@@ -42,6 +42,8 @@ serde_json     = "1"
 snow           = { version = "0.9", default-features = false, features = ["default-resolver"] }
 spake2         = "0.4"
 rand_core      = { version = "0.6", features = ["std"] }
+# Crypto crates must depend on `getrandom = { workspace = true }` to activate wasm `js`
+# support for transitive `snow` / `spake2` random use.
 getrandom      = { version = "0.2", features = ["js"] }
 
 # Async runtime / transport
