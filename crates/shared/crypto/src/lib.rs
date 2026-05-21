@@ -1,9 +1,5 @@
-//! Cryptographic primitives. Real types land in Plan B.
+//! Noise XK + SPAKE2 + identity. See § Section 5.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn placeholder_compiles() {
-        // Deliberately trivial. Plan B replaces this whole crate.
-    }
-}
+pub mod redact;
+
+pub use redact::Secret;
