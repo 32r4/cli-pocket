@@ -1,5 +1,5 @@
 use crate::error::ProtocolError;
-use crate::terminal::{SessionId, StreamSeq, TerminalId};
+use crate::terminal::{ClientId, SessionId, StreamSeq, TerminalId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +65,9 @@ pub struct ResumeAttachment {
 /// `HelloOk` carries the server-assigned `SessionId`. On reconnect, the client
 /// presents a fresh `ResumeToken` built from per-terminal `last_seq` values.
 /// `ClientId` is conveyed out of band via Noise static-key authentication.
+#[allow(dead_code)]
+fn _client_id_only_via_static_key(_: ClientId) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
