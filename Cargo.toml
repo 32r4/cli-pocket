@@ -7,6 +7,8 @@ members = [
     "crates/server/pty",
     "crates/server/daemon-core",
     "crates/server/daemon-bin",
+    "crates/relay/relay-core",
+    "crates/relay/relay-bin",
 ]
 
 [workspace.package]
