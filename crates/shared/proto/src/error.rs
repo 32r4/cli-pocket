@@ -18,8 +18,8 @@ pub enum ProtocolError {
     ResumeStale,
     #[error("rate limited")]
     RateLimited,
-    /// Forward-compat catchall. Peers that don't recognize a future variant
-    /// can fall back to this; older peers see only `Other`.
+    /// Catchall for protocol-level errors that are intentionally surfaced as
+    /// `Other` in this version of the wire format.
     #[error("other: {0}")]
     Other(String),
 }
