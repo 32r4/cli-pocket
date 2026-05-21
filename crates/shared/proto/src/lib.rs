@@ -1,11 +1,13 @@
 //! Wire protocol contracts. See docs/superpowers/specs/2026-05-21-cross-platform-remote-terminal-design.md § 2.
 
 pub mod error;
+pub mod frame;
 pub mod hello;
 pub mod snapshot;
 pub mod terminal;
 
 pub use error::{ByeReason, ProtocolError};
+pub use frame::{Frame, FrameBody};
 pub use hello::{
     Capabilities, ClientKind, Hello, HelloErr, HelloOk, ResumeAttachment, ResumeToken, ServerInfo,
 };
