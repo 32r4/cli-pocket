@@ -1,12 +1,5 @@
 [graph]
 all-features = true
-exclude = [
-    "cli-pocket-client-core@0.0.0",
-    "cli-pocket-client-core-wasm@0.0.0",
-    "cli-pocket-daemon@0.0.0",
-    "cli-pocket-daemon-core@0.0.0",
-    "cli-pocket-relay@0.0.0",
-]
 
 [advisories]
 db-path = "~/.cargo/advisory-db"
