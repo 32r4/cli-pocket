@@ -37,28 +37,28 @@ build-wasm:
     wasm-pack build crates/client/client-core-wasm --target web --release
 
 build-webview-tauri:
-    cd webview/terminal && npm run build:tauri
+    npm --prefix webview/terminal run build:tauri
 
 build-webview-web:
-    cd webview/terminal && npm run build:web
+    npm --prefix webview/terminal run build:web
 
 # Built in Plan H — recipes shown here so `just --list` is the single index.
 build-desktop:
-    cd webview/terminal && npm run build:tauri
-    cd apps/desktop && cargo tauri build
+    npm --prefix webview/terminal run build:tauri
+    cd apps/desktop; cargo tauri build
 
 build-mobile-android:
-    cd webview/terminal && npm run build:tauri
-    cd apps/mobile && cargo tauri android build --apk --aab
+    npm --prefix webview/terminal run build:tauri
+    cd apps/mobile; cargo tauri android build --apk --aab
 
 build-mobile-ios:
-    cd webview/terminal && npm run build:tauri
-    cd apps/mobile && cargo tauri ios build
+    npm --prefix webview/terminal run build:tauri
+    cd apps/mobile; cargo tauri ios build
 
 # Built in Plan I — needs `just build-wasm` first.
 build-web:
     just build-wasm
-    cd apps/web && npm run build
+    npm --prefix apps/web run build
 
 # ---- dev workflows ----
 
@@ -69,27 +69,34 @@ dev-relay:
     cargo run -p cli-pocket-relay
 
 dev-desktop:
-    cd apps/desktop && cargo tauri dev
+    cd apps/desktop; cargo tauri dev
 
 dev-mobile-android:
-    cd apps/mobile && cargo tauri android dev
+    cd apps/mobile; cargo tauri android dev
 
 dev-mobile-ios:
-    cd apps/mobile && cargo tauri ios dev
+    cd apps/mobile; cargo tauri ios dev
 
 dev-web:
-    cd apps/web && npm run dev
+    npm --prefix apps/web run dev
 
 # ---- maintenance ----
 
 fmt:
     cargo fmt
-    cd webview/terminal && npx tsc --noEmit
+    npm --prefix webview/terminal exec tsc -- --noEmit
 
 clean:
     cargo clean
-    rm -rf webview/terminal/dist webview/terminal/node_modules
-    rm -rf apps/web/dist apps/web/node_modules
+    just _clean-node
+
+[windows]
+_clean-node:
+    Remove-Item -LiteralPath 'webview/terminal/dist', 'webview/terminal/node_modules', 'apps/web/dist', 'apps/web/node_modules' -Recurse -Force -ErrorAction SilentlyContinue
+
+[unix]
+_clean-node:
+    rm -rf webview/terminal/dist webview/terminal/node_modules apps/web/dist apps/web/node_modules
 
 # ---- release ----
 
