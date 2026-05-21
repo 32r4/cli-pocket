@@ -9,11 +9,11 @@ check:
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo deny check
-    cd webview/terminal && npm run lint
+    npm --prefix webview/terminal run lint
 
 test:
     cargo test --workspace
-    cd webview/terminal && npm test
+    npm --prefix webview/terminal test
 
 # ---- one-time setup ----
 

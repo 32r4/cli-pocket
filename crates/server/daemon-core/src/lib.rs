@@ -1,5 +1,6 @@
 //! Daemon orchestration. Real types land in Plan D.
 
+#[must_use]
 pub fn version_banner() -> String {
     format!(
         "cli-pocket-daemon (scaffold proto v{})",
