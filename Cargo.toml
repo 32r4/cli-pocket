@@ -33,7 +33,7 @@ missing_panics_doc = "allow"
 
 [workspace.dependencies]
 # Serialization
-postcard       = { version = "1", features = ["use-std"] }
+postcard       = { version = "1", default-features = false, features = ["use-std"] }
 serde          = { version = "1", features = ["derive"] }
 serde_bytes    = "0.11"
 serde_json     = "1"

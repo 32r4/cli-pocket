@@ -1,13 +1,23 @@
 [package]
 name = "cli-pocket-proto"
-version = "0.0.0"
-publish = false
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Wire protocol contracts for cli-pocket. See docs/superpowers/specs."
+description = "Wire protocol contracts for cli-pocket."
+
+[dependencies]
+serde       = { workspace = true }
+serde_bytes = { workspace = true }
+postcard    = { workspace = true }
+thiserror   = { workspace = true }
+uuid        = { workspace = true }
+bytes       = { workspace = true }
+
+[dev-dependencies]
+proptest    = { workspace = true }
 
 [lints]
 workspace = true
