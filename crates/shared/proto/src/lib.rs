@@ -2,11 +2,15 @@
 
 pub mod error;
 pub mod hello;
+pub mod snapshot;
 pub mod terminal;
 
 pub use error::{ByeReason, ProtocolError};
 pub use hello::{
     Capabilities, ClientKind, Hello, HelloErr, HelloOk, ResumeAttachment, ResumeToken, ServerInfo,
+};
+pub use snapshot::{
+    AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs, Snapshot, TerminalModes,
 };
 pub use terminal::{
     ClientId, ExitInfo, HostId, KillSignal, SessionId, StreamId, StreamSeq, TerminalCreateParams,
