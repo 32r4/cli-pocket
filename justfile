@@ -1,5 +1,7 @@
 # cli-pocket developer commands. Run `just --list` for a summary.
 
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
 default:
     @just --list
 
