@@ -1,0 +1,12 @@
+[package]
+name = "cli-pocket-transport"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "WebSocket transport abstraction for cli-pocket. Real impl lands in Plan B."
+
+[lints]
+workspace = true

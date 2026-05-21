@@ -1,0 +1,12 @@
+[package]
+name = "cli-pocket-crypto"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Noise XK + SPAKE2 wrappers for cli-pocket. Real impl lands in Plan B."
+
+[lints]
+workspace = true
