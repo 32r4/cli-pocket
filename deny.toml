@@ -28,8 +28,6 @@ allow = [
 [bans]
 multiple-versions = "warn"
 wildcards = "warn"
-allow-wildcard-paths = true
-allow-workspace = true
 
 [sources]
 unknown-registry = "deny"
