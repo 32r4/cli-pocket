@@ -27,7 +27,15 @@ allow = [
 
 [bans]
 multiple-versions = "warn"
-wildcards = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+skip = [
+    { crate = "cli-pocket-client-core@0.0.0", reason = "workspace crate uses internal path dependencies without version requirements" },
+    { crate = "cli-pocket-client-core-wasm@0.0.0", reason = "workspace crate uses internal path dependencies without version requirements" },
+    { crate = "cli-pocket-daemon@0.0.0", reason = "workspace crate uses internal path dependencies without version requirements" },
+    { crate = "cli-pocket-daemon-core@0.0.0", reason = "workspace crate uses internal path dependencies without version requirements" },
+    { crate = "cli-pocket-relay@0.0.0", reason = "workspace crate uses internal path dependencies without version requirements" },
+]
 
 [sources]
 unknown-registry = "deny"
