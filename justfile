@@ -37,22 +37,22 @@ build-wasm:
     wasm-pack build crates/client/client-core-wasm --target web --release
 
 build-webview-tauri:
-    npm --prefix webview/terminal run build:tauri
+    just _build-webview-tauri
 
 build-webview-web:
-    npm --prefix webview/terminal run build:web
+    just _build-webview-web
 
 # Built in Plan H — recipes shown here so `just --list` is the single index.
 build-desktop:
-    npm --prefix webview/terminal run build:tauri
+    just _build-webview-tauri
     cd apps/desktop; cargo tauri build
 
 build-mobile-android:
-    npm --prefix webview/terminal run build:tauri
+    just _build-webview-tauri
     cd apps/mobile; cargo tauri android build --apk --aab
 
 build-mobile-ios:
-    npm --prefix webview/terminal run build:tauri
+    just _build-webview-tauri
     cd apps/mobile; cargo tauri ios build
 
 # Built in Plan I — needs `just build-wasm` first.
@@ -97,6 +97,22 @@ _clean-node:
 [unix]
 _clean-node:
     rm -rf webview/terminal/dist webview/terminal/node_modules apps/web/dist apps/web/node_modules
+
+[windows]
+_build-webview-tauri:
+    cd webview/terminal; $env:VITE_CLIENT_KIND='tauri'; npm exec vite -- build --outDir dist/tauri
+
+[unix]
+_build-webview-tauri:
+    cd webview/terminal && VITE_CLIENT_KIND=tauri npm exec vite -- build --outDir dist/tauri
+
+[windows]
+_build-webview-web:
+    cd webview/terminal; $env:VITE_CLIENT_KIND='web'; npm exec vite -- build --outDir dist/web
+
+[unix]
+_build-webview-web:
+    cd webview/terminal && VITE_CLIENT_KIND=web npm exec vite -- build --outDir dist/web
 
 # ---- release ----
 
