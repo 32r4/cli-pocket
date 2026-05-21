@@ -3,6 +3,7 @@
 pub mod error;
 pub mod frame;
 pub mod hello;
+pub mod relay;
 pub mod snapshot;
 pub mod terminal;
 
@@ -10,6 +11,10 @@ pub use error::{ByeReason, ProtocolError};
 pub use frame::{Frame, FrameBody};
 pub use hello::{
     Capabilities, ClientKind, Hello, HelloErr, HelloOk, ResumeAttachment, ResumeToken, ServerInfo,
+};
+pub use relay::{
+    Endpoint, OfferId, PairCloseReason, PairId, RelayCtrl, RelayData, RELAY_DISC_CTRL,
+    RELAY_DISC_DATA,
 };
 pub use snapshot::{
     AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs, Snapshot, TerminalModes,
