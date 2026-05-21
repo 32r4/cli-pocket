@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shared/proto",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.84"
+license = "AGPL-3.0-only"
+repository = "https://github.com/32r4/cli-pocket"
+authors = ["cli-pocket contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Shared dependency versions. Plan B+ will populate this table; per-crate
+# Cargo.toml files then declare `<name> = { workspace = true }` instead of
+# pinning their own version. Keeping the table empty-but-present in Plan A
+# avoids version drift the moment three crates pull in tokio at once.
+[workspace.dependencies]
+# Populated in Plan B and beyond. Examples (do NOT add yet):
+#   tokio       = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net"] }
+#   serde       = { version = "1", features = ["derive"] }
+#   postcard    = { version = "1", features = ["use-std"] }
+#   tracing     = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
