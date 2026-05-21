@@ -1,0 +1,18 @@
+[package]
+name = "cli-pocket-daemon-core"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Daemon library. Real impl lands in Plan D."
+
+[dependencies]
+cli-pocket-proto      = { path = "../../shared/proto" }
+cli-pocket-crypto     = { path = "../../shared/crypto" }
+cli-pocket-transport  = { path = "../../shared/transport" }
+cli-pocket-pty        = { path = "../pty" }
+
+[lints]
+workspace = true

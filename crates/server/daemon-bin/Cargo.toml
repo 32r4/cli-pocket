@@ -1,0 +1,19 @@
+[package]
+name = "cli-pocket-daemon"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "cli-pocket daemon binary. Real impl lands in Plan D."
+
+[[bin]]
+name = "cli-pocket-daemon"
+path = "src/main.rs"
+
+[dependencies]
+cli-pocket-daemon-core = { path = "../daemon-core" }
+
+[lints]
+workspace = true

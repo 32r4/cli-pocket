@@ -1,0 +1,12 @@
+[package]
+name = "cli-pocket-pty"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "PTY wrapper. Real impl lands in Plan C."
+
+[lints]
+workspace = true

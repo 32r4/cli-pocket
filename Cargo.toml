@@ -4,6 +4,9 @@ members = [
     "crates/shared/proto",
     "crates/shared/crypto",
     "crates/shared/transport",
+    "crates/server/pty",
+    "crates/server/daemon-core",
+    "crates/server/daemon-bin",
 ]
 
 [workspace.package]
