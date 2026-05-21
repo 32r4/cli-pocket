@@ -1,0 +1,18 @@
+[package]
+name = "cli-pocket-client-core-wasm"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "wasm-bindgen wrapper over client-core. Real impl lands in Plan F."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cli-pocket-client-core = { path = "../client-core" }
+
+[lints]
+workspace = true

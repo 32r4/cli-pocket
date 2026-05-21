@@ -9,6 +9,8 @@ members = [
     "crates/server/daemon-bin",
     "crates/relay/relay-core",
     "crates/relay/relay-bin",
+    "crates/client/client-core",
+    "crates/client/client-core-wasm",
 ]
 
 [workspace.package]
