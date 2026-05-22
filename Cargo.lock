@@ -361,7 +361,9 @@ dependencies = [
  "cli-pocket-pty",
  "cli-pocket-transport",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "toml",
 ]
 

@@ -15,7 +15,9 @@ cli-pocket-crypto     = { path = "../../shared/crypto" }
 cli-pocket-transport  = { path = "../../shared/transport" }
 cli-pocket-pty        = { path = "../pty" }
 serde                 = { workspace = true }
+serde_json            = { workspace = true }
 thiserror             = { workspace = true }
+tokio                 = { workspace = true }
 toml                  = "=0.8.23"
 
 [lints]
