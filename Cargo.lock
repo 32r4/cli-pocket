@@ -421,6 +421,7 @@ dependencies = [
  "toml",
  "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
