@@ -22,7 +22,7 @@ pub enum ClientError {
     Internal(String),
 }
 
-pub type ClientResult<T> = Result<T, ClientError>;
+pub type ClientResult<T> = std::result::Result<T, ClientError>;
 
 impl From<cli_pocket_crypto::IdentityError> for ClientError {
     fn from(value: cli_pocket_crypto::IdentityError) -> Self {
