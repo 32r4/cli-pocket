@@ -14,7 +14,9 @@ cli-pocket-proto      = { path = "../../shared/proto" }
 cli-pocket-crypto     = { path = "../../shared/crypto" }
 cli-pocket-transport  = { path = "../../shared/transport" }
 cli-pocket-pty        = { path = "../pty" }
+serde                 = { workspace = true }
 thiserror             = { workspace = true }
+toml                  = "=0.8.23"
 
 [lints]
 workspace = true
