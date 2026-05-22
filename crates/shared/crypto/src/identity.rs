@@ -11,6 +11,10 @@ pub enum IdentityError {
     Io(#[from] std::io::Error),
     #[error("serde_json: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("snow: {0}")]
+    Snow(#[from] snow::Error),
+    #[error("noise params: {0}")]
+    NoiseParams(String),
     #[error("identity file has wrong permissions (expected mode 0600): {0}")]
     BadPermissions(String),
     #[error("base64: {0}")]
@@ -36,33 +40,31 @@ impl std::fmt::Debug for KeyPair {
 }
 
 impl KeyPair {
-    #[must_use]
-    pub fn generate() -> Self {
-        let builder = snow::Builder::new(noise_params());
-        let kp = builder
-            .generate_keypair()
-            .expect("snow generate_keypair must succeed");
+    pub fn generate() -> Result<Self, IdentityError> {
+        let builder = snow::Builder::new(noise_params()?);
+        let kp = builder.generate_keypair()?;
         let mut public = [0_u8; 32];
         let mut secret = [0_u8; 32];
         public.copy_from_slice(&kp.public);
         secret.copy_from_slice(&kp.private);
-        Self {
+        Ok(Self {
             public,
             secret: Secret::new(secret),
-        }
+        })
     }
 }
 
-fn noise_params() -> snow::params::NoiseParams {
+fn noise_params() -> Result<snow::params::NoiseParams, IdentityError> {
     "Noise_XK_25519_ChaChaPoly_BLAKE2s"
         .parse()
-        .expect("static valid noise params string")
+        .map_err(|err: snow::Error| IdentityError::NoiseParams(err.to_string()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
     pub version: u32,
-    pub id: Uuid,
+    #[serde(rename = "host_id")]
+    pub host_id: Uuid,
     pub created_at: String,
     #[serde(rename = "static_public_key", with = "key32_b64")]
     pub static_public: [u8; 32],
@@ -122,11 +124,15 @@ impl Identity {
     pub fn from_keypair(kp: &KeyPair) -> Self {
         Self {
             version: 1,
-            id: Uuid::now_v7(),
+            host_id: Uuid::now_v7(),
             created_at: now_rfc3339(),
             static_public: kp.public,
             static_secret: Secret::new(KeyBytes32(*kp.secret.expose())),
         }
+    }
+
+    pub fn generate() -> Result<Self, IdentityError> {
+        Ok(Self::from_keypair(&KeyPair::generate()?))
     }
 
     #[must_use]
@@ -137,10 +143,14 @@ impl Identity {
         }
     }
 
-    pub fn load(path: &Path) -> Result<Self, IdentityError> {
+    pub fn load_strict(path: &Path) -> Result<Self, IdentityError> {
         check_mode(path)?;
         let bytes = fs::read(path)?;
         Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    pub fn load(path: &Path) -> Result<Self, IdentityError> {
+        Self::load_strict(path)
     }
 
     pub fn save(&self, path: &Path) -> Result<(), IdentityError> {
@@ -148,9 +158,7 @@ impl Identity {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_vec_pretty(self)?;
-        fs::write(path, json)?;
-        set_mode_600(path)?;
-        Ok(())
+        save_identity_json(path, &json)
     }
 }
 
@@ -252,6 +260,32 @@ fn set_mode_600(path: &Path) -> Result<(), IdentityError> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn save_identity_json(path: &Path, json: &[u8]) -> Result<(), IdentityError> {
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let tmp_path = path.with_extension(format!("{}.tmp", Uuid::now_v7().simple()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp_path)?;
+    file.write_all(json)?;
+    file.flush()?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn save_identity_json(path: &Path, json: &[u8]) -> Result<(), IdentityError> {
+    fs::write(path, json)?;
+    set_mode_600(path)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,7 +293,7 @@ mod tests {
 
     #[test]
     fn keypair_generates_32_byte_public() {
-        let kp = KeyPair::generate();
+        let kp = KeyPair::generate().expect("generate keypair");
         assert_eq!(kp.public.len(), 32);
         assert_eq!(kp.secret.expose().len(), 32);
     }
@@ -268,14 +302,15 @@ mod tests {
     fn identity_roundtrips_through_file() {
         let dir = tempdir().expect("temp dir");
         let path = dir.path().join("host_identity.json");
-        let kp = KeyPair::generate();
+        let kp = KeyPair::generate().expect("generate keypair");
         let id = Identity::from_keypair(&kp);
 
         id.save(&path).expect("save identity");
-        let back = Identity::load(&path).expect("load identity");
+        let back = Identity::load_strict(&path).expect("load identity");
 
         assert_eq!(back.static_public, id.static_public);
         assert_eq!(back.static_secret.expose().0, id.static_secret.expose().0);
+        assert_eq!(back.host_id, id.host_id);
     }
 
     #[cfg(unix)]
@@ -286,14 +321,14 @@ mod tests {
 
         let dir = tempdir().expect("temp dir");
         let path = dir.path().join("host_identity.json");
-        let id = Identity::from_keypair(&KeyPair::generate());
+        let id = Identity::from_keypair(&KeyPair::generate().expect("generate keypair"));
         id.save(&path).expect("save identity");
 
         let mut perm = fs::metadata(&path).expect("metadata").permissions();
         perm.set_mode(0o644);
         fs::set_permissions(&path, perm).expect("set permissions");
 
-        let err = Identity::load(&path).expect_err("world-readable file rejected");
+        let err = Identity::load_strict(&path).expect_err("world-readable file rejected");
         assert!(matches!(err, IdentityError::BadPermissions(_)));
     }
 
@@ -301,5 +336,13 @@ mod tests {
     fn epoch_to_ymd_works_for_known_value() {
         let actual = epoch_to_ymd_hms(1_779_321_600);
         assert_eq!(actual, (2026, 5, 21, 0, 0, 0));
+    }
+
+    #[test]
+    fn generate_produces_identity_with_host_id_field() {
+        let id = Identity::generate().expect("generate identity");
+        let json = serde_json::to_value(&id).expect("serialize identity");
+        assert!(json.get("host_id").is_some());
+        assert!(json.get("id").is_none());
     }
 }
