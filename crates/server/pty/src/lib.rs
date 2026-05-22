@@ -1,7 +1,3 @@
-//! PTY wrapper around portable-pty. Real types land in Plan C.
+//! PTY + scrollback boundary. See ADR 0002.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn placeholder_compiles() {}
-}
+mod platform;

@@ -1,13 +1,38 @@
 [package]
 name = "cli-pocket-pty"
-version = "0.0.0"
+version = "0.1.0"
 publish = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "PTY wrapper. Real impl lands in Plan C."
+description = "PTY wrapper and scrollback ring for cli-pocket."
 
-[lints]
-workspace = true
+[dependencies]
+cli-pocket-proto = { path = "../../shared/proto" }
+portable-pty = { workspace = true }
+vte = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "macros", "time"] }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+serde_bytes = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+proptest = { workspace = true }
+
+[lints.rust]
+# ADR 0002 keeps the PTY-specific unsafe boundary local to this crate so any
+# future ConPTY/raw HANDLE work can stay isolated here without widening the
+# workspace lint policy.
+unsafe_code = "allow"
+unused_must_use = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
