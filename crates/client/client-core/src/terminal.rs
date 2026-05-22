@@ -1,23 +1,26 @@
 use bytes::Bytes;
-use cli_pocket_proto::{StreamId, TerminalId, TerminalInfo};
+use cli_pocket_proto::{StreamId, StreamSeq, TerminalId, TerminalInfo};
 use futures_channel::mpsc;
 use futures_util::SinkExt;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub struct TerminalHandle {
     pub info: TerminalInfo,
-    pub stream: StreamId,
+    stream: Rc<RefCell<StreamId>>,
+    pub(crate) last_seq: Option<StreamSeq>,
     pub(crate) cmd_tx: mpsc::Sender<TerminalCmd>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminalCmd {
     Input {
-        stream: StreamId,
+        terminal: TerminalId,
         bytes: Bytes,
     },
     Resize {
-        stream: StreamId,
+        terminal: TerminalId,
         cols: u16,
         rows: u16,
     },
@@ -25,11 +28,25 @@ pub(crate) enum TerminalCmd {
         terminal: TerminalId,
     },
     Detach {
-        stream: StreamId,
+        terminal: TerminalId,
     },
 }
 
 impl TerminalHandle {
+    pub(crate) fn new(
+        info: TerminalInfo,
+        stream: StreamId,
+        last_seq: Option<StreamSeq>,
+        cmd_tx: mpsc::Sender<TerminalCmd>,
+    ) -> Self {
+        Self {
+            info,
+            stream: Rc::new(RefCell::new(stream)),
+            last_seq,
+            cmd_tx,
+        }
+    }
+
     #[must_use]
     pub fn terminal_id(&self) -> TerminalId {
         self.info.terminal
@@ -37,14 +54,18 @@ impl TerminalHandle {
 
     #[must_use]
     pub fn stream_id(&self) -> StreamId {
-        self.stream
+        *self.stream.borrow()
+    }
+
+    pub(crate) fn set_stream_id(&self, stream: StreamId) {
+        *self.stream.borrow_mut() = stream;
     }
 
     pub async fn write_input(&self, bytes: Bytes) -> crate::ClientResult<()> {
         self.cmd_tx
             .clone()
             .send(TerminalCmd::Input {
-                stream: self.stream,
+                terminal: self.terminal_id(),
                 bytes,
             })
             .await
@@ -55,7 +76,7 @@ impl TerminalHandle {
         self.cmd_tx
             .clone()
             .send(TerminalCmd::Resize {
-                stream: self.stream,
+                terminal: self.terminal_id(),
                 cols,
                 rows,
             })
@@ -77,7 +98,7 @@ impl TerminalHandle {
         self.cmd_tx
             .clone()
             .send(TerminalCmd::Detach {
-                stream: self.stream,
+                terminal: self.terminal_id(),
             })
             .await
             .map_err(|_| crate::ClientError::Closed)
@@ -92,8 +113,8 @@ mod tests {
     fn handle() -> (TerminalHandle, mpsc::Receiver<TerminalCmd>) {
         let (cmd_tx, cmd_rx) = mpsc::channel(1);
         let terminal = TerminalId::new();
-        let handle = TerminalHandle {
-            info: TerminalInfo {
+        let handle = TerminalHandle::new(
+            TerminalInfo {
                 terminal,
                 cols: 80,
                 rows: 24,
@@ -101,9 +122,10 @@ mod tests {
                 label: Some("shell".to_owned()),
                 attached_clients: 1,
             },
-            stream: StreamId(7),
+            StreamId(7),
+            None,
             cmd_tx,
-        };
+        );
 
         (handle, cmd_rx)
     }
@@ -120,7 +142,7 @@ mod tests {
         assert_eq!(
             cmd_rx.next().await.unwrap(),
             TerminalCmd::Input {
-                stream: StreamId(7),
+                terminal: handle.terminal_id(),
                 bytes: Bytes::from_static(b"ls\n"),
             }
         );
