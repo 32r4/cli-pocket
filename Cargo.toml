@@ -55,7 +55,7 @@ async-trait        = "0.1"
 # Errors / logging / id
 thiserror      = "1"
 tracing        = "0.1"
-uuid           = { version = "1", features = ["v7", "serde"] }
+uuid           = { version = "1", features = ["v7", "serde", "js"] }
 bytes          = { version = "1", features = ["serde"] }
 base64         = "0.22"
 
