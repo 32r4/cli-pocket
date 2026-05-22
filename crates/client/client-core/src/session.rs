@@ -1,6 +1,10 @@
 use cli_pocket_proto::{Capabilities, HostId, ResumeToken};
+use futures_channel::mpsc;
+use futures_util::lock::Mutex;
+use std::rc::Rc;
 
-use crate::ClientIdentity;
+use crate::terminal::{TerminalCmd, TerminalHandle};
+use crate::{ClientEvent, ClientIdentity};
 
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -25,4 +29,7 @@ pub enum SessionEndpoint {
 pub struct ClientSession {
     pub(crate) identity: ClientIdentity,
     pub(crate) config: SessionConfig,
+    pub(crate) events_tx: mpsc::Sender<ClientEvent>,
+    pub(crate) cmd_tx: mpsc::Sender<TerminalCmd>,
+    pub(crate) terminal: Rc<Mutex<Option<TerminalHandle>>>,
 }
