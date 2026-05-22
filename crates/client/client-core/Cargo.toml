@@ -7,12 +7,22 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Client state machine. Real impl lands in Plan F."
+description = "Platform-agnostic client state machine for cli-pocket."
 
 [dependencies]
-cli-pocket-proto      = { path = "../../shared/proto" }
-cli-pocket-crypto     = { path = "../../shared/crypto" }
-cli-pocket-transport  = { path = "../../shared/transport" }
+cli-pocket-proto  = { path = "../../shared/proto" }
+cli-pocket-crypto = { path = "../../shared/crypto" }
+
+async-trait  = { workspace = true }
+bytes        = { workspace = true }
+futures-util = { workspace = true, features = ["sink"] }
+serde        = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cli-pocket-transport = { path = "../../shared/transport" }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 
 [lints]
 workspace = true

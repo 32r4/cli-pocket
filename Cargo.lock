@@ -305,9 +305,16 @@ dependencies = [
 name = "cli-pocket-client-core"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "cli-pocket-crypto",
  "cli-pocket-proto",
  "cli-pocket-transport",
+ "futures-util",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

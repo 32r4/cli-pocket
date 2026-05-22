@@ -1,0 +1,28 @@
+use cli_pocket_proto::{Capabilities, HostId, ResumeToken};
+
+use crate::ClientIdentity;
+
+#[derive(Debug, Clone)]
+pub struct SessionConfig {
+    pub endpoint: SessionEndpoint,
+    pub server_public: [u8; 32],
+    pub resume_token: Option<ResumeToken>,
+    pub capabilities: Capabilities,
+    pub backoff: (u64, u64, u32),
+}
+
+#[derive(Debug, Clone)]
+pub enum SessionEndpoint {
+    Direct(String),
+    Relay {
+        url: String,
+        host_id: HostId,
+        psk_hex: String,
+    },
+}
+
+#[allow(dead_code)]
+pub struct ClientSession {
+    pub(crate) identity: ClientIdentity,
+    pub(crate) config: SessionConfig,
+}

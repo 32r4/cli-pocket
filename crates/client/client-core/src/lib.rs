@@ -1,10 +1,20 @@
-//! Client state machine. Real types land in Plan F.
+//! Platform-agnostic client core for cli-pocket.
 //!
-//! Must remain wasm-friendly: no tokio multi-thread, no `std::net` direct,
-//! no direct `std::time::Instant` outside trait impls. Plan F enforces this.
+//! Build native: `cargo check -p cli-pocket-client-core`
+//! Build wasm:   `cargo check -p cli-pocket-client-core --target wasm32-unknown-unknown`
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn placeholder_compiles() {}
-}
+pub mod error;
+pub mod events;
+pub mod identity;
+pub mod reconnect;
+pub mod relay;
+pub mod session;
+pub mod terminal;
+pub mod traits;
+
+pub use error::{ClientError, ClientResult};
+pub use events::ClientEvent;
+pub use identity::ClientIdentity;
+pub use session::{ClientSession, SessionConfig};
+pub use terminal::TerminalHandle;
+pub use traits::{Clock, KeyValueStore, Rng, Transport};
