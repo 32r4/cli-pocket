@@ -164,6 +164,10 @@ impl NoiseSession {
     }
 
     pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, NoiseError> {
+        if ciphertext.len() > NOISE_MAX_MSG_LEN {
+            return Err(NoiseError::PayloadTooLarge);
+        }
+
         let mut out = vec![0_u8; ciphertext.len()];
         let n = self.transport.read_message(ciphertext, &mut out)?;
         out.truncate(n);
@@ -279,6 +283,29 @@ mod tests {
         let err = session
             .encrypt(&oversized)
             .expect_err("oversized payload rejected");
+        assert!(matches!(err, NoiseError::PayloadTooLarge));
+    }
+
+    #[test]
+    fn rejects_ciphertext_over_message_limit_before_decrypting() {
+        let server = KeyPair::generate().expect("generate server keypair");
+        let client = KeyPair::generate().expect("generate client keypair");
+        let mut initiator =
+            NoiseInitiator::new(&client, &server.public, None).expect("create initiator");
+        let mut responder = NoiseResponder::new(&server, None).expect("create responder");
+
+        let m1 = initiator.write_handshake().expect("write message 1");
+        responder.read_handshake(&m1).expect("read message 1");
+        let m2 = responder.write_handshake().expect("write message 2");
+        initiator.read_handshake(&m2).expect("read message 2");
+        let m3 = initiator.write_handshake().expect("write message 3");
+        responder.read_handshake(&m3).expect("read message 3");
+
+        let mut session = responder.finish().expect("finish responder");
+        let oversized = vec![0_u8; 65_536];
+        let err = session
+            .decrypt(&oversized)
+            .expect_err("oversized ciphertext rejected");
         assert!(matches!(err, NoiseError::PayloadTooLarge));
     }
 }
