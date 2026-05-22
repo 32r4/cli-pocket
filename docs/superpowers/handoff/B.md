@@ -43,7 +43,7 @@ Public API surface, re-exported from `lib.rs`:
 - Local subagent shells did not have `just` available, so manual equivalents were run for the gate components. Those manual checks passed except for a local `cargo-deny` 0.17.0 TOML parse issue; CI and Plan A pin newer `cargo-deny` behavior for that check.
 - `Spake2Outcome` includes typed `psk: [u8; 32]` in addition to `shared: Vec<u8>` for the B11 Noise PSK handoff.
 - Identity JSON uses `host_id` per spec and exposes `Identity::generate`, `load_strict`, `load`, and `save`; Unix save writes a restrictive temp file then renames it.
-- `cli-pocket-proto` still exports `SCAFFOLD_VERSION = 0` for scaffold compatibility with crates not yet implemented in Plan B.
+- `cli-pocket-proto` still exports `SCAFFOLD_VERSION = 0` so downstream scaffold crates that have not yet migrated to the Plan B shared contract can continue compiling until their own plans replace the placeholder dependency surface.
 
 ## Open questions / follow-ups
 
@@ -54,18 +54,19 @@ Public API surface, re-exported from `lib.rs`:
 
 ## Validation
 
-- `cargo test --workspace` - passed fresh for B17; workspace tests and doctests passed.
-- `cargo clippy --workspace --all-targets -- -D warnings` - passed in latest B16 evidence.
-- `cargo build --target wasm32-unknown-unknown -p cli-pocket-proto` - passed fresh for B17.
-- `cargo build --target wasm32-unknown-unknown -p cli-pocket-crypto` - passed fresh for B17 after the workspace `uuid/js` and `getrandom/js` wiring.
-- `npm --prefix webview/terminal run lint` - passed in latest B16 evidence.
-- `npm --prefix webview/terminal test` - passed in latest B16 evidence.
-- `just check` - local `just` was unavailable in subagent shells, so equivalent component commands were run manually.
-- `cargo deny check` - blocked locally by `cargo-deny` 0.17.0 parsing `deny.toml`; CI / Plan A use newer cargo-deny behavior.
+- Fresh B17 checks:
+  - `cargo test --workspace` - passed; workspace tests and doctests passed.
+  - `cargo build --target wasm32-unknown-unknown -p cli-pocket-proto` - passed.
+  - `cargo build --target wasm32-unknown-unknown -p cli-pocket-crypto` - passed after the workspace `uuid/js` and `getrandom/js` wiring.
+- Latest B16 evidence:
+  - `cargo clippy --workspace --all-targets -- -D warnings` - passed.
+  - `npm --prefix webview/terminal run lint` - passed.
+  - `npm --prefix webview/terminal test` - passed.
+- `just check` was not run locally because `just` was unavailable in subagent shells. Manual equivalents passed for the available gate components above, except `cargo deny check` was blocked locally by `cargo-deny` 0.17.0 parsing `deny.toml`; CI and Plan A use newer cargo-deny behavior.
 
 ## Proto freeze
 
-The tag `proto-v1.0.0-frozen` is ready to create at the final Plan B commit, but this task did not create it. The parent should ask the user before cutting the tag.
+The tag `proto-v1.0.0-frozen` is a required Plan B gate artifact for downstream Plans C, D, E, and F. It is ready to create at the final Plan B commit after the parent/user approval step. This task did not create the tag; the parent must ask before cutting it per orchestration instructions.
 
 When approved, run:
 
