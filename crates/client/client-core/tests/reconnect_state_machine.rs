@@ -10,7 +10,8 @@ use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
     AnchorState, ByeReason, Capabilities, CharsetState, ClientId, Color, Frame, FrameBody,
     HelloErr, HelloOk, MouseMode, ProtocolError, ServerInfo, SessionId, SgrAttrs, Snapshot,
-    StreamId, StreamSeq, TerminalId, TerminalInfo, TerminalModes, PROTOCOL_VERSION,
+    StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo, TerminalModes,
+    PROTOCOL_VERSION,
 };
 use futures_channel::mpsc;
 use futures_util::future::LocalBoxFuture;
@@ -735,6 +736,566 @@ async fn terminal_created_waits_for_attach_ok_before_input_can_use_stream_inner(
     assert!(
         !input_streams.borrow().contains(&StreamId(0)),
         "client sent input to placeholder stream 0 before TerminalAttachOk"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn terminal_attach_ok_with_wrong_request_id_is_ignored() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            terminal_attach_ok_with_wrong_request_id_is_ignored_inner().await;
+        })
+        .await;
+}
+
+async fn terminal_attach_ok_with_wrong_request_id_is_ignored_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let terminal = TerminalId::new();
+    let info = terminal_info(terminal);
+    let wrong_ok_sent = Rc::new(RefCell::new(false));
+    let allow_correct_ok = Rc::new(RefCell::new(false));
+    let daemon = WrongAttachOkRequestDaemon {
+        keypair: server_keypair.clone(),
+        session_id: SessionId::new(),
+        info: info.clone(),
+        wrong_stream: StreamId(144),
+        correct_stream: StreamId(145),
+        wrong_ok_sent: Rc::clone(&wrong_ok_sent),
+        allow_correct_ok: Rc::clone(&allow_correct_ok),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            server_public: server_keypair.public,
+            resume_token: None,
+            capabilities: Capabilities::NONE,
+            backoff: (50, 100, 20),
+        },
+        DummyClock,
+        DummyRng,
+        DummyKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (session, mut events) = builder.start();
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+
+    for _ in 0..100 {
+        if *wrong_ok_sent.borrow() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        *wrong_ok_sent.borrow(),
+        "mock daemon did not send the wrong TerminalAttachOk"
+    );
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        session.terminal().await.is_none(),
+        "wrong TerminalAttachOk request_id must not expose a terminal handle"
+    );
+    let early_event = events.next().now_or_never();
+    assert!(
+        !matches!(early_event, Some(Some(ClientEvent::TerminalCreated(_)))),
+        "wrong TerminalAttachOk request_id must not emit TerminalCreated"
+    );
+
+    *allow_correct_ok.borrow_mut() = true;
+    assert_terminal_created(&mut events, &info).await;
+    let handle = session.terminal().await.unwrap();
+    assert_eq!(handle.stream_id(), daemon.correct_stream);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stale_attach_ok_with_existing_handle_does_not_rebind_stream() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            stale_attach_ok_with_existing_handle_does_not_rebind_stream_inner().await;
+        })
+        .await;
+}
+
+async fn stale_attach_ok_with_existing_handle_does_not_rebind_stream_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let terminal = TerminalId::new();
+    let info = terminal_info(terminal);
+    let wrong_ok_sent = Rc::new(RefCell::new(false));
+    let allow_correct_ok = Rc::new(RefCell::new(false));
+    let daemon = WrongAttachOkExistingHandleDaemon {
+        keypair: server_keypair.clone(),
+        session_id: SessionId::new(),
+        info: info.clone(),
+        first_stream: StreamId(151),
+        wrong_stream: StreamId(152),
+        correct_stream: StreamId(153),
+        wrong_ok_sent: Rc::clone(&wrong_ok_sent),
+        allow_correct_ok: Rc::clone(&allow_correct_ok),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            server_public: server_keypair.public,
+            resume_token: None,
+            capabilities: Capabilities::NONE,
+            backoff: (50, 100, 20),
+        },
+        DummyClock,
+        DummyRng,
+        DummyKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (session, mut events) = builder.start();
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+    assert_terminal_created(&mut events, &info).await;
+    let handle = session.terminal().await.unwrap();
+    assert_eq!(handle.stream_id(), daemon.first_stream);
+    assert_terminal_output(&mut events, terminal, StreamSeq(7), b"before-drop").await;
+    assert_disconnected_retry(&mut events).await;
+
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+    for _ in 0..100 {
+        if *wrong_ok_sent.borrow() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        *wrong_ok_sent.borrow(),
+        "mock daemon did not send the wrong TerminalAttachOk"
+    );
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!(
+        handle.stream_id(),
+        daemon.first_stream,
+        "wrong TerminalAttachOk request_id must not rebind an existing terminal handle"
+    );
+    let early_event = events.next().now_or_never();
+    assert!(
+        early_event.is_none(),
+        "wrong TerminalAttachOk request_id must not emit events before a matching attach ok"
+    );
+
+    *allow_correct_ok.borrow_mut() = true;
+    assert_terminal_output(&mut events, terminal, StreamSeq(9), b"after-correct-attach").await;
+    assert_eq!(handle.stream_id(), daemon.correct_stream);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn create_terminal_sends_create_and_waits_for_attach_ok() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            create_terminal_sends_create_and_waits_for_attach_ok_inner().await;
+        })
+        .await;
+}
+
+async fn create_terminal_sends_create_and_waits_for_attach_ok_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let terminal = TerminalId::new();
+    let params = TerminalCreateParams {
+        cols: 100,
+        rows: 40,
+        cwd: Some("/tmp".to_owned()),
+        cmd: vec!["sh".to_owned()],
+        env: vec![("TERM".to_owned(), "xterm-256color".to_owned())],
+        scrollback_bytes: Some(8192),
+    };
+    let create_seen = Rc::new(RefCell::new(false));
+    let attach_seen = Rc::new(RefCell::new(false));
+    let attach_ok_sent = Rc::new(RefCell::new(false));
+    let daemon = CreateTerminalDaemon {
+        keypair: server_keypair.clone(),
+        session_id: SessionId::new(),
+        terminal,
+        stream: StreamId(77),
+        params: params.clone(),
+        create_seen: Rc::clone(&create_seen),
+        attach_seen: Rc::clone(&attach_seen),
+        attach_ok_sent: Rc::clone(&attach_ok_sent),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            server_public: server_keypair.public,
+            resume_token: None,
+            capabilities: Capabilities::NONE,
+            backoff: (50, 100, 20),
+        },
+        DummyClock,
+        DummyRng,
+        DummyKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (session, mut events) = builder.start();
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+
+    session.create_terminal(params).await.unwrap();
+
+    for _ in 0..100 {
+        if *create_seen.borrow() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        *create_seen.borrow(),
+        "mock daemon did not receive TerminalCreate"
+    );
+
+    for _ in 0..100 {
+        if *attach_seen.borrow() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        *attach_seen.borrow(),
+        "mock daemon did not receive TerminalAttach"
+    );
+    assert!(
+        session.terminal().await.is_none(),
+        "terminal handle must not be exposed before TerminalAttachOk"
+    );
+    let early_event = events.next().now_or_never();
+    assert!(
+        !matches!(early_event, Some(Some(ClientEvent::TerminalCreated(_)))),
+        "TerminalCreated must not be emitted before TerminalAttachOk"
+    );
+
+    for _ in 0..100 {
+        if *attach_ok_sent.borrow() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        *attach_ok_sent.borrow(),
+        "mock daemon did not send TerminalAttachOk"
+    );
+
+    match events.next().await.unwrap() {
+        ClientEvent::TerminalCreated(info) => {
+            assert_eq!(info.terminal, terminal);
+            assert_eq!(info.cols, 100);
+            assert_eq!(info.rows, 40);
+        }
+        other => panic!("expected TerminalCreated, got {other:?}"),
+    }
+    let handle = session.terminal().await.unwrap();
+    assert_eq!(handle.terminal_id(), terminal);
+    assert_eq!(handle.stream_id(), daemon.stream);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn create_terminal_replaces_existing_handle_after_matching_attach_ok() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            create_terminal_replaces_existing_handle_after_matching_attach_ok_inner().await;
+        })
+        .await;
+}
+
+async fn create_terminal_replaces_existing_handle_after_matching_attach_ok_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let original_terminal = TerminalId::new();
+    let new_terminal = TerminalId::new();
+    let params = terminal_params(104, 38, "second");
+    let daemon = CreateSecondTerminalDaemon {
+        keypair: server_keypair.clone(),
+        session_id: SessionId::new(),
+        original_info: terminal_info(original_terminal),
+        original_stream: StreamId(177),
+        new_terminal,
+        new_stream: StreamId(233),
+        params: params.clone(),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            server_public: server_keypair.public,
+            resume_token: None,
+            capabilities: Capabilities::NONE,
+            backoff: (50, 100, 20),
+        },
+        DummyClock,
+        DummyRng,
+        DummyKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (session, mut events) = builder.start();
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+    assert_terminal_created(&mut events, &daemon.original_info).await;
+    let original_handle = session.terminal().await.unwrap();
+    assert_eq!(original_handle.terminal_id(), original_terminal);
+    assert_eq!(original_handle.stream_id(), daemon.original_stream);
+
+    session.create_terminal(params.clone()).await.unwrap();
+    assert_terminal_created_with_size(&mut events, new_terminal, params.cols, params.rows).await;
+
+    let current_handle = session.terminal().await.unwrap();
+    assert_eq!(current_handle.terminal_id(), new_terminal);
+    assert_eq!(current_handle.stream_id(), daemon.new_stream);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pending_create_is_discarded_when_connection_drops_before_response() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            pending_create_is_discarded_when_connection_drops_before_response_inner().await;
+        })
+        .await;
+}
+
+async fn pending_create_is_discarded_when_connection_drops_before_response_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let terminal = TerminalId::new();
+    let stale_params = terminal_params(72, 18, "stale");
+    let fresh_params = terminal_params(132, 43, "fresh");
+    let first_create_seen = Rc::new(RefCell::new(false));
+    let second_create = Rc::new(RefCell::new(None));
+    let daemon = DroppedCreateReconnectDaemon {
+        keypair: server_keypair.clone(),
+        session_id: SessionId::new(),
+        terminal,
+        stream: StreamId(117),
+        stale_params: stale_params.clone(),
+        fresh_params: fresh_params.clone(),
+        first_create_seen: Rc::clone(&first_create_seen),
+        second_create: Rc::clone(&second_create),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            server_public: server_keypair.public,
+            resume_token: None,
+            capabilities: Capabilities::NONE,
+            backoff: (50, 100, 20),
+        },
+        DummyClock,
+        DummyRng,
+        DummyKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (session, mut events) = builder.start();
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+
+    session.create_terminal(stale_params).await.unwrap();
+    for _ in 0..100 {
+        if *first_create_seen.borrow() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        *first_create_seen.borrow(),
+        "mock daemon did not receive the dropped TerminalCreate"
+    );
+    assert_disconnected_retry(&mut events).await;
+
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+    session.create_terminal(fresh_params.clone()).await.unwrap();
+    assert_terminal_created_with_size(&mut events, terminal, fresh_params.cols, fresh_params.rows)
+        .await;
+
+    assert_eq!(*second_create.borrow(), Some((2, fresh_params)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn terminal_create_err_removes_pending_create_and_surfaces_error() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            terminal_create_err_removes_pending_create_and_surfaces_error_inner().await;
+        })
+        .await;
+}
+
+async fn terminal_create_err_removes_pending_create_and_surfaces_error_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let terminal = TerminalId::new();
+    let params = terminal_params(90, 30, "rejected");
+    let daemon = CreateErrDaemon {
+        keypair: server_keypair.clone(),
+        session_id: SessionId::new(),
+        terminal,
+        stream: StreamId(213),
+        params: params.clone(),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            server_public: server_keypair.public,
+            resume_token: None,
+            capabilities: Capabilities::NONE,
+            backoff: (50, 100, 20),
+        },
+        DummyClock,
+        DummyRng,
+        DummyKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (session, mut events) = builder.start();
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+
+    session.create_terminal(params).await.unwrap();
+    assert_error_contains(&mut events, "terminal create failed").await;
+    assert_error_contains(&mut events, "missing metadata").await;
+
+    assert!(
+        session.terminal().await.is_none(),
+        "TerminalCreateErr must clear the pending create so a late matching TerminalCreateOk cannot create a terminal"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn terminal_create_ok_after_err_for_known_terminal_is_ignored() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            terminal_create_ok_after_err_for_known_terminal_is_ignored_inner().await;
+        })
+        .await;
+}
+
+async fn terminal_create_ok_after_err_for_known_terminal_is_ignored_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let terminal = TerminalId::new();
+    let params = terminal_params(90, 30, "stale-known");
+    let attach_after_stale_ok = Rc::new(RefCell::new(false));
+    let stale_observed = Rc::new(RefCell::new(false));
+    let daemon = CreateErrThenKnownTerminalOkDaemon {
+        keypair: server_keypair.clone(),
+        session_id: SessionId::new(),
+        info: terminal_info(terminal),
+        original_stream: StreamId(311),
+        stale_stream: StreamId(312),
+        params: params.clone(),
+        attach_after_stale_ok: Rc::clone(&attach_after_stale_ok),
+        stale_observed: Rc::clone(&stale_observed),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            server_public: server_keypair.public,
+            resume_token: None,
+            capabilities: Capabilities::NONE,
+            backoff: (50, 100, 20),
+        },
+        DummyClock,
+        DummyRng,
+        DummyKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (session, mut events) = builder.start();
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, daemon.session_id).await;
+    assert_terminal_created(&mut events, &daemon.info).await;
+    let handle = session.terminal().await.unwrap();
+    assert_eq!(handle.stream_id(), daemon.original_stream);
+
+    session.create_terminal(params).await.unwrap();
+    assert_error_contains(&mut events, "terminal create failed").await;
+
+    for _ in 0..100 {
+        if *stale_observed.borrow() {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        *stale_observed.borrow(),
+        "mock daemon did not observe the stale TerminalCreateOk aftermath"
+    );
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !*attach_after_stale_ok.borrow(),
+        "stale TerminalCreateOk for a known terminal must not send TerminalAttach"
+    );
+    assert_eq!(
+        session.terminal().await.unwrap().stream_id(),
+        daemon.original_stream,
+        "stale TerminalCreateOk must not replace the existing terminal stream"
+    );
+    let late_event = events.next().now_or_never();
+    assert!(
+        !matches!(late_event, Some(Some(ClientEvent::TerminalCreated(_)))),
+        "stale TerminalCreateOk must not emit TerminalCreated"
     );
 }
 
@@ -1650,7 +2211,7 @@ impl DelayedAttachDaemon {
             &mut session,
             Frame::body(FrameBody::TerminalListOk {
                 request_id: 1,
-                terminals: vec![self.info],
+                terminals: vec![self.info.clone()],
             }),
         )
         .await?;
@@ -1679,6 +2240,851 @@ impl DelayedAttachDaemon {
         )
         .await?;
         *self.attach_ok_sent.borrow_mut() = true;
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::Bye {
+                reason: ByeReason::Revoked,
+            }),
+        )
+        .await
+    }
+
+    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let m1 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m1)?;
+        transport.send(responder.write_handshake()?).await?;
+        let m3 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct WrongAttachOkRequestDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    info: TerminalInfo,
+    wrong_stream: StreamId,
+    correct_stream: StreamId,
+    wrong_ok_sent: Rc<RefCell<bool>>,
+    allow_correct_ok: Rc<RefCell<bool>>,
+}
+
+impl WrongAttachOkRequestDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
+        let state = self.clone();
+        move || {
+            let state = state.clone();
+            async move {
+                let (client, server) = memory_pair();
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(self, mut transport: MemoryTransport) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(hello.body, FrameBody::Hello(_)));
+        send_hello_ok(&mut transport, &mut session, self.session_id, false).await?;
+        let list = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalListOk {
+                request_id: 1,
+                terminals: vec![self.info.clone()],
+            }),
+        )
+        .await?;
+
+        let attach = recv_encrypted(&mut transport, &mut session).await?;
+        let request_id = match attach.body {
+            FrameBody::TerminalAttach {
+                request_id,
+                terminal,
+                since,
+            } => {
+                assert_eq!(terminal, self.info.terminal);
+                assert_eq!(since, None);
+                request_id
+            }
+            other => panic!("expected TerminalAttach, got {other:?}"),
+        };
+        send_attach_ok_with_request(
+            &mut transport,
+            &mut session,
+            request_id.saturating_add(1),
+            self.wrong_stream,
+            StreamSeq(0),
+        )
+        .await?;
+        *self.wrong_ok_sent.borrow_mut() = true;
+
+        for _ in 0..100 {
+            if *self.allow_correct_ok.borrow() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            *self.allow_correct_ok.borrow(),
+            "test did not permit the correct TerminalAttachOk"
+        );
+
+        send_attach_ok_with_request(
+            &mut transport,
+            &mut session,
+            request_id,
+            self.correct_stream,
+            StreamSeq(0),
+        )
+        .await?;
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::Bye {
+                reason: ByeReason::Revoked,
+            }),
+        )
+        .await
+    }
+
+    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let m1 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m1)?;
+        transport.send(responder.write_handshake()?).await?;
+        let m3 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct WrongAttachOkExistingHandleDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    info: TerminalInfo,
+    first_stream: StreamId,
+    wrong_stream: StreamId,
+    correct_stream: StreamId,
+    wrong_ok_sent: Rc<RefCell<bool>>,
+    allow_correct_ok: Rc<RefCell<bool>>,
+}
+
+impl WrongAttachOkExistingHandleDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
+        let state = self.clone();
+        let attempts = Rc::new(RefCell::new(0_u8));
+        move || {
+            let state = state.clone();
+            let attempts = Rc::clone(&attempts);
+            async move {
+                let attempt = {
+                    let mut attempts = attempts.borrow_mut();
+                    *attempts += 1;
+                    *attempts
+                };
+                let (client, server) = memory_pair();
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server, attempt).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(self, mut transport: MemoryTransport, attempt: u8) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        let resume = match hello.body {
+            FrameBody::Hello(hello) => hello.resume,
+            other => panic!("expected Hello, got {other:?}"),
+        };
+
+        match attempt {
+            1 => {
+                assert_eq!(resume, None);
+                self.run_first_connection(&mut transport, &mut session)
+                    .await
+            }
+            2 => {
+                assert!(resume.is_some());
+                self.run_resumed_connection(&mut transport, &mut session)
+                    .await
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn run_first_connection(
+        &self,
+        transport: &mut MemoryTransport,
+        session: &mut NoiseSession,
+    ) -> ClientResult<()> {
+        send_hello_ok(transport, session, self.session_id, false).await?;
+        let list = recv_encrypted(transport, session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        send_encrypted(
+            transport,
+            session,
+            Frame::body(FrameBody::TerminalListOk {
+                request_id: 1,
+                terminals: vec![self.info.clone()],
+            }),
+        )
+        .await?;
+        assert!(matches!(
+            recv_encrypted(transport, session).await?.body,
+            FrameBody::TerminalAttach { .. }
+        ));
+        send_attach_ok(transport, session, self.first_stream, StreamSeq(6)).await?;
+        send_output(
+            transport,
+            session,
+            self.first_stream,
+            StreamSeq(7),
+            b"before-drop",
+        )
+        .await?;
+        send_encrypted(
+            transport,
+            session,
+            Frame::body(FrameBody::Bye {
+                reason: ByeReason::ServerShutdown,
+            }),
+        )
+        .await
+    }
+
+    async fn run_resumed_connection(
+        &self,
+        transport: &mut MemoryTransport,
+        session: &mut NoiseSession,
+    ) -> ClientResult<()> {
+        send_hello_ok(transport, session, self.session_id, true).await?;
+        let attach = recv_encrypted(transport, session).await?;
+        let request_id = match attach.body {
+            FrameBody::TerminalAttach {
+                request_id,
+                terminal,
+                since,
+                ..
+            } => {
+                assert_eq!(terminal, self.info.terminal);
+                assert_eq!(since, Some(StreamSeq(7)));
+                request_id
+            }
+            other => panic!("expected TerminalAttach, got {other:?}"),
+        };
+
+        send_attach_ok_with_request(
+            transport,
+            session,
+            request_id.saturating_add(1),
+            self.wrong_stream,
+            StreamSeq(8),
+        )
+        .await?;
+        *self.wrong_ok_sent.borrow_mut() = true;
+
+        for _ in 0..100 {
+            if *self.allow_correct_ok.borrow() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            *self.allow_correct_ok.borrow(),
+            "test did not permit the correct TerminalAttachOk"
+        );
+
+        send_attach_ok_with_request(
+            transport,
+            session,
+            request_id,
+            self.correct_stream,
+            StreamSeq(8),
+        )
+        .await?;
+        send_output(
+            transport,
+            session,
+            self.correct_stream,
+            StreamSeq(9),
+            b"after-correct-attach",
+        )
+        .await
+    }
+
+    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let m1 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m1)?;
+        transport.send(responder.write_handshake()?).await?;
+        let m3 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct CreateTerminalDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    terminal: TerminalId,
+    stream: StreamId,
+    params: TerminalCreateParams,
+    create_seen: Rc<RefCell<bool>>,
+    attach_seen: Rc<RefCell<bool>>,
+    attach_ok_sent: Rc<RefCell<bool>>,
+}
+
+impl CreateTerminalDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
+        let state = self.clone();
+        move || {
+            let state = state.clone();
+            async move {
+                let (client, server) = memory_pair();
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(self, mut transport: MemoryTransport) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(hello.body, FrameBody::Hello(_)));
+        send_hello_ok(&mut transport, &mut session, self.session_id, false).await?;
+        let list = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalListOk {
+                request_id: 1,
+                terminals: Vec::new(),
+            }),
+        )
+        .await?;
+
+        let create = recv_encrypted(&mut transport, &mut session).await?;
+        let request_id = match create.body {
+            FrameBody::TerminalCreate { request_id, params } => {
+                assert_eq!(params, self.params);
+                *self.create_seen.borrow_mut() = true;
+                request_id
+            }
+            other => panic!("expected TerminalCreate, got {other:?}"),
+        };
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalCreateOk {
+                request_id,
+                terminal: self.terminal,
+                stream: self.stream,
+            }),
+        )
+        .await?;
+
+        let attach = recv_encrypted(&mut transport, &mut session).await?;
+        let attach_request_id = match attach.body {
+            FrameBody::TerminalAttach {
+                request_id,
+                terminal,
+                since,
+            } => {
+                assert_eq!(terminal, self.terminal);
+                assert_eq!(since, None);
+                *self.attach_seen.borrow_mut() = true;
+                request_id
+            }
+            other => panic!("expected TerminalAttach, got {other:?}"),
+        };
+
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+
+        send_attach_ok_with_request(
+            &mut transport,
+            &mut session,
+            attach_request_id,
+            self.stream,
+            StreamSeq(0),
+        )
+        .await?;
+        *self.attach_ok_sent.borrow_mut() = true;
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::Bye {
+                reason: ByeReason::Revoked,
+            }),
+        )
+        .await
+    }
+
+    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let m1 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m1)?;
+        transport.send(responder.write_handshake()?).await?;
+        let m3 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct CreateSecondTerminalDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    original_info: TerminalInfo,
+    original_stream: StreamId,
+    new_terminal: TerminalId,
+    new_stream: StreamId,
+    params: TerminalCreateParams,
+}
+
+impl CreateSecondTerminalDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
+        let state = self.clone();
+        move || {
+            let state = state.clone();
+            async move {
+                let (client, server) = memory_pair();
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(self, mut transport: MemoryTransport) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(hello.body, FrameBody::Hello(_)));
+        send_hello_ok(&mut transport, &mut session, self.session_id, false).await?;
+        let list = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalListOk {
+                request_id: 1,
+                terminals: vec![self.original_info.clone()],
+            }),
+        )
+        .await?;
+
+        let attach = recv_encrypted(&mut transport, &mut session).await?;
+        let original_attach_request_id = match attach.body {
+            FrameBody::TerminalAttach {
+                request_id,
+                terminal,
+                since,
+            } => {
+                assert_eq!(terminal, self.original_info.terminal);
+                assert_eq!(since, None);
+                request_id
+            }
+            other => panic!("expected TerminalAttach, got {other:?}"),
+        };
+        send_attach_ok_with_request(
+            &mut transport,
+            &mut session,
+            original_attach_request_id,
+            self.original_stream,
+            StreamSeq(0),
+        )
+        .await?;
+
+        let create = recv_encrypted(&mut transport, &mut session).await?;
+        let create_request_id = match create.body {
+            FrameBody::TerminalCreate { request_id, params } => {
+                assert_eq!(params, self.params);
+                request_id
+            }
+            other => panic!("expected TerminalCreate, got {other:?}"),
+        };
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalCreateOk {
+                request_id: create_request_id,
+                terminal: self.new_terminal,
+                stream: self.new_stream,
+            }),
+        )
+        .await?;
+
+        let attach = recv_encrypted(&mut transport, &mut session).await?;
+        let new_attach_request_id = match attach.body {
+            FrameBody::TerminalAttach {
+                request_id,
+                terminal,
+                since,
+            } => {
+                assert_eq!(terminal, self.new_terminal);
+                assert_eq!(since, None);
+                request_id
+            }
+            other => panic!("expected TerminalAttach, got {other:?}"),
+        };
+        assert_eq!(new_attach_request_id, create_request_id);
+        send_attach_ok_with_request(
+            &mut transport,
+            &mut session,
+            new_attach_request_id,
+            self.new_stream,
+            StreamSeq(0),
+        )
+        .await?;
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::Bye {
+                reason: ByeReason::Revoked,
+            }),
+        )
+        .await
+    }
+
+    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let m1 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m1)?;
+        transport.send(responder.write_handshake()?).await?;
+        let m3 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct DroppedCreateReconnectDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    terminal: TerminalId,
+    stream: StreamId,
+    stale_params: TerminalCreateParams,
+    fresh_params: TerminalCreateParams,
+    first_create_seen: Rc<RefCell<bool>>,
+    second_create: Rc<RefCell<Option<(u32, TerminalCreateParams)>>>,
+}
+
+impl DroppedCreateReconnectDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
+        let state = self.clone();
+        let attempts = Rc::new(RefCell::new(0_u8));
+        move || {
+            let state = state.clone();
+            let attempts = Rc::clone(&attempts);
+            async move {
+                let attempt = {
+                    let mut attempts = attempts.borrow_mut();
+                    *attempts += 1;
+                    *attempts
+                };
+                let (client, server) = memory_pair();
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server, attempt).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(self, mut transport: MemoryTransport, attempt: u8) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(hello.body, FrameBody::Hello(_)));
+        send_hello_ok(&mut transport, &mut session, self.session_id, false).await?;
+        let list = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalListOk {
+                request_id: 1,
+                terminals: Vec::new(),
+            }),
+        )
+        .await?;
+
+        let create = recv_encrypted(&mut transport, &mut session).await?;
+        let request_id = match create.body {
+            FrameBody::TerminalCreate {
+                request_id: _,
+                params,
+            } if attempt == 1 => {
+                assert_eq!(params, self.stale_params);
+                *self.first_create_seen.borrow_mut() = true;
+                return transport.close().await;
+            }
+            FrameBody::TerminalCreate { request_id, params } => {
+                assert_eq!(params, self.fresh_params);
+                *self.second_create.borrow_mut() = Some((request_id, params));
+                request_id
+            }
+            other => panic!("expected TerminalCreate, got {other:?}"),
+        };
+
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalCreateOk {
+                request_id,
+                terminal: self.terminal,
+                stream: self.stream,
+            }),
+        )
+        .await?;
+        let attach = recv_encrypted(&mut transport, &mut session).await?;
+        let attach_request_id = match attach.body {
+            FrameBody::TerminalAttach {
+                request_id,
+                terminal,
+                since: None,
+            } if terminal == self.terminal => request_id,
+            other => panic!("expected TerminalAttach, got {other:?}"),
+        };
+        send_attach_ok_with_request(
+            &mut transport,
+            &mut session,
+            attach_request_id,
+            self.stream,
+            StreamSeq(0),
+        )
+        .await
+    }
+
+    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let m1 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m1)?;
+        transport.send(responder.write_handshake()?).await?;
+        let m3 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct CreateErrDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    terminal: TerminalId,
+    stream: StreamId,
+    params: TerminalCreateParams,
+}
+
+impl CreateErrDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
+        let state = self.clone();
+        move || {
+            let state = state.clone();
+            async move {
+                let (client, server) = memory_pair();
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(self, mut transport: MemoryTransport) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(hello.body, FrameBody::Hello(_)));
+        send_hello_ok(&mut transport, &mut session, self.session_id, false).await?;
+        let list = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalListOk {
+                request_id: 1,
+                terminals: Vec::new(),
+            }),
+        )
+        .await?;
+
+        let create = recv_encrypted(&mut transport, &mut session).await?;
+        let request_id = match create.body {
+            FrameBody::TerminalCreate { request_id, params } => {
+                assert_eq!(params, self.params);
+                request_id
+            }
+            other => panic!("expected TerminalCreate, got {other:?}"),
+        };
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalCreateErr {
+                request_id,
+                error: ProtocolError::InvalidParam("bad cwd".to_owned()),
+            }),
+        )
+        .await?;
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalCreateOk {
+                request_id,
+                terminal: self.terminal,
+                stream: self.stream,
+            }),
+        )
+        .await
+    }
+
+    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let m1 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m1)?;
+        transport.send(responder.write_handshake()?).await?;
+        let m3 = transport.recv().await?.unwrap();
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct CreateErrThenKnownTerminalOkDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    info: TerminalInfo,
+    original_stream: StreamId,
+    stale_stream: StreamId,
+    params: TerminalCreateParams,
+    attach_after_stale_ok: Rc<RefCell<bool>>,
+    stale_observed: Rc<RefCell<bool>>,
+}
+
+impl CreateErrThenKnownTerminalOkDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
+        let state = self.clone();
+        move || {
+            let state = state.clone();
+            async move {
+                let (client, server) = memory_pair();
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(self, mut transport: MemoryTransport) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(hello.body, FrameBody::Hello(_)));
+        send_hello_ok(&mut transport, &mut session, self.session_id, false).await?;
+        let list = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalListOk {
+                request_id: 1,
+                terminals: vec![self.info.clone()],
+            }),
+        )
+        .await?;
+
+        let attach = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(
+            attach.body,
+            FrameBody::TerminalAttach {
+                terminal,
+                since: None,
+                ..
+            } if terminal == self.info.terminal
+        ));
+        send_attach_ok(
+            &mut transport,
+            &mut session,
+            self.original_stream,
+            StreamSeq(0),
+        )
+        .await?;
+
+        let create = recv_encrypted(&mut transport, &mut session).await?;
+        let request_id = match create.body {
+            FrameBody::TerminalCreate { request_id, params } => {
+                assert_eq!(params, self.params);
+                request_id
+            }
+            other => panic!("expected TerminalCreate, got {other:?}"),
+        };
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalCreateErr {
+                request_id,
+                error: ProtocolError::InvalidParam("bad cwd".to_owned()),
+            }),
+        )
+        .await?;
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::TerminalCreateOk {
+                request_id,
+                terminal: self.info.terminal,
+                stream: self.stale_stream,
+            }),
+        )
+        .await?;
+
+        for _ in 0..20 {
+            if let Some(frame) = try_recv_encrypted(&mut transport, &mut session)? {
+                if matches!(frame.body, FrameBody::TerminalAttach { .. }) {
+                    *self.attach_after_stale_ok.borrow_mut() = true;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+        *self.stale_observed.borrow_mut() = true;
+
         send_encrypted(
             &mut transport,
             &mut session,
@@ -2043,11 +3449,21 @@ async fn send_attach_ok(
     stream: StreamId,
     head_seq: StreamSeq,
 ) -> ClientResult<()> {
+    send_attach_ok_with_request(transport, session, 1, stream, head_seq).await
+}
+
+async fn send_attach_ok_with_request(
+    transport: &mut MemoryTransport,
+    session: &mut NoiseSession,
+    request_id: u32,
+    stream: StreamId,
+    head_seq: StreamSeq,
+) -> ClientResult<()> {
     send_encrypted(
         transport,
         session,
         Frame::body(FrameBody::TerminalAttachOk {
-            request_id: 1,
+            request_id,
             snapshot: snapshot(head_seq),
             head_seq,
             stream,
@@ -2119,6 +3535,22 @@ async fn assert_terminal_created(
     }
 }
 
+async fn assert_terminal_created_with_size(
+    events: &mut mpsc::Receiver<ClientEvent>,
+    terminal: TerminalId,
+    cols: u16,
+    rows: u16,
+) {
+    match events.next().await.unwrap() {
+        ClientEvent::TerminalCreated(info) => {
+            assert_eq!(info.terminal, terminal);
+            assert_eq!(info.cols, cols);
+            assert_eq!(info.rows, rows);
+        }
+        other => panic!("expected TerminalCreated, got {other:?}"),
+    }
+}
+
 async fn assert_terminal_output(
     events: &mut mpsc::Receiver<ClientEvent>,
     terminal_id: TerminalId,
@@ -2139,12 +3571,43 @@ async fn assert_terminal_output(
     }
 }
 
+async fn assert_error_contains(events: &mut mpsc::Receiver<ClientEvent>, expected: &str) {
+    for _ in 0..100 {
+        if let Some(event) = events.next().now_or_never() {
+            match event.unwrap() {
+                ClientEvent::Error(message) => {
+                    assert!(
+                        message.contains(expected),
+                        "expected error containing {expected:?}, got {message:?}"
+                    );
+                    return;
+                }
+                other => panic!("expected Error, got {other:?}"),
+            }
+        }
+        tokio::task::yield_now().await;
+    }
+
+    panic!("expected Error containing {expected:?}, got no event");
+}
+
 async fn assert_disconnected_retry(events: &mut mpsc::Receiver<ClientEvent>) {
     match events.next().await.unwrap() {
         ClientEvent::Disconnected {
             will_retry: true, ..
         } => {}
         other => panic!("expected retrying Disconnected, got {other:?}"),
+    }
+}
+
+fn terminal_params(cols: u16, rows: u16, label: &str) -> TerminalCreateParams {
+    TerminalCreateParams {
+        cols,
+        rows,
+        cwd: Some(format!("/tmp/{label}")),
+        cmd: vec![label.to_owned()],
+        env: vec![("TERM".to_owned(), "xterm-256color".to_owned())],
+        scrollback_bytes: Some(8192),
     }
 }
 

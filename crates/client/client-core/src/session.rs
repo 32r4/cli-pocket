@@ -73,6 +73,12 @@ where
 
 pub struct ClientSession {
     terminal: Rc<RefCell<Option<TerminalHandle>>>,
+    session_cmd_tx: mpsc::Sender<SessionCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SessionCommand {
+    CreateTerminal(TerminalCreateParams),
 }
 
 impl<T, C, R, K, S> SessionBuilder<T, C, R, K, S>
@@ -107,9 +113,11 @@ where
     pub fn start(self) -> (ClientSession, mpsc::Receiver<ClientEvent>) {
         let (events_tx, events_rx) = mpsc::channel::<ClientEvent>(64);
         let (cmd_tx, cmd_rx) = mpsc::channel::<TerminalCmd>(64);
+        let (session_cmd_tx, session_cmd_rx) = mpsc::channel::<SessionCommand>(64);
         let terminal = Rc::new(RefCell::new(None));
         let session = ClientSession {
             terminal: Rc::clone(&terminal),
+            session_cmd_tx,
         };
 
         self.spawner.spawn(
@@ -123,6 +131,7 @@ where
                 events_tx,
                 cmd_tx,
                 cmd_rx,
+                session_cmd_rx,
                 terminal,
             )
             .boxed_local(),
@@ -138,11 +147,12 @@ impl ClientSession {
         self.terminal.borrow().clone()
     }
 
-    #[allow(clippy::unused_async)]
-    pub async fn create_terminal(&self, _params: TerminalCreateParams) -> ClientResult<()> {
-        Err(ClientError::Internal(
-            "SessionCommand API is reserved for F7".to_owned(),
-        ))
+    pub async fn create_terminal(&self, params: TerminalCreateParams) -> ClientResult<()> {
+        self.session_cmd_tx
+            .clone()
+            .send(SessionCommand::CreateTerminal(params))
+            .await
+            .map_err(|_| ClientError::Closed)
     }
 }
 
@@ -157,6 +167,7 @@ async fn run_session_loop<T, C, R, K>(
     events_tx: mpsc::Sender<ClientEvent>,
     cmd_tx: mpsc::Sender<TerminalCmd>,
     mut cmd_rx: mpsc::Receiver<TerminalCmd>,
+    mut session_cmd_rx: mpsc::Receiver<SessionCommand>,
     terminal: Rc<RefCell<Option<TerminalHandle>>>,
 ) where
     T: Transport + 'static,
@@ -168,6 +179,7 @@ async fn run_session_loop<T, C, R, K>(
     let mut delay = start;
     let mut resume_state = ResumeState::from_config(config.resume_token.clone());
     let mut pending_cmds = VecDeque::<TerminalCmd>::new();
+    let mut pending_session_cmds = VecDeque::<SessionCommand>::new();
 
     loop {
         let _ = events_tx.clone().send(ClientEvent::Connecting).await;
@@ -192,7 +204,9 @@ async fn run_session_loop<T, C, R, K>(
             &config,
             &mut transport,
             &mut cmd_rx,
+            &mut session_cmd_rx,
             &mut pending_cmds,
+            &mut pending_session_cmds,
             ConnectionState {
                 resume: &mut resume_state,
                 events_tx: events_tx.clone(),
@@ -201,6 +215,8 @@ async fn run_session_loop<T, C, R, K>(
             },
         )
         .await;
+
+        resume_state.clear_pending_creates();
 
         match outcome {
             Ok(()) => {
@@ -232,13 +248,15 @@ async fn run_session_loop<T, C, R, K>(
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn run_one_connection<T: Transport>(
     identity: &ClientIdentity,
     config: &SessionConfig,
     transport: &mut T,
     cmd_rx: &mut mpsc::Receiver<TerminalCmd>,
+    session_cmd_rx: &mut mpsc::Receiver<SessionCommand>,
     pending_cmds: &mut VecDeque<TerminalCmd>,
+    pending_session_cmds: &mut VecDeque<SessionCommand>,
     state: ConnectionState<'_>,
 ) -> ClientResult<()> {
     let mut noise = NoiseInitiator::new(&identity.keypair, &config.server_public, None)?;
@@ -251,6 +269,7 @@ async fn run_one_connection<T: Transport>(
     let m3 = noise.write_handshake()?;
     transport.send(m3).await?;
     let mut session = noise.finish()?;
+    let mut next_request_id = 2;
 
     let hello = Frame::body(FrameBody::Hello(Hello {
         protocol_min: PROTOCOL_VERSION,
@@ -298,7 +317,7 @@ async fn run_one_connection<T: Transport>(
         };
         if let Some((terminal, handle_last_seq)) = attachment {
             let since = handle_last_seq.or_else(|| state.resume.last_seq(terminal));
-            state.resume.mark_pending_attach(terminal, false);
+            state.resume.mark_pending_attach(1, terminal, false);
             send_encrypted(
                 transport,
                 &mut session,
@@ -314,7 +333,7 @@ async fn run_one_connection<T: Transport>(
         let terminal_guard = state.terminal.borrow();
         terminal_guard.as_ref().map(TerminalHandle::terminal_id)
     } {
-        state.resume.mark_pending_attach(terminal, false);
+        state.resume.mark_pending_attach(1, terminal, false);
         send_encrypted(
             transport,
             &mut session,
@@ -326,7 +345,7 @@ async fn run_one_connection<T: Transport>(
         )
         .await?;
     } else if let Some(terminal) = state.resume.first_terminal() {
-        state.resume.mark_pending_attach(terminal, false);
+        state.resume.mark_pending_attach(1, terminal, false);
         send_encrypted(
             transport,
             &mut session,
@@ -350,13 +369,19 @@ async fn run_one_connection<T: Transport>(
         enum Action {
             Send(Frame),
             SendPendingCommand(Frame),
+            SendPendingSessionCommand(Frame),
             Emit(ClientEvent),
             Return(ClientResult<()>),
             None,
         }
 
         let action = {
-            let next = if let Some(cmd) = pending_cmds.pop_front() {
+            let next = if let Some(cmd) = pending_session_cmds.pop_front() {
+                let frame =
+                    frame_for_session_command(state.resume, cmd.clone(), &mut next_request_id);
+                pending_session_cmds.push_front(cmd);
+                Either::Left((Some(frame), ()))
+            } else if let Some(cmd) = pending_cmds.pop_front() {
                 if let Some(frame) = frame_for_command(state.resume, cmd.clone()) {
                     pending_cmds.push_front(cmd);
                     Either::Left((Some(frame), ()))
@@ -366,11 +391,29 @@ async fn run_one_connection<T: Transport>(
                 }
             } else {
                 let next_cmd = cmd_rx.next().fuse();
+                let next_session_cmd = session_cmd_rx.next().fuse();
                 let next_frame = recv_encrypted(transport, &mut session).fuse();
-                futures_util::pin_mut!(next_cmd, next_frame);
+                futures_util::pin_mut!(next_cmd, next_session_cmd, next_frame);
 
-                match futures_util::future::select(next_cmd, next_frame).await {
-                    Either::Left((cmd, _pending_frame)) => {
+                match futures_util::future::select(
+                    next_session_cmd,
+                    futures_util::future::select(next_cmd, next_frame),
+                )
+                .await
+                {
+                    Either::Left((cmd, _pending_other)) => {
+                        let Some(cmd) = cmd else {
+                            return Ok(());
+                        };
+                        let frame = frame_for_session_command(
+                            state.resume,
+                            cmd.clone(),
+                            &mut next_request_id,
+                        );
+                        pending_session_cmds.push_back(cmd);
+                        Either::Left((Some(frame), ()))
+                    }
+                    Either::Right((Either::Left((cmd, _pending_frame)), _pending_session_cmd)) => {
                         let Some(cmd) = cmd else {
                             return Ok(());
                         };
@@ -382,12 +425,20 @@ async fn run_one_connection<T: Transport>(
                             Either::Left((None, ()))
                         }
                     }
-                    Either::Right((frame, _pending_cmd)) => Either::Right((frame, ())),
+                    Either::Right((Either::Right((frame, _pending_cmd)), _pending_session_cmd)) => {
+                        Either::Right((frame, ()))
+                    }
                 }
             };
 
             match next {
-                Either::Left((frame, ())) => frame.map_or(Action::None, Action::SendPendingCommand),
+                Either::Left((frame, ())) => {
+                    if pending_session_cmds.front().is_some() {
+                        frame.map_or(Action::None, Action::SendPendingSessionCommand)
+                    } else {
+                        frame.map_or(Action::None, Action::SendPendingCommand)
+                    }
+                }
                 Either::Right((frame, ())) => {
                     let frame = match frame {
                         Ok(frame) => frame,
@@ -427,46 +478,71 @@ async fn run_one_connection<T: Transport>(
                             })
                         }
                         FrameBody::TerminalCreateOk {
+                            request_id,
                             terminal: created_terminal,
                             stream,
-                            ..
                         } => {
-                            if let Some(info) = state.resume.info(created_terminal).cloned() {
-                                let handle = TerminalHandle::new(
-                                    info.clone(),
-                                    stream,
-                                    None,
-                                    state.cmd_tx.clone(),
+                            if state
+                                .resume
+                                .complete_create(request_id, created_terminal, stream)
+                                .is_some()
+                            {
+                                state.resume.mark_pending_attach(
+                                    request_id,
+                                    created_terminal,
+                                    true,
                                 );
-                                *state.terminal.borrow_mut() = Some(handle);
-                                Action::Emit(ClientEvent::TerminalCreated(info))
+                                Action::Send(Frame::body(FrameBody::TerminalAttach {
+                                    request_id,
+                                    terminal: created_terminal,
+                                    since: None,
+                                }))
                             } else {
                                 Action::Emit(ClientEvent::Error(format!(
                                     "terminal create ok missing metadata for {created_terminal:?}"
                                 )))
                             }
                         }
-                        FrameBody::TerminalAttachOk {
-                            stream, head_seq, ..
-                        } => {
-                            let pending = state.resume.take_pending_attach();
-                            let mut created = None;
-                            {
-                                let mut terminal_guard = state.terminal.borrow_mut();
-                                if let Some(handle) = terminal_guard.as_mut() {
-                                    let terminal = handle.terminal_id();
-                                    if pending
-                                        .as_ref()
-                                        .is_none_or(|pending| pending.terminal == terminal)
-                                    {
-                                        handle.set_stream_id(stream);
-                                        handle.last_seq = Some(head_seq);
-                                        state.resume.update_attachment(terminal, head_seq, stream);
-                                    }
-                                }
+                        FrameBody::TerminalCreateErr { request_id, error } => {
+                            if state.resume.remove_pending_create(request_id).is_some() {
+                                Action::Emit(ClientEvent::Error(format!(
+                                    "terminal create failed: {error}"
+                                )))
+                            } else {
+                                Action::Emit(ClientEvent::Error(format!(
+                                    "terminal create failed for unknown request {request_id}: {error}"
+                                )))
                             }
-                            if state.terminal.borrow().is_none() {
-                                if let Some(pending) = pending {
+                        }
+                        FrameBody::TerminalAttachOk {
+                            request_id,
+                            stream,
+                            head_seq,
+                            ..
+                        } => {
+                            let pending = state.resume.take_pending_attach(request_id);
+                            let mut created = None;
+                            if let Some(pending) = pending {
+                                let handled_existing = {
+                                    let mut terminal_guard = state.terminal.borrow_mut();
+                                    if let Some(handle) = terminal_guard.as_mut() {
+                                        let terminal = handle.terminal_id();
+                                        if pending.terminal == terminal {
+                                            handle.set_stream_id(stream);
+                                            handle.last_seq = Some(head_seq);
+                                            state
+                                                .resume
+                                                .update_attachment(terminal, head_seq, stream);
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                };
+
+                                if !handled_existing {
                                     state.resume.update_attachment(
                                         pending.terminal,
                                         head_seq,
@@ -494,7 +570,7 @@ async fn run_one_connection<T: Transport>(
                                 Action::None
                             } else if let Some(info) = terminals.into_iter().next() {
                                 state.resume.store_info(info.clone());
-                                state.resume.mark_pending_attach(info.terminal, true);
+                                state.resume.mark_pending_attach(1, info.terminal, true);
                                 let frame = Frame::body(FrameBody::TerminalAttach {
                                     request_id: 1,
                                     terminal: info.terminal,
@@ -542,6 +618,10 @@ async fn run_one_connection<T: Transport>(
             Action::SendPendingCommand(frame) => {
                 send_encrypted(transport, &mut session, &frame).await?;
                 pending_cmds.pop_front();
+            }
+            Action::SendPendingSessionCommand(frame) => {
+                send_encrypted(transport, &mut session, &frame).await?;
+                pending_session_cmds.pop_front();
             }
             Action::Emit(event) => {
                 let _ = state.events_tx.clone().send(event).await;
@@ -601,6 +681,21 @@ fn frame_for_command(resume: &ResumeState, cmd: TerminalCmd) -> Option<Frame> {
     }
 }
 
+fn frame_for_session_command(
+    resume: &mut ResumeState,
+    cmd: SessionCommand,
+    next_request_id: &mut u32,
+) -> Frame {
+    match cmd {
+        SessionCommand::CreateTerminal(params) => {
+            let request_id = *next_request_id;
+            *next_request_id = next_request_id.saturating_add(1);
+            resume.record_create(request_id, params.clone());
+            Frame::body(FrameBody::TerminalCreate { request_id, params })
+        }
+    }
+}
+
 struct ConnectionState<'a> {
     resume: &'a mut ResumeState,
     events_tx: mpsc::Sender<ClientEvent>,
@@ -633,6 +728,7 @@ struct ResumeState {
     session_id: Option<SessionId>,
     attachments: Vec<AttachmentState>,
     pending_attach: Option<PendingAttach>,
+    pending_creates: Vec<PendingCreate>,
 }
 
 #[derive(Debug, Clone)]
@@ -645,8 +741,15 @@ struct AttachmentState {
 
 #[derive(Debug, Clone)]
 struct PendingAttach {
+    request_id: u32,
     terminal: TerminalId,
     emit_created: bool,
+}
+
+#[derive(Debug, Clone)]
+struct PendingCreate {
+    request_id: u32,
+    params: TerminalCreateParams,
 }
 
 impl ResumeState {
@@ -668,6 +771,7 @@ impl ResumeState {
                 })
                 .collect(),
             pending_attach: None,
+            pending_creates: Vec::new(),
         }
     }
 
@@ -705,6 +809,7 @@ impl ResumeState {
             attachment.stream = None;
         }
         self.pending_attach = None;
+        self.pending_creates.clear();
     }
 
     fn first_terminal(&self) -> Option<TerminalId> {
@@ -739,6 +844,48 @@ impl ResumeState {
         attachment.info = Some(info);
     }
 
+    fn record_create(&mut self, request_id: u32, params: TerminalCreateParams) {
+        self.pending_creates
+            .push(PendingCreate { request_id, params });
+    }
+
+    fn clear_pending_creates(&mut self) {
+        self.pending_creates.clear();
+    }
+
+    fn remove_pending_create(&mut self, request_id: u32) -> Option<PendingCreate> {
+        let idx = self
+            .pending_creates
+            .iter()
+            .position(|pending| pending.request_id == request_id)?;
+        Some(self.pending_creates.remove(idx))
+    }
+
+    fn complete_create(
+        &mut self,
+        request_id: u32,
+        terminal: TerminalId,
+        stream: StreamId,
+    ) -> Option<TerminalInfo> {
+        let idx = self
+            .pending_creates
+            .iter()
+            .position(|pending| pending.request_id == request_id)?;
+        let pending = self.pending_creates.remove(idx);
+        let info = TerminalInfo {
+            terminal,
+            cols: pending.params.cols,
+            rows: pending.params.rows,
+            created_at_unix_ms: 0,
+            label: pending.params.cmd.first().cloned(),
+            attached_clients: 1,
+        };
+        let attachment = self.entry(terminal);
+        attachment.info = Some(info.clone());
+        attachment.stream = Some(stream);
+        Some(info)
+    }
+
     fn info(&self, terminal: TerminalId) -> Option<&TerminalInfo> {
         self.attachments
             .iter()
@@ -753,16 +900,25 @@ impl ResumeState {
         attachment.last_seq = Some(last_seq);
     }
 
-    fn mark_pending_attach(&mut self, terminal: TerminalId, emit_created: bool) {
+    fn mark_pending_attach(&mut self, request_id: u32, terminal: TerminalId, emit_created: bool) {
         self.entry(terminal).stream = None;
         self.pending_attach = Some(PendingAttach {
+            request_id,
             terminal,
             emit_created,
         });
     }
 
-    fn take_pending_attach(&mut self) -> Option<PendingAttach> {
-        self.pending_attach.take()
+    fn take_pending_attach(&mut self, request_id: u32) -> Option<PendingAttach> {
+        if self
+            .pending_attach
+            .as_ref()
+            .is_some_and(|pending| pending.request_id == request_id)
+        {
+            self.pending_attach.take()
+        } else {
+            None
+        }
     }
 
     fn remove_attachment(&mut self, terminal: TerminalId) {
