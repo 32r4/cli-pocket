@@ -1,13 +1,26 @@
 [package]
 name = "cli-pocket-transport"
-version = "0.0.0"
+version = "0.1.0"
 publish = false
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "WebSocket transport abstraction for cli-pocket. Real impl lands in Plan B."
+description = "WebSocket transport abstraction for cli-pocket."
+
+[dependencies]
+cli-pocket-proto  = { path = "../proto" }
+async-trait       = { workspace = true }
+tokio             = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util      = { workspace = true }
+thiserror         = { workspace = true }
+tracing           = { workspace = true }
+bytes             = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

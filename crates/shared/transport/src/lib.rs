@@ -1,7 +1,5 @@
-//! WebSocket transport abstraction. Real types land in Plan B.
+//! Binary-framed WebSocket transport abstraction. See Section 3 / Section 6.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn placeholder_compiles() {}
-}
+pub mod transport;
+
+pub use transport::{Transport, TransportError};
