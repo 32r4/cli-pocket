@@ -1756,3 +1756,104 @@ git commit -m "docs: ADR 0006 + Plan F handoff"
 - [ ] No `tokio` import in `client-core/src/**` outside `cfg(not(target_arch = "wasm32"))`.
 - [ ] No `std::time::Instant` in `client-core/src/**` (use Clock).
 - [ ] wasm-bindgen surface is documented in F14 handoff for Plan I to consume.
+
+---
+
+## Deviations Recorded by Task F0
+
+Task F0 compared this plan against `docs/superpowers/handoff/A.md`,
+`docs/superpowers/handoff/B.md`, and the current shared crates on
+2026-05-22. Future Plan F tasks must treat these notes as corrections to the
+code snippets above.
+
+- **Frozen shared contracts:** After `proto-v1.0.0-frozen`, Plan F tasks must
+  not modify `crates/shared/proto/**` or `crates/shared/crypto/**`. Adapt
+  client-core and client-core-wasm to the frozen Plan B contracts. Any later
+  shared contract change must be made separately by a maintainer outside Plan F
+  under the repository's freeze process.
+- **Plan filename:** The actual Plan F file is
+  `docs/superpowers/plans/2026-05-21-F-client-core.md`. There is no
+  `2026-05-21-F-client-core-wasm.md` file in the current tree.
+- **Crate names:** Current crate package names and Rust imports omit the
+  `shared` segment. Use `cli-pocket-proto`, `cli-pocket-crypto`, and
+  `cli-pocket-transport` in `Cargo.toml`; use `cli_pocket_proto`,
+  `cli_pocket_crypto`, and `cli_pocket_transport` in Rust. Do not use
+  `cli-pocket-shared-proto`, `cli-pocket-shared-crypto`,
+  `cli-pocket-shared-transport`, or their `cli_pocket_shared_*` import forms.
+- **Workspace membership:** Plan A already created
+  `crates/client/client-core` and `crates/client/client-core-wasm` and added
+  them to the root workspace. Task F1/F10 should modify the existing scaffold
+  crates instead of creating new workspace members.
+- **Public module paths:** Plan B re-exports most shared types from crate root
+  modules. There is no `cli_pocket_proto::ids` module. IDs and terminal types
+  are exported from `cli_pocket_proto::terminal` and also re-exported at
+  `cli_pocket_proto::{TerminalId, StreamId, StreamSeq, SessionId, HostId,
+  ClientId, TerminalInfo, ...}`. `ByeReason` is from
+  `cli_pocket_proto::error` or the crate root, not `frame`.
+- **Shared crypto error type:** There is no shared `CryptoError`. The exported
+  error types are `IdentityError`, `NoiseError`, and `Spake2Error`. Convert
+  these explicitly into `ClientError`; do not implement
+  `From<cli_pocket_crypto::CryptoError>`.
+- **KeyPair API:** Current `KeyPair` has public fields
+  `public: [u8; 32]` and `secret: Secret<[u8; 32]>`, plus
+  `KeyPair::generate() -> Result<KeyPair, IdentityError>`. It does not expose
+  `from_raw`, `from_private_bytes`, `private_bytes`, or
+  `public.as_bytes()`. Plan F identity persistence must adapt to the current
+  `Identity`/`KeyPair` API from Plan B.
+- **NoiseInitiator API:** Current constructor is
+  `NoiseInitiator::new(local: &KeyPair, remote_static_public: &[u8; 32],
+  psk: Option<&[u8; 32]>) -> Result<_, NoiseError>`. Do not pass private key
+  bytes directly. Handshake is three messages:
+  `write_handshake`, `read_handshake`, `write_handshake`, then `finish()`.
+  `NoiseSession` uses `encrypt(&[u8]) -> Result<Vec<u8>, NoiseError>` and
+  `decrypt(&[u8]) -> Result<Vec<u8>, NoiseError>`.
+- **Shared transport trait:** Current `cli_pocket_transport::Transport` is
+  `Send + 'static`, uses `send(&mut self, bytes: Vec<u8>)`, and
+  `recv(&mut self) -> Result<Option<Vec<u8>>, TransportError>`. `None` means
+  closed. The Plan F local wasm-friendly trait can remain separate, but native
+  adapters must account for `Vec<u8>` ownership and optional receive.
+- **Frame shape:** `Frame` is `Frame { body: FrameBody }` with
+  `Frame::body(body)`. `FrameBody::Hello` is a tuple variant wrapping
+  `Hello`, not a struct-like variant. `Hello` fields are `protocol_min`,
+  `protocol_max`, `capabilities`, `client_kind`, and
+  `resume: Option<ResumeToken>`.
+- **Hello/HelloOk/HelloErr:** `HelloOk` fields are `protocol`, `server_info`,
+  `session_id`, and `resumed`. It does not carry `resume_attached`.
+  `HelloErr` wraps `ProtocolError` as `FrameBody::HelloErr(HelloErr)`, not
+  `{ reason, message }`.
+- **ClientKind variants:** Current variants are `Daemon`, `DesktopTauri`,
+  `MobileTauri`, `Web`, and `Cli`. There is no `ClientKind::Desktop`.
+- **Resume token shape:** `ResumeToken` is
+  `{ session_id: SessionId, attachments: Vec<ResumeAttachment> }`, where each
+  attachment is `{ terminal: TerminalId, last_seq: StreamSeq }`. It is not raw
+  bytes or a hex string in the protocol.
+- **TerminalInfo fields:** Current `TerminalInfo` uses `terminal: TerminalId`,
+  not `terminal_id`. It also has `cols`, `rows`, `created_at_unix_ms`,
+  `label`, and `attached_clients`.
+- **Terminal command frames:** Use the current stream-oriented variants:
+  `Input { stream, bytes }`, `Resize { stream, cols, rows }`,
+  `TerminalDetach { stream }`, and
+  `TerminalKill { request_id, terminal }`. `TerminalKill` has no
+  `KillSignal` field in the wire contract.
+- **Terminal create/attach flow:** `TerminalCreateOk` returns
+  `{ request_id, terminal, stream }`; attach uses
+  `TerminalAttach { request_id, terminal, since }` and
+  `TerminalAttachOk { request_id, snapshot, head_seq, stream,
+  initial_window }`. There is no `FrameBody::TerminalInfo` or
+  `FrameBody::Exit`; use `TerminalListOk`, `TerminalCreateOk`,
+  `TerminalAttachOk`, and `TerminalExit`.
+- **Output frame shape:** Current output is
+  `Output { stream: StreamId, seq: StreamSeq, bytes: serde_bytes::ByteBuf }`.
+  Client events should map stream IDs back to terminal IDs locally if the UI
+  needs terminal IDs.
+- **Bye frame shape:** `FrameBody::Bye { reason: ByeReason }` has no message
+  field.
+- **Codec imports:** `encode_frame`, `decode_frame`, and `CodecError` are
+  re-exported from `cli_pocket_proto` and live in `cli_pocket_proto::codec`.
+  They encode/decode plaintext `Frame`; encrypted transport messages still
+  wrap these encoded bytes via `NoiseSession`.
+- **Tokio in client-core:** The plan's snippets import `tokio::sync` and use
+  `tokio::select!` in shared `client-core` modules, but the plan's own
+  constraint says `client-core` must be wasm-friendly and must not depend on
+  tokio directly. Future tasks must replace these with wasm-compatible
+  primitives or gate native-only code with `cfg(not(target_arch = "wasm32"))`.
