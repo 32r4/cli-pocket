@@ -263,6 +263,7 @@ fn set_mode_600(path: &Path) -> Result<(), IdentityError> {
 #[cfg(unix)]
 fn save_identity_json(path: &Path, json: &[u8]) -> Result<(), IdentityError> {
     use std::fs::OpenOptions;
+    use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
     let tmp_path = path.with_extension(format!("{}.tmp", Uuid::now_v7().simple()));
