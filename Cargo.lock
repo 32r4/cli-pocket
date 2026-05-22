@@ -312,6 +312,8 @@ dependencies = [
  "cli-pocket-transport",
  "futures-util",
  "serde",
+ "serde_json",
+ "snow",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
