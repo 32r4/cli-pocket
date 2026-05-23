@@ -11,7 +11,7 @@ check:
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo deny check
-    npm --prefix webview/terminal run lint
+    just webview-check
 
 test:
     cargo test --workspace
@@ -37,22 +37,22 @@ build-wasm:
     wasm-pack build crates/client/client-core-wasm --target web --release
 
 build-webview-tauri:
-    just _build-webview-tauri
+    npm --prefix webview/terminal run build:tauri
 
 build-webview-web:
-    just _build-webview-web
+    npm --prefix webview/terminal run build:web
 
 # Built in Plan H — recipes shown here so `just --list` is the single index.
 build-desktop:
-    just _build-webview-tauri
+    just build-webview-tauri
     cd apps/desktop; cargo tauri build
 
 build-mobile-android:
-    just _build-webview-tauri
+    just build-webview-tauri
     cd apps/mobile; cargo tauri android build --apk --aab
 
 build-mobile-ios:
-    just _build-webview-tauri
+    just build-webview-tauri
     cd apps/mobile; cargo tauri ios build
 
 # Built in Plan I — needs `just build-wasm` first.
@@ -98,22 +98,6 @@ _clean-node:
 _clean-node:
     rm -rf webview/terminal/dist webview/terminal/node_modules apps/web/dist apps/web/node_modules
 
-[windows]
-_build-webview-tauri:
-    cd webview/terminal; $env:VITE_CLIENT_KIND='tauri'; npm exec vite -- build --outDir dist/tauri
-
-[unix]
-_build-webview-tauri:
-    cd webview/terminal && VITE_CLIENT_KIND=tauri npm exec vite -- build --outDir dist/tauri
-
-[windows]
-_build-webview-web:
-    cd webview/terminal; $env:VITE_CLIENT_KIND='web'; npm exec vite -- build --outDir dist/web
-
-[unix]
-_build-webview-web:
-    cd webview/terminal && VITE_CLIENT_KIND=web npm exec vite -- build --outDir dist/web
-
 # ---- release ----
 
 # Builds every artifact this project produces. Slow.
@@ -123,3 +107,20 @@ dist:
     just build-wasm
     just build-webview-tauri
     just build-webview-web
+
+# ---- webview (Plan G) ----
+
+webview-install:
+    npm --prefix webview/terminal install
+
+webview-dev:
+    npm --prefix webview/terminal run dev
+
+webview-build:
+    npm --prefix webview/terminal run build
+
+webview-test:
+    npm --prefix webview/terminal run test
+
+webview-check:
+    npm --prefix webview/terminal run check
