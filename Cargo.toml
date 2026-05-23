@@ -71,11 +71,12 @@ tracing        = "0.1"
 uuid           = { version = "1", features = ["v7", "serde", "js"] }
 bytes          = { version = "1", features = ["serde"] }
 base64         = "0.22"
+toml           = "0.9.8"
 
 # Utilities used by plan C+ but pinned now for version stability
 notify         = "6"
 vte            = "0.13"
-portable-pty   = "0.8"
+portable-pty   = "0.9"
 clap           = { version = "4", features = ["derive", "env"] }
 
 # Platform directories (XDG / macOS / Windows data dirs)

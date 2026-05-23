@@ -27,7 +27,7 @@ subtle                = "2"
 thiserror             = { workspace = true }
 tokio                 = { workspace = true, features = ["sync", "net", "rt-multi-thread"] }
 tokio-tungstenite     = { workspace = true }
-toml                  = "=0.8.23"
+toml                  = { workspace = true }
 tracing               = "0.1"
 uuid                  = { workspace = true }
 

@@ -70,6 +70,11 @@ impl ScrollbackRing {
         (self.cols, self.rows)
     }
 
+    #[must_use]
+    pub fn cursor(&self) -> (u16, u16) {
+        self.tracker.snapshot_state().cursor
+    }
+
     pub fn set_dims(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;

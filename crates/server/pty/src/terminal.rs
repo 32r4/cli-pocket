@@ -11,6 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::watch;
 
+const CURSOR_POSITION_QUERY: &[u8] = b"\x1b[6n";
+const WIN32_INPUT_MODE_PREFIX: &[u8] = b"\x1b[?9001";
+const FOCUS_EVENT_MODE_PREFIX: &[u8] = b"\x1b[?1004";
+const OSC_TITLE_PREFIX: &[u8] = b"\x1b]0;";
+
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalError {
     #[error("ring error: {0}")]
@@ -56,6 +61,15 @@ impl Terminal {
             .openpty(pty_size)
             .map_err(|error| TerminalError::Pty(error.to_string()))?;
 
+        let mut writer = master
+            .take_writer()
+            .map_err(|error| TerminalError::Pty(error.to_string()))?;
+        #[cfg(windows)]
+        bootstrap_conpty_cursor_inheritance(&mut *writer, rows)?;
+
+        let reader = master
+            .try_clone_reader()
+            .map_err(|error| TerminalError::Pty(error.to_string()))?;
         let command = build_command(params)?;
         let child = slave
             .spawn_command(command)
@@ -63,12 +77,6 @@ impl Terminal {
         drop(slave);
 
         let killer = child.clone_killer();
-        let writer = master
-            .take_writer()
-            .map_err(|error| TerminalError::Pty(error.to_string()))?;
-        let reader = master
-            .try_clone_reader()
-            .map_err(|error| TerminalError::Pty(error.to_string()))?;
 
         let ring = ScrollbackRing::new(
             cols,
@@ -266,6 +274,143 @@ fn build_command(params: &TerminalCreateParams) -> Result<CommandBuilder, Termin
     Ok(command)
 }
 
+#[derive(Default)]
+struct HostOutputProcessor {
+    pending: Vec<u8>,
+    pending_response: Vec<u8>,
+}
+
+enum SequenceMatch {
+    Consumed(usize),
+    Incomplete,
+}
+
+impl HostOutputProcessor {
+    fn process(&mut self, bytes: &[u8], cursor: (u16, u16)) -> Vec<u8> {
+        let mut input = Vec::with_capacity(self.pending.len() + bytes.len());
+        input.extend_from_slice(&self.pending);
+        input.extend_from_slice(bytes);
+        self.pending.clear();
+
+        let mut filtered = Vec::with_capacity(input.len());
+        let mut index = 0;
+        while index < input.len() {
+            let remaining = &input[index..];
+            if CURSOR_POSITION_QUERY.starts_with(remaining) {
+                self.pending.extend_from_slice(remaining);
+                break;
+            }
+            if remaining.starts_with(CURSOR_POSITION_QUERY) {
+                self.pending_response
+                    .extend_from_slice(cursor_position_report(cursor).as_bytes());
+                index += CURSOR_POSITION_QUERY.len();
+                continue;
+            }
+
+            if let Some(consumed) =
+                split_prefixed_control_sequence(remaining, WIN32_INPUT_MODE_PREFIX)
+            {
+                match consumed {
+                    SequenceMatch::Consumed(consumed) => {
+                        index += consumed;
+                        continue;
+                    }
+                    SequenceMatch::Incomplete => {
+                        self.pending.extend_from_slice(remaining);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(consumed) =
+                split_prefixed_control_sequence(remaining, FOCUS_EVENT_MODE_PREFIX)
+            {
+                match consumed {
+                    SequenceMatch::Consumed(consumed) => {
+                        index += consumed;
+                        continue;
+                    }
+                    SequenceMatch::Incomplete => {
+                        self.pending.extend_from_slice(remaining);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(consumed) = split_osc_title_sequence(remaining) {
+                match consumed {
+                    SequenceMatch::Consumed(consumed) => {
+                        index += consumed;
+                        continue;
+                    }
+                    SequenceMatch::Incomplete => {
+                        self.pending.extend_from_slice(remaining);
+                        break;
+                    }
+                }
+            }
+
+            filtered.push(input[index]);
+            index += 1;
+        }
+
+        filtered
+    }
+
+    fn take_pending_response(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending_response)
+    }
+}
+
+fn cursor_position_report((col, row): (u16, u16)) -> String {
+    format!("\x1b[{};{}R", row.saturating_add(1), col.saturating_add(1))
+}
+
+#[cfg(windows)]
+fn bootstrap_conpty_cursor_inheritance(
+    writer: &mut dyn Write,
+    rows: u16,
+) -> Result<(), TerminalError> {
+    let response = format!("\x1b[{};1R", rows.max(1));
+    writer.write_all(response.as_bytes())?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn split_prefixed_control_sequence(bytes: &[u8], prefix: &[u8]) -> Option<SequenceMatch> {
+    if prefix.starts_with(bytes) {
+        return Some(SequenceMatch::Incomplete);
+    }
+
+    if bytes.starts_with(prefix) {
+        if let Some(&suffix) = bytes.get(prefix.len()) {
+            if suffix == b'h' || suffix == b'l' {
+                return Some(SequenceMatch::Consumed(prefix.len() + 1));
+            }
+        } else {
+            return Some(SequenceMatch::Incomplete);
+        }
+    }
+
+    None
+}
+
+fn split_osc_title_sequence(bytes: &[u8]) -> Option<SequenceMatch> {
+    if OSC_TITLE_PREFIX.starts_with(bytes) {
+        return Some(SequenceMatch::Incomplete);
+    }
+
+    if !bytes.starts_with(OSC_TITLE_PREFIX) {
+        return None;
+    }
+
+    bytes[OSC_TITLE_PREFIX.len()..]
+        .iter()
+        .position(|&byte| byte == 0x07)
+        .map(|offset| SequenceMatch::Consumed(OSC_TITLE_PREFIX.len() + offset + 1))
+        .or(Some(SequenceMatch::Incomplete))
+}
+
 fn spawn_reader(
     inner: Arc<TerminalInner>,
     mut reader: Box<dyn Read + Send>,
@@ -275,6 +420,7 @@ fn spawn_reader(
         .name("cli-pocket-pty-reader".to_string())
         .spawn(move || {
             let mut buffer = [0_u8; 8192];
+            let mut host_output = HostOutputProcessor::default();
 
             loop {
                 let read = match reader.read(&mut buffer) {
@@ -287,7 +433,33 @@ fn spawn_reader(
                     }
                 };
 
-                let chunk = Bytes::copy_from_slice(&buffer[..read]);
+                let filtered = {
+                    let cursor = {
+                        let ring = lock_or_recover(&inner.ring, "ring");
+                        ring.cursor()
+                    };
+                    host_output.process(&buffer[..read], cursor)
+                };
+
+                let response = host_output.take_pending_response();
+                if !response.is_empty() {
+                    let mut writer = lock_or_recover(&inner.writer, "writer");
+                    if let Err(error) = writer.write_all(&response) {
+                        tracing::debug!(
+                            "pty reader failed to answer host query while writing response: {error}"
+                        );
+                    } else if let Err(error) = writer.flush() {
+                        tracing::debug!(
+                            "pty reader failed to flush host query response to PTY: {error}"
+                        );
+                    }
+                }
+
+                if filtered.is_empty() {
+                    continue;
+                }
+
+                let chunk = Bytes::from(filtered);
                 let seq_at_end = {
                     let mut ring = lock_or_recover(&inner.ring, "ring");
                     ring.push(&chunk);
@@ -497,5 +669,37 @@ mod tests {
         let result = map_kill_error(&error, false);
 
         assert!(matches!(result, Err(TerminalError::Pty(message)) if message.contains("denied")));
+    }
+
+    #[test]
+    fn host_output_processor_replies_to_cursor_position_query() {
+        let mut processor = HostOutputProcessor::default();
+
+        let filtered = processor.process(b"\x1b[6nhello", (0, 0));
+
+        assert_eq!(filtered, b"hello");
+        assert_eq!(processor.take_pending_response(), b"\x1b[1;1R");
+    }
+
+    #[test]
+    fn host_output_processor_handles_split_cursor_position_query() {
+        let mut processor = HostOutputProcessor::default();
+
+        let first = processor.process(b"\x1b[", (4, 2));
+        let second = processor.process(b"6nok", (4, 2));
+
+        assert!(first.is_empty());
+        assert_eq!(second, b"ok");
+        assert_eq!(processor.take_pending_response(), b"\x1b[3;5R");
+    }
+
+    #[test]
+    fn host_output_processor_strips_conpty_management_sequences() {
+        let mut processor = HostOutputProcessor::default();
+
+        let filtered = processor.process(b"\x1b[?9001h\x1b[?1004l\x1b]0;title\x07hello", (0, 0));
+
+        assert_eq!(filtered, b"hello");
+        assert!(processor.take_pending_response().is_empty());
     }
 }
