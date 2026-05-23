@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "cli-pocket daemon binary. Real impl lands in Plan D."
+description = "cli-pocket daemon binary."
 
 [[bin]]
 name = "cli-pocket-daemon"
@@ -15,6 +15,17 @@ path = "src/main.rs"
 
 [dependencies]
 cli-pocket-daemon-core = { path = "../daemon-core" }
+cli-pocket-crypto      = { path = "../../shared/crypto" }
+cli-pocket-proto       = { path = "../../shared/proto" }
+
+anyhow             = "1"
+clap               = { workspace = true }
+hex                = "0.4"
+tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+toml               = "=0.8.23"
+tracing            = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid               = { workspace = true }
 
 [lints]
 workspace = true

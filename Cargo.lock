@@ -471,7 +471,17 @@ dependencies = [
 name = "cli-pocket-daemon"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "clap",
+ "cli-pocket-crypto",
  "cli-pocket-daemon-core",
+ "cli-pocket-proto",
+ "hex",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
