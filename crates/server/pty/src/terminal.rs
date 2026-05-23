@@ -183,6 +183,15 @@ impl Terminal {
         }
     }
 
+    /// Check whether the PTY child process has exited.
+    ///
+    /// This is a non-blocking snapshot of the exited flag set by the
+    /// internal waiter thread.
+    #[must_use]
+    pub fn is_exited(&self) -> bool {
+        self.inner.exited.load(Ordering::Acquire)
+    }
+
     pub async fn wait(&self) -> ExitInfo {
         if let Some(exit) = self.current_exit() {
             return exit;
