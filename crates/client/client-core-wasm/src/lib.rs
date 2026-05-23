@@ -25,7 +25,7 @@ use cli_pocket_client_core::{
 use cli_pocket_proto::{Capabilities, ResumeToken, TerminalCreateParams};
 use futures_channel::mpsc;
 use futures_util::{future::LocalBoxFuture, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -67,6 +67,87 @@ mod tests {
             .expect("kind string");
 
         assert_eq!(kind, "Disconnected");
+    }
+
+    #[test]
+    fn terminal_created_event_serializes_for_web_bridge() {
+        let value = event_to_json_value(&ClientEvent::TerminalCreated(
+            cli_pocket_proto::TerminalInfo {
+                terminal: cli_pocket_proto::TerminalId(uuid::Uuid::nil()),
+                cols: 80,
+                rows: 24,
+                created_at_unix_ms: 1,
+                label: None,
+                attached_clients: 1,
+            },
+        ));
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "TerminalCreated",
+                "info": {
+                    "terminal": uuid::Uuid::nil().to_string(),
+                    "cols": 80,
+                    "rows": 24,
+                    "created_at_unix_ms": 1,
+                    "label": null,
+                    "attached_clients": 1,
+                },
+            })
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    fn event_to_js_serializes_plain_js_objects() {
+        let value = event_to_js(&ClientEvent::Connecting).expect("serialize event");
+
+        assert!(js_sys::Reflect::has(&value, &JsValue::from_str("kind")).unwrap_or(false));
+    }
+
+    #[test]
+    fn terminal_output_event_serializes_for_web_bridge() {
+        let value = event_to_json_value(&ClientEvent::TerminalOutput {
+            terminal_id: cli_pocket_proto::TerminalId(uuid::Uuid::nil()),
+            stream_seq: cli_pocket_proto::StreamSeq(7),
+            bytes: Bytes::from_static(b"hi"),
+        });
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "TerminalOutput",
+                "terminal_id": uuid::Uuid::nil().to_string(),
+                "stream_seq": 7,
+                "bytes_b64": "aGk=",
+            })
+        );
+    }
+
+    #[test]
+    fn terminal_exited_event_serializes_for_web_bridge() {
+        let value = event_to_json_value(&ClientEvent::TerminalExited {
+            terminal_id: cli_pocket_proto::TerminalId(uuid::Uuid::nil()),
+            info: cli_pocket_proto::ExitInfo {
+                code: Some(0),
+                signal: None,
+                at_unix_ms: 2,
+            },
+        });
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "TerminalExited",
+                "terminal_id": uuid::Uuid::nil().to_string(),
+                "info": {
+                    "code": 0,
+                    "signal": null,
+                    "at_unix_ms": 2,
+                },
+            })
+        );
     }
 }
 
@@ -426,7 +507,15 @@ fn parse_resume_token(value: Option<&str>) -> Result<Option<ResumeToken>, JsValu
 }
 
 fn event_to_js(event: &ClientEvent) -> Result<JsValue, JsValue> {
-    let value = match event {
+    let value = event_to_json_value(event);
+
+    value
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&format!("serialize event: {e}")))
+}
+
+fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
+    match event {
         ClientEvent::Connecting => serde_json::json!({ "kind": "Connecting" }),
         ClientEvent::Connected { session_id } => {
             serde_json::json!({ "kind": "Connected", "session_id": session_id.0.to_string() })
@@ -438,18 +527,40 @@ fn event_to_js(event: &ClientEvent) -> Result<JsValue, JsValue> {
                 "reason": reason,
             })
         }
-        ClientEvent::TerminalCreated(_)
-        | ClientEvent::TerminalOutput { .. }
-        | ClientEvent::TerminalExited { .. } => {
-            serde_json::json!({ "kind": "Error", "message": "event serialization not yet implemented" })
-        }
+        ClientEvent::TerminalCreated(info) => serde_json::json!({
+            "kind": "TerminalCreated",
+            "info": {
+                "terminal": info.terminal.0.to_string(),
+                "cols": info.cols,
+                "rows": info.rows,
+                "created_at_unix_ms": info.created_at_unix_ms,
+                "label": info.label,
+                "attached_clients": info.attached_clients,
+            },
+        }),
+        ClientEvent::TerminalOutput {
+            terminal_id,
+            stream_seq,
+            bytes,
+        } => serde_json::json!({
+            "kind": "TerminalOutput",
+            "terminal_id": terminal_id.0.to_string(),
+            "stream_seq": stream_seq.0,
+            "bytes_b64": BASE64.encode(bytes),
+        }),
+        ClientEvent::TerminalExited { terminal_id, info } => serde_json::json!({
+            "kind": "TerminalExited",
+            "terminal_id": terminal_id.0.to_string(),
+            "info": {
+                "code": info.code,
+                "signal": info.signal,
+                "at_unix_ms": info.at_unix_ms,
+            },
+        }),
         ClientEvent::Error(message) => {
             serde_json::json!({ "kind": "Error", "message": message })
         }
-    };
-
-    serde_wasm_bindgen::to_value(&value)
-        .map_err(|e| JsValue::from_str(&format!("serialize event: {e}")))
+    }
 }
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {

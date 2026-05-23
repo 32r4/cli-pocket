@@ -161,6 +161,60 @@ describe("WebBridge", () => {
     });
   });
 
+  test("yields validated wasm terminal events", async () => {
+    const terminalInfo = {
+      terminal: "terminal-1",
+      cols: 80,
+      rows: 24,
+      created_at_unix_ms: 1,
+      label: null,
+      attached_clients: 1,
+    };
+    const exitInfo = {
+      code: 0,
+      signal: null,
+      at_unix_ms: 2,
+    };
+    const client = createClient({
+      next_event: vi
+        .fn()
+        .mockResolvedValueOnce({
+          kind: "TerminalCreated",
+          info: terminalInfo,
+        })
+        .mockResolvedValueOnce({
+          kind: "TerminalOutput",
+          terminal_id: "terminal-1",
+          stream_seq: 1,
+          bytes_b64: "SGk=",
+        })
+        .mockResolvedValueOnce({
+          kind: "TerminalExited",
+          terminal_id: "terminal-1",
+          info: exitInfo,
+        })
+        .mockResolvedValueOnce(null),
+    });
+    const iterator = new WebBridge(client).events()[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({
+      value: { kind: "TerminalCreated", info: terminalInfo },
+      done: false,
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      value: {
+        kind: "TerminalOutput",
+        terminal_id: "terminal-1",
+        stream_seq: 1,
+        bytes_b64: "SGk=",
+      },
+      done: false,
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      value: { kind: "TerminalExited", terminal_id: "terminal-1", info: exitInfo },
+      done: false,
+    });
+  });
   test("rejects invalid wasm events", async () => {
     const client = createClient({
       next_event: vi.fn(async () => ({ kind: "Connected" })),
