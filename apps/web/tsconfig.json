@@ -10,10 +10,16 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
+      "@/*": ["../../webview/terminal/src/*"],
+      "@web/*": ["src/*"],
       "@terminal/*": ["../../webview/terminal/src/*"]
     }
   },
-  "include": ["src", "src/env.d.ts"]
+  "include": [
+    "src",
+    "src/env.d.ts",
+    "../../webview/terminal/src/types/cli-pocket-client-core-wasm.d.ts"
+  ]
 }
