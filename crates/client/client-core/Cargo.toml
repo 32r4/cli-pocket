@@ -22,6 +22,7 @@ serde_json   = { workspace = true }
 snow         = { workspace = true }
 thiserror    = { workspace = true }
 tracing      = { workspace = true }
+uuid         = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cli-pocket-transport = { path = "../../shared/transport" }

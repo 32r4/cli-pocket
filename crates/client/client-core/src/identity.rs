@@ -1,7 +1,8 @@
-use cli_pocket_crypto::{Identity, KeyPair, Secret};
+use cli_pocket_crypto::{KeyPair, Secret};
 use cli_pocket_proto::ClientId;
 use serde::{Deserialize, Serialize};
 use snow::resolvers::{CryptoResolver, DefaultResolver};
+use uuid::Builder as UuidBuilder;
 
 const KEYPAIR_KEY: &str = "cli-pocket/identity/v1/keypair";
 const CLIENT_ID_KEY: &str = "cli-pocket/identity/v1/client-id";
@@ -46,7 +47,7 @@ impl ClientIdentity {
         let mut private = [0_u8; 32];
         rng.fill(&mut private);
         let keypair = keypair_from_private(private)?;
-        let client_id = ClientId(Identity::from_keypair(&keypair).host_id);
+        let client_id = generate_client_id(rng);
 
         persist(kv, &keypair, client_id).await?;
 
@@ -148,4 +149,10 @@ fn keypair_from_private(private: [u8; 32]) -> crate::ClientResult<KeyPair> {
         public,
         secret: Secret::new(private),
     })
+}
+
+fn generate_client_id<R: crate::Rng>(rng: &R) -> ClientId {
+    let mut bytes = [0_u8; 16];
+    rng.fill(&mut bytes);
+    ClientId(UuidBuilder::from_random_bytes(bytes).into_uuid())
 }

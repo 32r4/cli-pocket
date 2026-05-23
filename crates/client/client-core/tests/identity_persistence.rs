@@ -71,6 +71,19 @@ async fn first_run_uses_injected_rng_for_private_key() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn first_run_uses_injected_rng_for_client_id() {
+    let rng = FixedRng { byte: 12 };
+    let id1 = ClientIdentity::load_or_create(&MemKv::default(), &rng)
+        .await
+        .unwrap();
+    let id2 = ClientIdentity::load_or_create(&MemKv::default(), &rng)
+        .await
+        .unwrap();
+
+    assert_eq!(id1.client_id, id2.client_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn export_then_import_into_fresh_kv() {
     let kv1 = MemKv::default();
     let rng = FixedRng { byte: 13 };
