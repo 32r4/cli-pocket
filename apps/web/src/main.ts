@@ -4,8 +4,8 @@ import "./styles/web.css";
 async function boot() {
   const root = document.getElementById("root")!;
   root.textContent = "loading…";
-  // PairingFlow lands in Task I7. For the skeleton, show a placeholder.
-  root.textContent = "cli-pocket web app — pairing UI lands in I7";
+  const { startWebApp } = await import("./pairing/PairingFlow");
+  await startWebApp(root);
 }
 
 boot().catch((e) => {
