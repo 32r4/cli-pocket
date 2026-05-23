@@ -12,6 +12,7 @@ members = [
     "crates/client/client-core",
     "crates/client/client-core-wasm",
     "crates/client/tauri-bindings",
+    "apps/desktop/src-tauri",
 ]
 
 [workspace.package]

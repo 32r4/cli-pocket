@@ -21,7 +21,7 @@ tokio-tungstenite = { workspace = true }
 axum = { version = "=0.7.9", features = ["ws", "macros"] }
 tower = "0.5"
 hyper = "1"
-hyper-util = { version = "=0.1.10", features = ["server"] }
+hyper-util = { version = "0.1", features = ["server"] }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
