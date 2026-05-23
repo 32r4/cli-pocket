@@ -78,6 +78,10 @@ export class App {
     await this.eventLoop?.catch(() => undefined);
   }
 
+  showError(message: string): void {
+    this.setState({ error: message });
+  }
+
   private createTerminalParams(): CreateTerminalParams {
     return this.renderer.proposeDimensions() ?? { cols: 80, rows: 24 };
   }
