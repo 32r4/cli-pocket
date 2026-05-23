@@ -1,0 +1,226 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (without leading v)"
+        required: true
+
+jobs:
+  build:
+    name: build (${{ matrix.os }} / ${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            kinds: "daemon,relay,desktop,web"
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            kinds: "daemon,relay"
+          - os: macos-14
+            target: x86_64-apple-darwin
+            kinds: "daemon,relay,desktop"
+          - os: macos-14
+            target: aarch64-apple-darwin
+            kinds: "daemon,relay,desktop,mobile-ios"
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            kinds: "daemon,relay,desktop"
+          - os: ubuntu-22.04
+            target: android
+            kinds: "mobile-android"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive VERSION
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'android' && '' || matrix.target }}
+
+      - name: Add cross-linker (linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+        if: contains(matrix.kinds, 'desktop') || contains(matrix.kinds, 'web') || contains(matrix.kinds, 'mobile')
+
+      - name: Install Tauri prerequisites (linux)
+        if: runner.os == 'Linux' && (contains(matrix.kinds, 'desktop') || contains(matrix.kinds, 'mobile-android'))
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libssl-dev pkg-config librsvg2-dev
+
+      - name: Install wasm-pack
+        if: contains(matrix.kinds, 'web')
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install tauri-cli
+        if: contains(matrix.kinds, 'desktop') || contains(matrix.kinds, 'mobile-android') || contains(matrix.kinds, 'mobile-ios')
+        run: cargo install tauri-cli --version "^2.1" --locked
+
+      - name: Install minisign
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   sudo apt-get install -y minisign ;;
+            macOS)   brew install minisign ;;
+            Windows) choco install minisign -y ;;
+          esac
+
+      - name: Materialise signing key
+        if: secrets.MINISIGN_SECRET_KEY != ''
+        shell: bash
+        env:
+          KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          printf '%s' "$KEY" > cli-pocket-minisign.key
+          chmod 600 cli-pocket-minisign.key
+
+      - name: Build daemon
+        if: contains(matrix.kinds, 'daemon')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: bash scripts/release/build-daemon.sh
+
+      - name: Build relay
+        if: contains(matrix.kinds, 'relay')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: bash scripts/release/build-relay.sh
+
+      - name: Build desktop
+        if: contains(matrix.kinds, 'desktop')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAURI_BUNDLES: ${{ runner.os == 'Linux' && 'deb,rpm,appimage' || runner.os == 'macOS' && 'dmg,app' || 'msi' }}
+        shell: bash
+        run: bash scripts/release/build-desktop.sh
+
+      - name: Build web
+        if: contains(matrix.kinds, 'web')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        shell: bash
+        run: bash scripts/release/build-web.sh
+
+      - name: Setup Java + Android SDK
+        if: contains(matrix.kinds, 'mobile-android')
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android NDK
+        if: contains(matrix.kinds, 'mobile-android')
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: Build mobile (android)
+        if: contains(matrix.kinds, 'mobile-android')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        shell: bash
+        run: bash scripts/release/build-mobile-android.sh
+
+      - name: Build mobile (ios)
+        if: contains(matrix.kinds, 'mobile-ios')
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        shell: bash
+        run: bash scripts/release/build-mobile-ios.sh
+
+      - name: Sign artifacts
+        if: secrets.MINISIGN_SECRET_KEY != ''
+        env:
+          MINISIGN_KEY_FILE: cli-pocket-minisign.key
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        shell: bash
+        run: bash scripts/release/sign.sh dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: aggregated/
+
+      - name: Flatten
+        run: |
+          mkdir -p dist
+          find aggregated -type f -exec cp -n {} dist/ \;
+          ls -lh dist/
+
+      - name: Generate SHA256SUMS
+        run: bash scripts/release/sha256sums.sh dist/
+
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - name: Sign SHA256SUMS
+        env:
+          MINISIGN_KEY_FILE: cli-pocket-minisign.key
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          printf '%s' "$KEY" > cli-pocket-minisign.key
+          chmod 600 cli-pocket-minisign.key
+          echo "$MINISIGN_PASSWORD" | minisign -S -s cli-pocket-minisign.key -m dist/SHA256SUMS -t "cli-pocket release"
+
+      - name: Verify everything
+        run: |
+          curl -fsSL -o cli-pocket-minisign.pub https://raw.githubusercontent.com/${{ github.repository }}/main/docs/release/PUBLIC_KEY.md \
+            && true # cleaning the markdown wrap is done by the next step
+          # Extract the inline `untrusted comment: ...\n<base64>` block from the doc.
+          awk '/```text/{flag=1;next}/```/{flag=0}flag' cli-pocket-minisign.pub > tmp.pub && mv tmp.pub cli-pocket-minisign.pub
+          MINISIGN_PUB_FILE=cli-pocket-minisign.pub bash scripts/release/verify.sh dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            dist/*
+          body_path: docs/release/VERIFY.md
