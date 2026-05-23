@@ -125,8 +125,36 @@ async fn run_connection_post_handshake<T: Transport>(
     let mut stream_map: HashMap<StreamId, AttachedStream> = HashMap::new();
     let mut next_local_stream_id = 1u32;
 
+    // Subscribe to revocation updates so we can drop a live session as soon as
+    // its `client_id` is revoked. `watch::Receiver::changed()` resolves after
+    // any send into the channel, so we re-check `is_revoked` against the
+    // current set rather than trusting the changed signal alone.
+    let mut rev_rx = deps.client_db.watch_revocations();
+
     loop {
-        let frame = chan.recv_frame().await?;
+        let frame = tokio::select! {
+            biased;
+            res = rev_rx.changed() => {
+                // The watch sender is owned by `ClientDb`, which lives as long
+                // as `deps`; a recv error here means it was dropped (shutdown).
+                if res.is_err() {
+                    return Ok(());
+                }
+                if deps.client_db.is_revoked(&client_id).await {
+                    // Best-effort Bye; if the transport is already gone we
+                    // still want to tear down cleanly.
+                    let _ = chan
+                        .send_frame(&Frame::body(FrameBody::Bye {
+                            reason: ByeReason::Revoked,
+                        }))
+                        .await;
+                    info!(?client_id, "client revoked; closing live session");
+                    return Ok(());
+                }
+                continue;
+            }
+            frame = chan.recv_frame() => frame?,
+        };
         match frame.body {
             // ---- Lifecycle requests ----
             FrameBody::TerminalCreate { request_id, params } => {
