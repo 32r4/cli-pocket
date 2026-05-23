@@ -75,8 +75,12 @@ vte            = "0.13"
 portable-pty   = "0.8"
 clap           = { version = "4", features = ["derive", "env"] }
 
+# Platform directories (XDG / macOS / Windows data dirs)
+directories    = "5"
+
 # Dev-only (not in regular deps)
 proptest       = "1"
+tempfile       = "3"
 
 [profile.release]
 codegen-units = 1
