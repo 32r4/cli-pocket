@@ -60,6 +60,7 @@ getrandom      = { version = "0.2", features = ["js"] }
 tokio              = { version = "1", features = ["rt", "macros", "sync", "time", "io-util", "net"] }
 tokio-tungstenite  = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 futures-util       = "0.3"
+futures-channel    = { version = "0.3", features = ["sink"] }
 async-trait        = "0.1"
 
 # Errors / logging / id

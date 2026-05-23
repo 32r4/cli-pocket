@@ -591,6 +591,8 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "cli-pocket-client-core",
+ "cli-pocket-proto",
+ "futures-channel",
  "futures-util",
  "getrandom 0.2.17",
  "tokio",

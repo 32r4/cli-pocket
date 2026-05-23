@@ -14,10 +14,12 @@ workspace = true
 
 [dependencies]
 cli-pocket-client-core = { path = "../client-core" }
+cli-pocket-proto = { path = "../../shared/proto" }
 
 async-trait = { workspace = true }
 base64 = { workspace = true }
 directories = { workspace = true }
+futures-channel = { workspace = true }
 futures-util = { workspace = true, features = ["sink"] }
 getrandom = { workspace = true }
 serde = { workspace = true }
