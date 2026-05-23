@@ -8,8 +8,11 @@
 //!
 mod clock_perf;
 mod kv_idb;
+mod pairing;
 mod rng_crypto;
 mod ws_transport;
+
+pub use pairing::*;
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};

@@ -17,7 +17,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 cli-pocket-client-core = { path = "../client-core" }
+cli-pocket-crypto = { path = "../../shared/crypto" }
 cli-pocket-proto = { path = "../../shared/proto" }
+chacha20poly1305 = "0.10"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
