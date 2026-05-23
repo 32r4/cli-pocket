@@ -440,6 +440,7 @@ dependencies = [
  "gloo-timers",
  "hex",
  "js-sys",
+ "postcard",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

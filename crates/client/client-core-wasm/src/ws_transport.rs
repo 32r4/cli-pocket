@@ -54,13 +54,13 @@ impl WsTransport {
         ws.set_binary_type(BinaryType::Arraybuffer);
 
         // Resolve once when `onopen` fires.
-        let (open_tx, open_rx) = oneshot::channel::<()>();
+        let (open_tx, open_rx) = oneshot::channel::<ClientResult<()>>();
         let open_tx = Rc::new(RefCell::new(Some(open_tx)));
         let on_open = {
             let open_tx = Rc::clone(&open_tx);
             Closure::wrap(Box::new(move || {
                 if let Some(tx) = open_tx.borrow_mut().take() {
-                    let _ = tx.send(());
+                    let _ = tx.send(Ok(()));
                 }
             }) as Box<dyn FnMut()>)
         };
@@ -87,7 +87,11 @@ impl WsTransport {
 
         let on_close = {
             let tx = tx.clone();
+            let open_tx = Rc::clone(&open_tx);
             Closure::wrap(Box::new(move |_evt: CloseEvent| {
+                if let Some(tx) = open_tx.borrow_mut().take() {
+                    let _ = tx.send(Err(ClientError::Transport("ws closed before open".into())));
+                }
                 // `Ok(None)` matches the `Option<Vec<u8>>` end-of-stream
                 // contract on `Transport::recv`.
                 let _ = tx.unbounded_send(Ok(None));
@@ -97,7 +101,11 @@ impl WsTransport {
 
         let on_error = {
             let tx = tx.clone();
+            let open_tx = Rc::clone(&open_tx);
             Closure::wrap(Box::new(move |_evt: ErrorEvent| {
+                if let Some(tx) = open_tx.borrow_mut().take() {
+                    let _ = tx.send(Err(ClientError::Transport("ws error".into())));
+                }
                 let _ = tx.unbounded_send(Err(ClientError::Transport("ws error".into())));
             }) as Box<dyn FnMut(ErrorEvent)>)
         };
@@ -106,9 +114,13 @@ impl WsTransport {
         // Block until the handshake either succeeds (onopen) or the oneshot
         // sender is dropped (which only happens if the socket errored before
         // `onopen` ran).
-        open_rx
+        let open_result = open_rx
             .await
             .map_err(|_| ClientError::Transport("ws open cancelled".into()))?;
+        if let Err(err) = open_result {
+            clear_handlers(&ws);
+            return Err(err);
+        }
 
         Ok(Self {
             ws,
@@ -119,6 +131,13 @@ impl WsTransport {
             _on_error: on_error,
         })
     }
+}
+
+fn clear_handlers(ws: &WebSocket) {
+    ws.set_onopen(None);
+    ws.set_onmessage(None);
+    ws.set_onclose(None);
+    ws.set_onerror(None);
 }
 
 #[async_trait(?Send)]

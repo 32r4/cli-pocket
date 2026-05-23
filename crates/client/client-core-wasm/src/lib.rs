@@ -6,24 +6,64 @@
 //! [`ClientSession`] plus the four platform adapters
 //! ([`WsTransport`], [`IdbStore`], [`PerfClock`], [`CryptoRng`]).
 //!
-//! The surface is intentionally a stub: per Plan F Task F13 the actual
-//! session wiring (transport factory, identity persistence, event drain
-//! into JS) lands in Plan I once the web UI is the consumer. Each method
-//! either returns a typed "not yet implemented" error or performs the
-//! tiny piece of work that the JS contract genuinely depends on (e.g.
-//! parsing the config JSON in `connect`).
-
 mod clock_perf;
 mod kv_idb;
 mod rng_crypto;
 mod ws_transport;
 
-use cli_pocket_client_core::{ClientEvent, ClientSession};
+use async_trait::async_trait;
+use cli_pocket_client_core::session::SessionSpawner;
+use cli_pocket_client_core::{
+    ClientEvent, ClientIdentity, ClientResult, ClientSession, KeyValueStore, SessionBuilder,
+    SessionConfig, SessionEndpoint,
+};
+use cli_pocket_proto::{Capabilities, ResumeToken};
 use futures_channel::mpsc;
+use futures_util::{future::LocalBoxFuture, StreamExt};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
+
+use crate::clock_perf::PerfClock;
+use crate::kv_idb::IdbStore;
+use crate::rng_crypto::CryptoRng;
+use crate::ws_transport::WsTransport;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    async fn connect_surfaces_transport_errors_as_event() {
+        let client = CliPocketClient::new().expect("construct client");
+
+        client
+            .connect(
+                serde_json::json!({
+                    "endpoint_url": "ws://127.0.0.1:9/ws/client",
+                    "server_public_hex": "00".repeat(32),
+                })
+                .to_string()
+                .into(),
+            )
+            .await
+            .expect("connect should start session");
+
+        let _connecting = client.next_event().await.expect("connecting event");
+        let event = client.next_event().await.expect("disconnect event");
+        let kind = js_sys::Reflect::get(&event, &JsValue::from_str("kind"))
+            .expect("kind property")
+            .as_string()
+            .expect("kind string");
+
+        assert_eq!(kind, "Disconnected");
+    }
+}
 
 #[wasm_bindgen(start)]
 pub fn _start() {
@@ -38,8 +78,10 @@ pub fn _start() {
 /// borrow without lifetime grief.
 #[wasm_bindgen]
 pub struct CliPocketClient {
-    inner: Rc<RefCell<Option<ClientSession>>>,
+    inner: Rc<RefCell<Option<Rc<ClientSession>>>>,
     events: Rc<RefCell<Option<mpsc::Receiver<ClientEvent>>>>,
+    kv: Rc<RefCell<Option<Rc<IdbStore>>>>,
+    identity: Rc<RefCell<Option<ClientIdentity>>>,
 }
 
 /// JSON config consumed by [`CliPocketClient::connect`].
@@ -50,10 +92,13 @@ pub struct CliPocketClient {
 #[derive(Deserialize)]
 struct JsConfig {
     /// `wss://…` (direct) or `wss://relay/...` (relay-mediated).
+    #[serde(alias = "endpointUrl")]
     endpoint_url: String,
     /// Hex-encoded 32-byte X25519 server static public key.
+    #[serde(alias = "serverPublicHex")]
     server_public_hex: String,
     /// Optional hex-encoded resume token from a previous session.
+    #[serde(default, alias = "resumeTokenHex")]
     resume_token_hex: Option<String>,
 }
 
@@ -67,36 +112,52 @@ impl CliPocketClient {
         Ok(Self {
             inner: Rc::new(RefCell::new(None)),
             events: Rc::new(RefCell::new(None)),
+            kv: Rc::new(RefCell::new(None)),
+            identity: Rc::new(RefCell::new(None)),
         })
     }
 
     /// Open a session against `endpoint_url` using `server_public_hex`
     /// as the Noise-XK responder static key.
     ///
-    /// Validates the config shape eagerly so JS-side mistakes surface at
-    /// the call site. The actual session bring-up (building a
-    /// [`SessionBuilder`] over [`WsTransport`] / [`IdbStore`] /
-    /// [`PerfClock`] / [`CryptoRng`] and storing the resulting
-    /// [`ClientSession`] in `self.inner`) is wired in Plan I.
     #[wasm_bindgen]
-    pub async fn connect(&self, config_json: String) -> Result<(), JsValue> {
-        let cfg: JsConfig = serde_json::from_str(&config_json)
-            .map_err(|e| JsValue::from_str(&format!("config json: {e}")))?;
+    pub async fn connect(&self, config: JsValue) -> Result<(), JsValue> {
+        let cfg = parse_config(config)?;
         let server_public: [u8; 32] = hex::decode(&cfg.server_public_hex)
-            .map_err(|e| JsValue::from_str(&format!("hex: {e}")))?
+            .map_err(|e| JsValue::from_str(&format!("server_public_hex: {e}")))?
             .try_into()
             .map_err(|_| JsValue::from_str("server_public_hex must be 32 bytes"))?;
-        // The resume token (if any) is opaque proto bytes; the codec lives in
-        // `cli-pocket-proto` and will be threaded through `SessionConfig` in
-        // Plan I. We validate the hex shape here so the JS side fails fast.
-        let resume_bytes = cfg
-            .resume_token_hex
-            .as_deref()
-            .map(hex::decode)
-            .transpose()
-            .map_err(|e| JsValue::from_str(&format!("resume hex: {e}")))?;
-        let _ = (cfg.endpoint_url, server_public, resume_bytes);
-        Err(JsValue::from_str("Plan F13 wires this in Plan I"))
+        let resume_token = parse_resume_token(cfg.resume_token_hex.as_deref())?;
+        let kv = self.kv().await?;
+        let identity = self.identity(&kv).await?;
+        let endpoint_url = cfg.endpoint_url.clone();
+        let transport_url = cfg.endpoint_url;
+
+        let builder = SessionBuilder::new(
+            identity,
+            SessionConfig {
+                endpoint: SessionEndpoint::Direct(endpoint_url),
+                server_public,
+                resume_token,
+                capabilities: Capabilities::NONE,
+                backoff: (50, 1_000, 20),
+            },
+            PerfClock,
+            CryptoRng,
+            SharedIdbStore(Rc::clone(&kv)),
+            move || {
+                let url = transport_url.clone();
+                Box::pin(async move {
+                    WsTransport::connect(&url, Some("cli-pocket-relay-client/v1")).await
+                })
+            },
+            WasmSpawner,
+        );
+        let (session, events) = builder.start();
+
+        *self.inner.borrow_mut() = Some(Rc::new(session));
+        *self.events.borrow_mut() = Some(events);
+        Ok(())
     }
 
     /// Spawn a new terminal in the current session.
@@ -158,10 +219,15 @@ impl CliPocketClient {
     /// it has the consumer code to validate the contract.
     #[wasm_bindgen]
     pub async fn next_event(&self) -> Result<JsValue, JsValue> {
-        if self.events.borrow().is_none() {
-            return Err(JsValue::from_str("not connected"));
-        }
-        Err(JsValue::from_str("not yet implemented"))
+        let mut events = self
+            .events
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| JsValue::from_str("not connected"))?;
+        let event = events.next().await;
+        *self.events.borrow_mut() = Some(events);
+
+        event.map_or(Ok(JsValue::NULL), |event| event_to_js(&event))
     }
 
     /// Export the persisted identity as JSON bytes.
@@ -178,4 +244,107 @@ impl CliPocketClient {
     pub async fn import_identity(&self, _bytes: Vec<u8>) -> Result<(), JsValue> {
         Err(JsValue::from_str("not yet implemented"))
     }
+}
+
+impl CliPocketClient {
+    async fn kv(&self) -> Result<Rc<IdbStore>, JsValue> {
+        if let Some(kv) = self.kv.borrow().as_ref() {
+            return Ok(Rc::clone(kv));
+        }
+
+        let kv = Rc::new(IdbStore::open().await.map_err(js_error)?);
+        *self.kv.borrow_mut() = Some(Rc::clone(&kv));
+        Ok(kv)
+    }
+
+    async fn identity(&self, kv: &IdbStore) -> Result<ClientIdentity, JsValue> {
+        if let Some(identity) = self.identity.borrow().as_ref() {
+            return Ok(identity.clone());
+        }
+
+        let identity = ClientIdentity::load_or_create(kv, &CryptoRng)
+            .await
+            .map_err(js_error)?;
+        *self.identity.borrow_mut() = Some(identity.clone());
+        Ok(identity)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct WasmSpawner;
+
+impl SessionSpawner for WasmSpawner {
+    fn spawn(&self, fut: LocalBoxFuture<'static, ()>) {
+        spawn_local(fut);
+    }
+}
+
+#[derive(Clone)]
+struct SharedIdbStore(Rc<IdbStore>);
+
+#[async_trait(?Send)]
+impl KeyValueStore for SharedIdbStore {
+    async fn get(&self, key: &str) -> ClientResult<Option<Vec<u8>>> {
+        self.0.get(key).await
+    }
+
+    async fn put(&self, key: &str, value: &[u8]) -> ClientResult<()> {
+        self.0.put(key, value).await
+    }
+
+    async fn delete(&self, key: &str) -> ClientResult<()> {
+        self.0.delete(key).await
+    }
+}
+
+fn parse_config(config: JsValue) -> Result<JsConfig, JsValue> {
+    if let Some(config_json) = config.as_string() {
+        serde_json::from_str(&config_json)
+            .map_err(|e| JsValue::from_str(&format!("config json: {e}")))
+    } else {
+        serde_wasm_bindgen::from_value(config)
+            .map_err(|e| JsValue::from_str(&format!("config object: {e}")))
+    }
+}
+
+fn parse_resume_token(value: Option<&str>) -> Result<Option<ResumeToken>, JsValue> {
+    let Some(value) = value.filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let bytes =
+        hex::decode(value).map_err(|e| JsValue::from_str(&format!("resume_token_hex: {e}")))?;
+    postcard::from_bytes(&bytes)
+        .map(Some)
+        .map_err(|e| JsValue::from_str(&format!("resume_token_hex: {e}")))
+}
+
+fn event_to_js(event: &ClientEvent) -> Result<JsValue, JsValue> {
+    let value = match event {
+        ClientEvent::Connecting => serde_json::json!({ "kind": "Connecting" }),
+        ClientEvent::Connected { session_id } => {
+            serde_json::json!({ "kind": "Connected", "session_id": session_id.0.to_string() })
+        }
+        ClientEvent::Disconnected { will_retry, reason } => {
+            serde_json::json!({
+                "kind": "Disconnected",
+                "will_retry": will_retry,
+                "reason": reason,
+            })
+        }
+        ClientEvent::TerminalCreated(_)
+        | ClientEvent::TerminalOutput { .. }
+        | ClientEvent::TerminalExited { .. } => {
+            serde_json::json!({ "kind": "Error", "message": "event serialization not yet implemented" })
+        }
+        ClientEvent::Error(message) => {
+            serde_json::json!({ "kind": "Error", "message": message })
+        }
+    };
+
+    serde_wasm_bindgen::to_value(&value)
+        .map_err(|e| JsValue::from_str(&format!("serialize event: {e}")))
+}
+
+fn js_error(error: impl std::fmt::Display) -> JsValue {
+    JsValue::from_str(&error.to_string())
 }
