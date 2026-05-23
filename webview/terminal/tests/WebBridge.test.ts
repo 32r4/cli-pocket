@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { WebBridge, type WasmClient } from "@/bridge/WebBridge";
+import initUnavailableWasm, {
+  CliPocketClient as UnavailableWasmClient,
+} from "@/bridge/wasmUnavailable";
 
 function createClient(overrides: Partial<WasmClient> = {}): WasmClient {
   return {
@@ -19,7 +22,7 @@ function createClient(overrides: Partial<WasmClient> = {}): WasmClient {
 }
 
 describe("WebBridge", () => {
-  test("uses a bundler-visible wasm package import", async () => {
+  test("keeps the wasm package import visible to the bundler", async () => {
     const source = await readFile(
       fileURLToPath(new URL("../src/bridge/WebBridge.ts", import.meta.url)),
       "utf8",
@@ -27,6 +30,24 @@ describe("WebBridge", () => {
 
     expect(source).toContain('import("cli-pocket-client-core-wasm")');
     expect(source).not.toContain("@vite-ignore");
+  });
+
+  test("web mode aliases the wasm package to the unavailable fallback", async () => {
+    const source = await readFile(
+      fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
+      "utf8",
+    );
+
+    expect(source).toContain('"cli-pocket-client-core-wasm"');
+    expect(source).toContain('"src/bridge/wasmUnavailable.ts"');
+    expect(source).not.toContain("@vite-ignore");
+  });
+
+  test("unavailable wasm fallback throws a clear build instruction", async () => {
+    await expect(initUnavailableWasm()).rejects.toThrow("run just build-wasm");
+    await expect(new UnavailableWasmClient().connect("{}")).rejects.toThrow(
+      "cli-pocket-client-core-wasm package has not been built",
+    );
   });
 
   test("serializes connect and terminal params to wasm JSON", async () => {
