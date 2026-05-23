@@ -478,6 +478,7 @@ dependencies = [
  "cli-pocket-daemon-core",
  "cli-pocket-proto",
  "hex",
+ "rand",
  "tokio",
  "toml",
  "tracing",
@@ -490,6 +491,7 @@ name = "cli-pocket-daemon-core"
 version = "0.0.0"
 dependencies = [
  "bytes",
+ "chacha20poly1305",
  "cli-pocket-crypto",
  "cli-pocket-proto",
  "cli-pocket-pty",

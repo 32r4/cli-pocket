@@ -44,6 +44,18 @@ enum Cmd {
         #[arg(long)]
         yes_i_understand_this_breaks_all_clients: bool,
     },
+    /// Generate a 6-digit pairing code and wait for one client.
+    Pair {
+        /// Label shown for the new client in `list-clients`.
+        #[arg(long, default_value = "unknown")]
+        label: String,
+        /// Bind for the one-shot pairing listener.
+        #[arg(long, default_value = "127.0.0.1:7843")]
+        bind: std::net::SocketAddr,
+        /// Use this exact code instead of generating one (for scripted pairing).
+        #[arg(long)]
+        code: Option<String>,
+    },
     /// Print a sample config TOML to stdout.
     PrintSampleConfig,
 }
@@ -117,10 +129,28 @@ async fn main() -> Result<()> {
             let new = load_or_create(p).context("generate new identity")?;
             println!("new host_id = {}", new.host_id.0);
         }
+        Cmd::Pair { label, bind, code } => {
+            let code = code.unwrap_or_else(generate_pair_code);
+            println!("Pairing code: {code}");
+            println!("Have the client connect to {bind} and enter this code.");
+            let daemon = Daemon::boot(cfg).await.context("boot daemon")?;
+            let record = daemon
+                .run_pairing(code, label, bind)
+                .await
+                .context("run pairing")?;
+            println!("paired: {} ({})", record.label, record.client_id.0);
+        }
         Cmd::PrintSampleConfig => unreachable!("handled above"),
     }
 
     Ok(())
+}
+
+fn generate_pair_code() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let n: u32 = rng.gen_range(0..1_000_000);
+    format!("{n:06}")
 }
 
 async fn run_start(cfg: DaemonConfig) -> Result<()> {

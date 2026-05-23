@@ -21,6 +21,7 @@ cli-pocket-proto       = { path = "../../shared/proto" }
 anyhow             = "1"
 clap               = { workspace = true }
 hex                = "0.4"
+rand               = "0.8"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 toml               = "=0.8.23"
 tracing            = { workspace = true }
