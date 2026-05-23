@@ -12,6 +12,7 @@ mod rng_crypto;
 mod ws_transport;
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bytes::Bytes;
 use cli_pocket_client_core::session::SessionSpawner;
 use cli_pocket_client_core::{
@@ -305,19 +306,52 @@ impl CliPocketClient {
         event.map_or(Ok(JsValue::NULL), |event| event_to_js(&event))
     }
 
-    /// Export the persisted identity as JSON bytes.
+    /// Export the loaded identity as a base64-encoded string.
     ///
-    /// Mirrors [`ClientIdentity::export_serialized`]; round-trips through
-    /// [`import_identity`](Self::import_identity).
+    /// The returned value can be stored externally and re-imported with
+    /// [`import_identity`](Self::import_identity).  Requires that an identity
+    /// has already been loaded (e.g. via [`connect`](Self::connect)).
     #[wasm_bindgen]
-    pub async fn export_identity(&self) -> Result<Vec<u8>, JsValue> {
-        Err(JsValue::from_str("not yet implemented"))
+    pub fn export_identity(&self) -> Result<String, JsValue> {
+        let identity_ref = self.identity.borrow();
+        let id = identity_ref
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("no identity loaded"))?;
+        let bytes = id.export_serialized().map_err(js_error)?;
+        Ok(BASE64.encode(&bytes))
     }
 
-    /// Import a previously exported identity.
+    /// Import a base64-encoded identity blob and persist it to the KV store.
+    ///
+    /// After a successful import the in-memory identity cache is updated so
+    /// subsequent calls to [`connect`](Self::connect) use the imported
+    /// identity without reloading from storage.
     #[wasm_bindgen]
-    pub async fn import_identity(&self, _bytes: Vec<u8>) -> Result<(), JsValue> {
-        Err(JsValue::from_str("not yet implemented"))
+    pub async fn import_identity(&self, blob: String) -> Result<(), JsValue> {
+        let raw = BASE64
+            .decode(blob.as_bytes())
+            .map_err(|e| JsValue::from_str(&format!("base64 decode: {e}")))?;
+        let kv = self.kv().await?;
+        ClientIdentity::import_serialized(kv.as_ref(), &raw)
+            .await
+            .map_err(js_error)?;
+        // Reload from KV so the cached identity matches what was just persisted.
+        let identity = ClientIdentity::load_or_create(kv.as_ref(), &CryptoRng)
+            .await
+            .map_err(js_error)?;
+        *self.identity.borrow_mut() = Some(identity);
+        Ok(())
+    }
+
+    /// Close the active session and drop all session state.
+    ///
+    /// Safe to call when not connected; subsequent [`connect`](Self::connect)
+    /// calls will start a fresh session.
+    #[wasm_bindgen]
+    pub fn close(&self) -> Result<(), JsValue> {
+        self.inner.borrow_mut().take();
+        self.events.borrow_mut().take();
+        Ok(())
     }
 }
 
