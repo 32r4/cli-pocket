@@ -12,12 +12,13 @@ mod rng_crypto;
 mod ws_transport;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use cli_pocket_client_core::session::SessionSpawner;
 use cli_pocket_client_core::{
     ClientEvent, ClientIdentity, ClientResult, ClientSession, KeyValueStore, SessionBuilder,
     SessionConfig, SessionEndpoint,
 };
-use cli_pocket_proto::{Capabilities, ResumeToken};
+use cli_pocket_proto::{Capabilities, ResumeToken, TerminalCreateParams};
 use futures_channel::mpsc;
 use futures_util::{future::LocalBoxFuture, StreamExt};
 use serde::Deserialize;
@@ -82,6 +83,26 @@ pub struct CliPocketClient {
     events: Rc<RefCell<Option<mpsc::Receiver<ClientEvent>>>>,
     kv: Rc<RefCell<Option<Rc<IdbStore>>>>,
     identity: Rc<RefCell<Option<ClientIdentity>>>,
+}
+
+/// JSON params consumed by [`CliPocketClient::create_terminal`].
+///
+/// Maps 1:1 onto [`TerminalCreateParams`]; all optional fields default to
+/// sensible empty values so the JS caller only needs to supply `cols`/`rows`.
+#[derive(Deserialize)]
+struct JsCreateTerminalParams {
+    cols: u16,
+    rows: u16,
+    #[serde(default)]
+    cwd: Option<String>,
+    /// Shell / command argv. Defaults to empty (server picks the default shell).
+    #[serde(default)]
+    cmd: Vec<String>,
+    /// Environment overrides as `[[key, value], ...]`.
+    #[serde(default)]
+    env: Vec<(String, String)>,
+    #[serde(default)]
+    scrollback_bytes: Option<u32>,
 }
 
 /// JSON config consumed by [`CliPocketClient::connect`].
@@ -162,53 +183,107 @@ impl CliPocketClient {
 
     /// Spawn a new terminal in the current session.
     ///
-    /// `params_json` is a JSON-serialized [`TerminalCreateParams`]. The
-    /// JS side already speaks JSON; we keep the wire as JSON rather than
-    /// `Uint8Array` so xterm.js can call this with a plain object.
+    /// `params_json` is a JSON object with fields:
+    ///   `cols`, `rows`, `cwd?`, `cmd?` (string[]), `env?` ([[k,v],...]),
+    ///   `scrollback_bytes?`.
     #[wasm_bindgen]
-    pub async fn create_terminal(&self, _params_json: String) -> Result<(), JsValue> {
-        let _session = self
+    pub async fn create_terminal(&self, params_json: String) -> Result<(), JsValue> {
+        let session = self
             .inner
             .borrow()
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("not connected"))?;
-        Err(JsValue::from_str("not yet implemented"))
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let js_params: JsCreateTerminalParams = serde_json::from_str(&params_json)
+            .map_err(|e| JsValue::from_str(&format!("params_json: {e}")))?;
+
+        let params = TerminalCreateParams {
+            cols: js_params.cols,
+            rows: js_params.rows,
+            cwd: js_params.cwd,
+            cmd: js_params.cmd,
+            env: js_params.env,
+            scrollback_bytes: js_params.scrollback_bytes,
+        };
+
+        session
+            .create_terminal(params)
+            .await
+            .map_err(js_error)
     }
 
     /// Send raw keystroke bytes to the active terminal.
     ///
-    /// Bytes are copied off the JS heap before the await point, so the
-    /// caller does not need to keep the `Uint8Array` alive.
+    /// `data` is a `Uint8Array` on the JS side; wasm-bindgen copies it into a
+    /// `Vec<u8>` before the await point so the caller does not need to keep
+    /// the original buffer alive.
+    ///
+    /// Note: the `terminal_id` parameter is accepted for future multi-terminal
+    /// support but currently ignored — only the single active terminal is
+    /// addressed (the protocol only supports one at a time).
     #[wasm_bindgen]
-    pub async fn send_input(&self, _data: Vec<u8>) -> Result<(), JsValue> {
-        let _session = self
+    pub async fn send_input(&self, data: Vec<u8>) -> Result<(), JsValue> {
+        let session = self
             .inner
             .borrow()
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("not connected"))?;
-        Err(JsValue::from_str("not yet implemented"))
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let handle = session
+            .terminal()
+            .await
+            .ok_or_else(|| JsValue::from_str("no active terminal"))?;
+
+        handle
+            .write_input(Bytes::from(data))
+            .await
+            .map_err(js_error)
     }
 
     /// Resize the active terminal.
+    ///
+    /// Note: the active terminal is always targeted (single-terminal protocol
+    /// v1); a `terminal_id` parameter will be added when multi-terminal is
+    /// supported.
     #[wasm_bindgen]
-    pub async fn resize(&self, _cols: u16, _rows: u16) -> Result<(), JsValue> {
-        let _session = self
+    pub async fn resize(&self, cols: u16, rows: u16) -> Result<(), JsValue> {
+        let session = self
             .inner
             .borrow()
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("not connected"))?;
-        Err(JsValue::from_str("not yet implemented"))
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let handle = session
+            .terminal()
+            .await
+            .ok_or_else(|| JsValue::from_str("no active terminal"))?;
+
+        handle.resize(cols, rows).await.map_err(js_error)
     }
 
     /// Kill the active terminal.
+    ///
+    /// Note: the active terminal is always targeted (single-terminal protocol
+    /// v1); a `terminal_id` parameter will be added when multi-terminal is
+    /// supported.
     #[wasm_bindgen]
     pub async fn kill(&self) -> Result<(), JsValue> {
-        let _session = self
+        let session = self
             .inner
             .borrow()
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("not connected"))?;
-        Err(JsValue::from_str("not yet implemented"))
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let handle = session
+            .terminal()
+            .await
+            .ok_or_else(|| JsValue::from_str("no active terminal"))?;
+
+        handle.kill().await.map_err(js_error)
     }
 
     /// Await the next [`ClientEvent`].

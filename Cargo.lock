@@ -430,6 +430,7 @@ name = "cli-pocket-client-core-wasm"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "base64",
  "bytes",
  "cli-pocket-client-core",
  "cli-pocket-proto",
