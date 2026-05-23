@@ -172,9 +172,7 @@ impl CliPocketClient {
             SharedIdbStore(Rc::clone(&kv)),
             move || {
                 let url = transport_url.clone();
-                Box::pin(async move {
-                    WsTransport::connect(&url, Some("cli-pocket-relay-client/v1")).await
-                })
+                Box::pin(async move { WsTransport::connect(&url, None).await })
             },
             WasmSpawner,
         );
