@@ -10,6 +10,7 @@ interface Disposable {
 
 interface MockTerminal {
   open: Mock<[container: HTMLElement], void>;
+  focus: Mock<[], void>;
   loadAddon: Mock<[addon: Disposable], void>;
   onData: Mock<[(data: string) => void], Disposable>;
   onResize: Mock<[(size: { cols: number; rows: number }) => void], Disposable>;
@@ -51,6 +52,7 @@ vi.mock("@xterm/xterm", () => ({
   Terminal: vi.fn((): MockTerminal => {
     const terminal: MockTerminal = {
       open: vi.fn(),
+      focus: vi.fn(),
       loadAddon: vi.fn((addon: Disposable) => {
         if (webglOptions.throwOnLoadAddon && webglAddonInstances.includes(addon as MockWebglAddon)) {
           throw new Error("failed to load webgl addon");
@@ -194,6 +196,7 @@ describe("Renderer", () => {
     expect(terminal?.loadAddon).toHaveBeenCalledWith(webglAddon);
     expect(terminal?.unicode.activeVersion).toBe("11");
     expect(terminal?.open).toHaveBeenCalledWith(container);
+    expect(terminal?.focus).toHaveBeenCalledTimes(1);
     expect(fitAddon?.fit).toHaveBeenCalledTimes(1);
 
     resizeObservers[0]?.emit();

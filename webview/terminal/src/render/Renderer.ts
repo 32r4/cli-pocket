@@ -51,6 +51,7 @@ export class Renderer {
     this.terminal.open(container);
     this.loadWebglAddon();
     this.fitAddon.fit();
+    this.terminal.focus?.();
     this.mountedContainer = container;
 
     this.resizeObserver = new ResizeObserver(() => {
