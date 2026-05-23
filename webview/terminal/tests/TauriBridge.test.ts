@@ -24,7 +24,7 @@ describe("TauriBridge", () => {
 
   test("invokes centralized Tauri command names with expected payloads", async () => {
     invoke.mockResolvedValueOnce(undefined);
-    invoke.mockResolvedValueOnce("terminal-1");
+    invoke.mockResolvedValueOnce(undefined);
     invoke.mockResolvedValueOnce(undefined);
     invoke.mockResolvedValueOnce(undefined);
     invoke.mockResolvedValueOnce(undefined);
@@ -48,7 +48,7 @@ describe("TauriBridge", () => {
         env: { TERM: "xterm-256color" },
         scrollbackBytes: 4096,
       }),
-    ).resolves.toBe("terminal-1");
+    ).resolves.toBeUndefined();
     await bridge.sendInput("terminal-1", new Uint8Array([0, 127, 255]));
     await bridge.resize("terminal-1", 100, 40);
     await bridge.kill("terminal-1", "SIGTERM");

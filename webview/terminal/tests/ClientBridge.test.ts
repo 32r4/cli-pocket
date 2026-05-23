@@ -33,6 +33,9 @@ describe("ClientBridge contract", () => {
     expectTypeOf<ClientBridge["events"]>().returns.toEqualTypeOf<
       AsyncIterable<ClientEvent>
     >();
+    expectTypeOf<ClientBridge["createTerminal"]>().returns.toEqualTypeOf<
+      Promise<void>
+    >();
     expectTypeOf<typeof CLIENT_KIND>().toEqualTypeOf<"tauri" | "web">();
   });
 });

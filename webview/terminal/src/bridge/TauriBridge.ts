@@ -48,14 +48,8 @@ export class TauriBridge implements ClientBridge {
     };
   }
 
-  async createTerminal(params: CreateTerminalParams): Promise<TerminalId> {
-    const terminalId = await this.invoke<unknown>(COMMANDS.createTerminal, {
-      params,
-    });
-    if (typeof terminalId !== "string") {
-      throw new Error("Tauri create_terminal returned a non-string terminal id");
-    }
-    return terminalId;
+  async createTerminal(params: CreateTerminalParams): Promise<void> {
+    await this.invokeVoid(COMMANDS.createTerminal, { params });
   }
 
   async sendInput(terminalId: TerminalId, bytes: Uint8Array): Promise<void> {

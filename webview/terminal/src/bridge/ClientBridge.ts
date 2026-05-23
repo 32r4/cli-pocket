@@ -25,7 +25,7 @@ export interface CreateTerminalParams {
 export interface ClientBridge {
   connect(config: ConnectConfig): Promise<void>;
   events(): AsyncIterable<ClientEvent>;
-  createTerminal(params: CreateTerminalParams): Promise<TerminalId>;
+  createTerminal(params: CreateTerminalParams): Promise<void>;
   sendInput(terminalId: TerminalId, bytes: Uint8Array): Promise<void>;
   resize(terminalId: TerminalId, cols: number, rows: number): Promise<void>;
   kill(terminalId: TerminalId, signal: string): Promise<void>;
