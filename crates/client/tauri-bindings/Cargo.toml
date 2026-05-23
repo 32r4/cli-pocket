@@ -30,3 +30,4 @@ tokio-tungstenite = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio-tungstenite = { workspace = true }
