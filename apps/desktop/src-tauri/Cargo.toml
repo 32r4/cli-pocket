@@ -1,0 +1,34 @@
+[package]
+name = "cli-pocket-desktop"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+name = "cli_pocket_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = "=2.6.2"
+
+[dependencies]
+# Pin tauri sibling crates to a coherent Tauri 2.11.2 release bundle.
+# Without the tauri-runtime-wry pin Cargo resolves to 2.9.3, which is
+# internally inconsistent with tauri-runtime 2.11.x and wry 0.55.x.
+tauri = "=2.11.2"
+tauri-runtime-wry = "=2.11.2"
+tauri-plugin-deep-link = "=2.4.9"
+
+cli-pocket-client-core = { path = "../../../crates/client/client-core" }
+cli-pocket-tauri-bindings = { path = "../../../crates/client/tauri-bindings" }
+
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hex = "0.4"
