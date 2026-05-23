@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "wasm:build": "wasm-pack build ../../crates/client/client-core-wasm --target web --release",
+    "build": "npm run wasm:build && tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
