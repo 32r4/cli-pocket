@@ -1,0 +1,16 @@
+[package]
+name = "cli-pocket-tauri-bindings"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Native bindings for cli-pocket-client-core in Tauri apps."
+
+[lints]
+workspace = true
+
+[dependencies]
+cli-pocket-client-core = { path = "../client-core" }

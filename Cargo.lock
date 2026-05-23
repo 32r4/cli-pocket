@@ -585,6 +585,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cli-pocket-tauri-bindings"
+version = "0.0.0"
+dependencies = [
+ "cli-pocket-client-core",
+]
+
+[[package]]
 name = "cli-pocket-transport"
 version = "0.1.0"
 dependencies = [

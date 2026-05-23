@@ -11,6 +11,7 @@ members = [
     "crates/relay/relay-bin",
     "crates/client/client-core",
     "crates/client/client-core-wasm",
+    "crates/client/tauri-bindings",
 ]
 
 [workspace.package]
