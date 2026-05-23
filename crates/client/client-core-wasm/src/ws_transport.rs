@@ -14,8 +14,8 @@ use futures_util::StreamExt;
 use js_sys::ArrayBuffer;
 use std::cell::RefCell;
 use std::rc::Rc;
-use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use web_sys::{BinaryType, CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
 /// Item flowing from the WebSocket event-loop callbacks into `recv()`:

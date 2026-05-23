@@ -10,8 +10,8 @@ use cli_pocket_crypto::{KeyPair, NoiseResponder, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
     AnchorState, Capabilities, CharsetState, ClientId, ClientKind, Color, Frame, FrameBody,
-    HelloOk, MouseMode, ServerInfo, SessionId, SgrAttrs, Snapshot, StreamId, StreamSeq,
-    TerminalId, TerminalInfo, TerminalModes, PROTOCOL_VERSION,
+    HelloOk, MouseMode, ServerInfo, SessionId, SgrAttrs, Snapshot, StreamId, StreamSeq, TerminalId,
+    TerminalInfo, TerminalModes, PROTOCOL_VERSION,
 };
 use cli_pocket_transport::InMemoryTransportPair;
 use futures_channel::mpsc;
@@ -77,7 +77,13 @@ async fn reconnect_with_resume_inner() {
     assert_connected(&mut events, session_id).await;
 
     // After resume, the daemon sends output proactively (not waiting for input)
-    assert_terminal_output(&mut events, terminal, StreamSeq(1), b"resumed output".to_vec()).await;
+    assert_terminal_output(
+        &mut events,
+        terminal,
+        StreamSeq(1),
+        b"resumed output".to_vec(),
+    )
+    .await;
 }
 
 #[derive(Clone)]

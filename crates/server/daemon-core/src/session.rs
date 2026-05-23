@@ -73,10 +73,7 @@ impl SessionManager {
     ///
     /// Returns `TerminalInfo` on success. Fails if the terminal limit is reached
     /// or if the PTY subsystem cannot spawn the terminal.
-    pub async fn create(
-        &self,
-        params: TerminalCreateParams,
-    ) -> crate::DaemonResult<TerminalInfo> {
+    pub async fn create(&self, params: TerminalCreateParams) -> crate::DaemonResult<TerminalInfo> {
         {
             let g = self.inner.lock();
             if g.terminals.len() >= g.max_terminals {
@@ -136,9 +133,7 @@ impl SessionManager {
             .terminals
             .get(id)
             .map(|entry| Arc::clone(&entry.terminal))
-            .ok_or_else(|| {
-                crate::DaemonError::Internal(format!("unknown terminal {id:?}"))
-            })?;
+            .ok_or_else(|| crate::DaemonError::Internal(format!("unknown terminal {id:?}")))?;
         terminal.kill(signal).map_err(crate::DaemonError::Pty)
     }
 

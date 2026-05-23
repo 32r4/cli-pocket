@@ -24,7 +24,11 @@ fn cmd_command() -> Vec<String> {
 
 #[cfg(unix)]
 fn cmd_command() -> Vec<String> {
-    vec!["/bin/sh".to_string(), "-c".to_string(), "echo done".to_string()]
+    vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        "echo done".to_string(),
+    ]
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -78,7 +82,10 @@ async fn enforces_max_terminals() {
 
     // While the terminal is still alive, creating a second should fail.
     let result = mgr.create(quick_exit_params()).await;
-    assert!(result.is_err(), "should not be able to exceed max_terminals");
+    assert!(
+        result.is_err(),
+        "should not be able to exceed max_terminals"
+    );
     let msg = format!("{}", result.unwrap_err());
     assert!(msg.contains("limit"), "expected limit error, got: {msg}");
 

@@ -27,15 +27,16 @@ pub async fn responder_handshake<T: Transport + ?Sized>(
     db: &ClientDb,
 ) -> crate::DaemonResult<AcceptedHandshake> {
     // Step 1: Create the NoiseResponder with our identity keypair and optional PSK.
-    let mut responder =
-        NoiseResponder::new(identity, psk).map_err(crate::DaemonError::Crypto)?;
+    let mut responder = NoiseResponder::new(identity, psk).map_err(crate::DaemonError::Crypto)?;
 
     // Step 2: Read msg1 from client (`e`).
     let msg1 = transport
         .recv()
         .await
         .map_err(crate::DaemonError::Transport)?
-        .ok_or_else(|| crate::DaemonError::Internal("transport closed during handshake msg1".into()))?;
+        .ok_or_else(|| {
+            crate::DaemonError::Internal("transport closed during handshake msg1".into())
+        })?;
     responder
         .read_handshake(&msg1)
         .map_err(crate::DaemonError::Crypto)?;
@@ -54,20 +55,20 @@ pub async fn responder_handshake<T: Transport + ?Sized>(
         .recv()
         .await
         .map_err(crate::DaemonError::Transport)?
-        .ok_or_else(|| crate::DaemonError::Internal("transport closed during handshake msg3".into()))?;
+        .ok_or_else(|| {
+            crate::DaemonError::Internal("transport closed during handshake msg3".into())
+        })?;
     responder
         .read_handshake(&msg3)
         .map_err(crate::DaemonError::Crypto)?;
 
     // Step 5: Extract the client's static public key before consuming the responder.
-    let client_pk = responder
-        .remote_static_public()
-        .ok_or_else(|| crate::DaemonError::Internal("XK handshake finished without remote static key".into()))?;
+    let client_pk = responder.remote_static_public().ok_or_else(|| {
+        crate::DaemonError::Internal("XK handshake finished without remote static key".into())
+    })?;
 
     // Step 6: Transition to transport mode.
-    let session = responder
-        .finish()
-        .map_err(crate::DaemonError::Crypto)?;
+    let session = responder.finish().map_err(crate::DaemonError::Crypto)?;
 
     // Step 7: Look up the client in the database by their static public key.
     let record = db

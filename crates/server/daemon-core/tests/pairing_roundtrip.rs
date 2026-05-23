@@ -177,7 +177,10 @@ async fn paired_client_creates_terminal_end_to_end() {
             seq: _,
         } = extra.body
         {
-            assert_eq!(s, stream_id, "Output.stream should match the created stream");
+            assert_eq!(
+                s, stream_id,
+                "Output.stream should match the created stream"
+            );
         }
     }
 

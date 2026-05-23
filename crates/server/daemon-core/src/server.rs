@@ -38,15 +38,10 @@ impl Daemon {
         let identity = load_or_create(&config.security.identity_path)?;
 
         let client_db = Arc::new(
-            ClientDb::open(
-                &config.security.clients_path,
-                &config.security.revoked_path,
-            )
-            .await?,
+            ClientDb::open(&config.security.clients_path, &config.security.revoked_path).await?,
         );
 
-        let session_mgr =
-            Arc::new(SessionManager::new(config.limits.max_terminals));
+        let session_mgr = Arc::new(SessionManager::new(config.limits.max_terminals));
 
         let server_info = ServerInfo {
             server_version: env!("CARGO_PKG_VERSION").to_string(),

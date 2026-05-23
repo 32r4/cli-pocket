@@ -239,10 +239,7 @@ struct EncryptedChannel<T> {
 
 impl<T: Transport> EncryptedChannel<T> {
     fn new(transport: T, session: NoiseSession) -> Self {
-        Self {
-            transport,
-            session,
-        }
+        Self { transport, session }
     }
 
     async fn send_frame(&mut self, frame: &Frame) -> crate::DaemonResult<()> {
@@ -307,12 +304,9 @@ async fn handle_terminal_create(
     *next_local_stream_id += 1;
 
     // Subscribe to terminal output and spawn writer.
-    let terminal = deps
-        .session_mgr
-        .attach(&terminal_id)
-        .ok_or_else(|| {
-            crate::DaemonError::Internal("terminal vanished immediately after create".into())
-        })?;
+    let terminal = deps.session_mgr.attach(&terminal_id).ok_or_else(|| {
+        crate::DaemonError::Internal("terminal vanished immediately after create".into())
+    })?;
 
     let (out_tx, out_rx) = mpsc::channel::<OutputChunk>(64);
     let writer = spawn_output_writer(
@@ -500,10 +494,7 @@ fn spawn_writer_task(
 // Hello validation
 // ---------------------------------------------------------------------------
 
-fn validate_hello(
-    hello: &Hello,
-    _deps: &ConnectionDeps,
-) -> crate::DaemonResult<()> {
+fn validate_hello(hello: &Hello, _deps: &ConnectionDeps) -> crate::DaemonResult<()> {
     if hello.protocol_min > PROTOCOL_VERSION || hello.protocol_max < PROTOCOL_VERSION {
         return Err(crate::DaemonError::Internal(format!(
             "protocol version mismatch: client supports {}..{}, server is {}",

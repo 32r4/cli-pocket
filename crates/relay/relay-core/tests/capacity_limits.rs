@@ -3,10 +3,10 @@ use cli_pocket_relay_core::caps::Caps;
 #[test]
 fn host_limit_enforced() {
     let c = Caps::new(2, 4, 1024, 1024);
-    let _h1 = c.try_add_host().unwrap();
+    let h1 = c.try_add_host().unwrap();
     let _h2 = c.try_add_host().unwrap();
     assert!(c.try_add_host().is_err());
-    drop(_h1);
+    drop(h1);
     assert!(c.try_add_host().is_ok());
 }
 
