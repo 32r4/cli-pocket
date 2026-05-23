@@ -96,11 +96,13 @@ impl Daemon {
         });
         self.listener_handle = Some(handle);
 
-        if self.config.relay.is_some() {
+        if let Some(relay_config) = self.config.relay.clone() {
             let host_id = self.identity.host_id;
-            let relay_config = self.config.relay.clone().unwrap();
+            let identity_keypair = self.identity.keypair.clone();
             let handle = tokio::spawn(async move {
-                if let Err(e) = crate::relay_dialer::run(relay_config, host_id).await {
+                if let Err(e) =
+                    crate::relay_dialer::run(relay_config, host_id, identity_keypair).await
+                {
                     error!(error = %e, "relay dialer exited with error");
                 }
             });
