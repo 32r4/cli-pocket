@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.cli-pocket.desktop",
   "build": {
-    "beforeDevCommand": "cd ../../../webview/terminal && npm run dev",
+    "beforeDevCommand": "npm --prefix ../../../webview/terminal run dev -- --mode tauri",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "cd ../../../webview/terminal && npm run build:tauri",
+    "beforeBuildCommand": "npm --prefix ../../../webview/terminal run build:tauri",
     "frontendDist": "../../../webview/terminal/dist/tauri"
   },
   "app": {

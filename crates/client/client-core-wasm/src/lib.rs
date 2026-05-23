@@ -211,10 +211,7 @@ impl CliPocketClient {
             scrollback_bytes: js_params.scrollback_bytes,
         };
 
-        session
-            .create_terminal(params)
-            .await
-            .map_err(js_error)
+        session.create_terminal(params).await.map_err(js_error)
     }
 
     /// Send raw keystroke bytes to the active terminal.

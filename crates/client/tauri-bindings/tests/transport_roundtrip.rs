@@ -6,6 +6,7 @@ use tokio::time::{timeout, Duration};
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::result_large_err)]
 async fn echo_roundtrip_with_subprotocol() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

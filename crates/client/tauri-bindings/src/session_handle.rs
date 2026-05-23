@@ -9,13 +9,14 @@
 
 use cli_pocket_client_core::session::SessionBuilder;
 use cli_pocket_client_core::session::SessionSpawner;
-use cli_pocket_client_core::{
-    ClientEvent, ClientSession, Clock, KeyValueStore, Rng, Transport,
-};
+use cli_pocket_client_core::{ClientEvent, ClientSession, Clock, KeyValueStore, Rng, Transport};
 use cli_pocket_proto::TerminalCreateParams;
 use futures_channel::mpsc as futures_mpsc;
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
+
+type SessionStart = (ClientSession, futures_mpsc::Receiver<ClientEvent>);
+type SessionFactory = Box<dyn FnOnce(&LocalSpawner) -> SessionStart + Send>;
 
 // ── command enum ──────────────────────────────────────────────────────────────
 
@@ -26,14 +27,12 @@ use tokio::sync::{mpsc, oneshot};
 /// and the actor constructs the builder on its own thread.
 enum SessionCommand {
     /// Check if a session is currently connected.
-    IsConnected {
-        reply: oneshot::Sender<bool>,
-    },
+    IsConnected { reply: oneshot::Sender<bool> },
 
     /// Connect using a pre-built SessionBuilder.
     /// The builder is constructed on the actor thread from the provided factory.
     Connect {
-        factory: Box<dyn FnOnce(&LocalSpawner) -> (ClientSession, futures_mpsc::Receiver<ClientEvent>) + Send>,
+        factory: SessionFactory,
         reply: oneshot::Sender<Result<(), String>>,
     },
 
@@ -44,9 +43,7 @@ enum SessionCommand {
     },
 
     /// Shutdown the session (drop it).
-    Shutdown {
-        reply: oneshot::Sender<()>,
-    },
+    Shutdown { reply: oneshot::Sender<()> },
 }
 
 /// A spawner that can be used from the actor thread to spawn local futures.
@@ -130,11 +127,10 @@ impl SessionHandle {
         F: FnOnce(&LocalSpawner) -> SessionBuilder<T, C, R, K, LocalSpawner> + Send + 'static,
     {
         // Type-erase the builder factory
-        let factory: Box<dyn FnOnce(&LocalSpawner) -> (ClientSession, futures_mpsc::Receiver<ClientEvent>) + Send> =
-            Box::new(move |spawner| {
-                let builder = builder_factory(spawner);
-                builder.start()
-            });
+        let factory: SessionFactory = Box::new(move |spawner| {
+            let builder = builder_factory(spawner);
+            builder.start()
+        });
 
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
@@ -245,7 +241,11 @@ async fn actor_loop(
 }
 
 /// Handle a single command. Returns `false` if the actor should exit.
-async fn handle_command(cmd: SessionCommand, state: &mut ActorState, spawner: &LocalSpawner) -> bool {
+async fn handle_command(
+    cmd: SessionCommand,
+    state: &mut ActorState,
+    spawner: &LocalSpawner,
+) -> bool {
     match cmd {
         SessionCommand::IsConnected { reply } => {
             let _ = reply.send(state.session.is_some());

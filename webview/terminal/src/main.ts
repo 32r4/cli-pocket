@@ -6,7 +6,6 @@ import {
 } from "@/bridge/ClientBridge";
 import { MockBridge } from "@/bridge/MockBridge";
 import { TauriBridge } from "@/bridge/TauriBridge";
-import { WebBridge } from "@/bridge/WebBridge";
 import "@/styles/app.css";
 
 const root = document.getElementById("app");
@@ -40,6 +39,8 @@ async function createBridge(): Promise<ClientBridge> {
     return new TauriBridge();
   }
 
+  // Dynamic import to avoid bundling wasm in tauri mode
+  const { WebBridge } = await import("@/bridge/WebBridge");
   return WebBridge.create();
 }
 

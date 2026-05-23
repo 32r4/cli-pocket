@@ -21,7 +21,9 @@ export class Renderer {
   private disposed = false;
 
   constructor() {
-    this.terminal = new Terminal();
+    this.terminal = new Terminal({
+      allowProposedApi: true,
+    });
     this.fitAddon = new FitAddon();
 
     this.terminal.loadAddon(this.fitAddon);

@@ -540,8 +540,9 @@ fn validate_hello(hello: &Hello, _deps: &ConnectionDeps) -> crate::DaemonResult<
 fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-        .unwrap_or(u64::MAX)
+        .map_or(u64::MAX, |d| {
+            u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn accepted_placeholder() -> AcceptedSession {

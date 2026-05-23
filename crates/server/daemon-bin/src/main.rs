@@ -78,7 +78,9 @@ async fn main() -> Result<()> {
     }
 
     let cfg = match &cli.config {
-        Some(p) => DaemonConfig::load_from(p).with_context(|| format!("load config {p:?}"))?,
+        Some(p) => {
+            DaemonConfig::load_from(p).with_context(|| format!("load config {}", p.display()))?
+        }
         None => DaemonConfig::default(),
     };
 
@@ -123,8 +125,9 @@ async fn main() -> Result<()> {
             let p = &cfg.security.identity_path;
             if p.exists() {
                 let bak = p.with_extension("json.bak");
-                std::fs::rename(p, &bak).with_context(|| format!("back up identity to {bak:?}"))?;
-                eprintln!("old identity moved to {bak:?}");
+                std::fs::rename(p, &bak)
+                    .with_context(|| format!("back up identity to {}", bak.display()))?;
+                eprintln!("old identity moved to {}", bak.display());
             }
             let new = load_or_create(p).context("generate new identity")?;
             println!("new host_id = {}", new.host_id.0);

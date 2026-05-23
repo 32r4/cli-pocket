@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let cfg = match &cli.config {
-        Some(p) => RelayConfig::load_from(p).with_context(|| format!("load {p:?}"))?,
+        Some(p) => RelayConfig::load_from(p).with_context(|| format!("load {}", p.display()))?,
         None => RelayConfig::default(),
     };
 

@@ -39,7 +39,7 @@ impl Transport for TokioWsTransport {
                 None | Some(Ok(Message::Close(_))) => return Ok(None),
                 Some(Err(e)) => return Err(TransportError::WebSocket(e.to_string())),
                 Some(Ok(Message::Binary(bytes))) => return Ok(Some(bytes)),
-                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {}
                 Some(Ok(Message::Text(_))) => {
                     return Err(TransportError::WebSocket(
                         "unexpected text frame on binary transport".into(),

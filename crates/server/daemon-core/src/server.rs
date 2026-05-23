@@ -147,25 +147,20 @@ impl Daemon {
         let listener = TcpListener::bind(bind).await?;
         info!(addr = %bind, "pairing listener up");
         let (sock, _peer) = listener.accept().await?;
-        let ws = accept_async(MaybeTlsStream::Plain(sock)).await.map_err(|e| {
-            crate::DaemonError::Internal(format!("ws upgrade during pairing: {e}"))
-        })?;
+        let ws = accept_async(MaybeTlsStream::Plain(sock))
+            .await
+            .map_err(|e| crate::DaemonError::Internal(format!("ws upgrade during pairing: {e}")))?;
         let mut transport = TokioWsTransport::new(ws);
 
         // SPAKE2 — host side. Both sides bind to fixed identity strings so
         // the client can complete the handshake without prior knowledge of
         // the daemon's host_id.
-        let sp = Spake2Side::start_host(
-            code.as_bytes(),
-            PAIRING_HOST_ID,
-            PAIRING_CLIENT_ID,
-        );
+        let sp = Spake2Side::start_host(code.as_bytes(), PAIRING_HOST_ID, PAIRING_CLIENT_ID);
         let outbound = sp.outbound().to_vec();
         transport.send(outbound).await?;
-        let peer_msg = transport
-            .recv()
-            .await?
-            .ok_or_else(|| crate::DaemonError::Internal("pairing peer closed before SPAKE2 reply".into()))?;
+        let peer_msg = transport.recv().await?.ok_or_else(|| {
+            crate::DaemonError::Internal("pairing peer closed before SPAKE2 reply".into())
+        })?;
         let outcome = sp
             .finish(&peer_msg)
             .map_err(|e| crate::DaemonError::Internal(format!("SPAKE2 finish failed: {e}")))?;
@@ -173,10 +168,9 @@ impl Daemon {
         // The client now uses the SPAKE2 PSK to encrypt their static public
         // key + label hint. We use ChaCha20Poly1305 with a zero nonce; the
         // PSK is single-use so reuse is safe.
-        let payload = transport
-            .recv()
-            .await?
-            .ok_or_else(|| crate::DaemonError::Internal("pairing peer closed before client pk".into()))?;
+        let payload = transport.recv().await?.ok_or_else(|| {
+            crate::DaemonError::Internal("pairing peer closed before client pk".into())
+        })?;
         let client_pk_vec = decrypt_pairing_payload(&outcome.psk, &payload)?;
         let client_pk: [u8; 32] = client_pk_vec
             .as_slice()
@@ -189,8 +183,7 @@ impl Daemon {
             label,
             paired_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
+                .map_or(0, |d| d.as_secs()),
         };
         self.client_db.add(record.clone()).await?;
 
