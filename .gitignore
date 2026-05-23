@@ -12,6 +12,7 @@ node_modules/
 # Tauri
 apps/*/src-tauri/target/
 apps/*/dist/
+apps/mobile/src-tauri/gen/android/
 
 # Webview
 webview/*/dist/

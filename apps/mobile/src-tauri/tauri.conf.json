@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "dev.cli-pocket.mobile",
   "build": {
-    "beforeDevCommand": "npm --prefix ../../../webview/terminal run dev -- --mode tauri",
+    "beforeDevCommand": "npm --prefix ../../webview/terminal run dev -- --mode tauri",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix ../../../webview/terminal run build:tauri",
-    "frontendDist": "../../../webview/terminal/dist/tauri"
+    "beforeBuildCommand": "npm --prefix ../../webview/terminal run build:tauri",
+    "frontendDist": "../../webview/terminal/dist/tauri"
   },
   "app": {
     "windows": [],

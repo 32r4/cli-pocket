@@ -35,6 +35,15 @@ pub struct ListenerDeps {
 /// This function only returns on listener error (e.g. port already in use).
 pub async fn listen(addr: SocketAddr, deps: ListenerDeps) -> crate::DaemonResult<()> {
     let listener = TcpListener::bind(addr).await?;
+    serve(listener, deps).await
+}
+
+/// Accept inbound WebSocket connections on an already-bound listener.
+///
+/// This lets callers separate the bind step from the accept loop so startup
+/// can fail synchronously if the listen address is unavailable.
+pub async fn serve(listener: TcpListener, deps: ListenerDeps) -> crate::DaemonResult<()> {
+    let addr = listener.local_addr()?;
     info!(%addr, "daemon listening");
 
     loop {

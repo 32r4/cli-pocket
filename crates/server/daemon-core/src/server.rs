@@ -4,13 +4,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use cli_pocket_proto::ServerInfo;
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::client_db::ClientDb;
 use crate::config::DaemonConfig;
 use crate::identity_store::{load_or_create, DaemonIdentity};
-use crate::listener::{listen, ListenerDeps};
+use crate::listener::{serve, ListenerDeps};
 use crate::session::SessionManager;
 
 /// Top-level daemon struct owning all subsystems.
@@ -65,6 +66,7 @@ impl Daemon {
     /// dialer task.
     pub async fn start(&mut self) -> crate::DaemonResult<()> {
         let addr = SocketAddr::new(self.config.listen.addr, self.config.listen.port);
+        let listener = TcpListener::bind(addr).await?;
 
         let identity = Arc::new(self.identity.keypair.clone());
         let psk = self.config.relay.as_ref().and_then(|r| {
@@ -85,7 +87,7 @@ impl Daemon {
         };
 
         let handle = tokio::spawn(async move {
-            if let Err(e) = listen(addr, listener_deps).await {
+            if let Err(e) = serve(listener, listener_deps).await {
                 error!(error = %e, "listener exited with error");
             }
         });

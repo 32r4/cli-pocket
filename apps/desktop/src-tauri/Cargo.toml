@@ -12,13 +12,10 @@ name = "cli_pocket_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = "=2.6.2"
+tauri-build = "2.6.2"
 
 [dependencies]
-# Pin tauri sibling crates to a coherent Tauri 2.11.2 release bundle.
-# Without the tauri-runtime-wry pin Cargo resolves to 2.9.3, which is
-# internally inconsistent with tauri-runtime 2.11.x and wry 0.55.x.
-tauri = "=2.11.2"
+tauri = "2.11.2"
 tauri-runtime-wry = "=2.11.2"
 tauri-plugin-deep-link = "=2.4.9"
 

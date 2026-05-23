@@ -164,3 +164,20 @@ async fn run_start(cfg: DaemonConfig) -> Result<()> {
     daemon.shutdown().await;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pair_defaults_to_the_separate_pairing_port() {
+        let cli = Cli::parse_from(["cli-pocket-daemon", "pair"]);
+
+        match cli.cmd {
+            Cmd::Pair { bind, .. } => {
+                assert_eq!(bind, "127.0.0.1:7843".parse().unwrap());
+            }
+            _ => panic!("expected pair command"),
+        }
+    }
+}

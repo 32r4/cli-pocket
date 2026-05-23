@@ -20,10 +20,13 @@ test:
 # ---- one-time setup ----
 
 # Installs the tauri-cli used by `cargo tauri` in apps/desktop and apps/mobile,
-# plus wasm-pack used by Plans F and I. Idempotent.
+# plus wasm-pack and frontend dependencies used by Plans F, G, and I. Idempotent.
 setup:
     cargo install tauri-cli --version "^2.1" --locked
     cargo install wasm-pack --locked
+    just webview-install
+    just web-install
+    just mobile-android-init
 
 # ---- per-target builds ----
 
@@ -48,6 +51,7 @@ build-desktop:
     cd apps/desktop; cargo tauri build
 
 build-mobile-android:
+    just mobile-android-init
     just build-webview-tauri
     cd apps/mobile; cargo tauri android build --apk --aab
 
@@ -63,7 +67,7 @@ build-web:
 # ---- dev workflows ----
 
 dev-daemon:
-    cargo run -p cli-pocket-daemon
+    cargo run -p cli-pocket-daemon -- start
 
 dev-relay:
     cargo run -p cli-pocket-relay
@@ -72,6 +76,7 @@ dev-desktop:
     cd apps/desktop; cargo tauri dev
 
 dev-mobile-android:
+    just mobile-android-init
     cd apps/mobile; cargo tauri android dev
 
 dev-mobile-ios:
@@ -113,6 +118,12 @@ dist:
 webview-install:
     npm --prefix webview/terminal install
 
+web-install:
+    npm --prefix apps/web install
+
+mobile-android-init:
+    cd apps/mobile; cargo tauri android init --ci
+
 webview-dev:
     npm --prefix webview/terminal run dev
 
@@ -124,3 +135,9 @@ webview-test:
 
 webview-check:
     npm --prefix webview/terminal run check
+
+# ---- guardrails ----
+
+verify-justfile:
+    @rg -n '^dev-daemon:\r?$' justfile
+    @rg -n '^    cargo run -p cli-pocket-daemon -- start\r?$' justfile
