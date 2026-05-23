@@ -93,14 +93,13 @@ export class WebBridge implements ClientBridge {
   }
 
   async sendInput(terminalId: TerminalId, bytes: Uint8Array): Promise<void> {
-    const sendInput = this.client.send_input;
-    if (sendInput.length >= 2) {
-      await (sendInput as FutureSendInput)(terminalId, bytes);
+    if (this.client.send_input.length >= 2) {
+      await (this.client.send_input as FutureSendInput)(terminalId, bytes);
       return;
     }
 
     // Plan F wasm targets the active terminal.
-    await (sendInput as CurrentSendInput)(bytes);
+    await (this.client.send_input as CurrentSendInput)(bytes);
   }
 
   async resize(
@@ -108,23 +107,21 @@ export class WebBridge implements ClientBridge {
     cols: number,
     rows: number,
   ): Promise<void> {
-    const resize = this.client.resize;
-    if (resize.length >= 3) {
-      await (resize as FutureResize)(terminalId, cols, rows);
+    if (this.client.resize.length >= 3) {
+      await (this.client.resize as FutureResize)(terminalId, cols, rows);
       return;
     }
 
-    await (resize as CurrentResize)(cols, rows);
+    await (this.client.resize as CurrentResize)(cols, rows);
   }
 
   async kill(terminalId: TerminalId, signal: string): Promise<void> {
-    const kill = this.client.kill;
-    if (kill.length >= 2) {
-      await (kill as FutureKill)(terminalId, signal);
+    if (this.client.kill.length >= 2) {
+      await (this.client.kill as FutureKill)(terminalId, signal);
       return;
     }
 
-    await (kill as CurrentKill)();
+    await (this.client.kill as CurrentKill)();
   }
 
   async exportIdentity(): Promise<Uint8Array> {
