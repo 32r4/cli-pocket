@@ -7,6 +7,7 @@
 //   ConnectConfig: { endpointUrl, serverPublicHex, resumeTokenHex? } (camelCase)
 
 import init, { client_pair_with_code } from "cli-pocket-client-core-wasm";
+import { installHashHandlers } from "@/identity/IdentityActions";
 import { mountPairingView, type PairingValues } from "./PairingView";
 import type { SavedServer } from "./relayEndpoint";
 
@@ -64,6 +65,11 @@ async function launchTerminal(root: HTMLElement, saved: SavedServer): Promise<vo
     serverPublicHex: saved.server_public_hex,
     resumeTokenHex: saved.resume_token_hex ?? undefined,
   });
+
+  // Wire #export / #import URL-hash handlers so the user can export/import
+  // their identity without navigating away from the terminal.
+  // WebBridge satisfies IdentityClient (exportIdentity + importIdentity).
+  installHashHandlers(bridge);
 
   // App constructor: (host, bridge, clientKind) — then call .start()
   // (verified in webview/terminal/src/ui/App.ts)
