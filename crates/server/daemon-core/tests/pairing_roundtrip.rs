@@ -20,7 +20,7 @@ use cli_pocket_daemon_core::session::SessionManager;
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Capabilities, ClientKind, Hello, ServerInfo};
-use cli_pocket_proto::{ClientId, TerminalCreateParams, PROTOCOL_VERSION};
+use cli_pocket_proto::{ClientId, StreamId, TerminalCreateParams, PROTOCOL_VERSION};
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -195,6 +195,85 @@ async fn paired_client_creates_terminal_end_to_end() {
     let _ = daemon_task.await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paired_client_receives_live_output_after_input() {
+    let dir = TempDir::new().expect("tempdir");
+    let id_path = dir.path().join("identity.json");
+    let clients_path = dir.path().join("clients.json");
+    let revoked_path = dir.path().join("revoked.json");
+
+    let daemon_id = load_or_create(&id_path).expect("load_or_create daemon identity");
+    let daemon_pub = daemon_id.keypair.public;
+    let client_keypair = KeyPair::generate().expect("client keypair");
+    let client_pub = client_keypair.public;
+
+    let db = Arc::new(
+        ClientDb::open(&clients_path, &revoked_path)
+            .await
+            .expect("ClientDb::open"),
+    );
+    db.add(ClientRecord {
+        client_id: ClientId(Uuid::from_bytes([0x88; 16])),
+        public_key: client_pub,
+        label: "test-client".into(),
+        paired_at: 0,
+    })
+    .await
+    .expect("add client record");
+
+    let session_mgr = Arc::new(SessionManager::new(4));
+    let deps = ConnectionDeps {
+        session_mgr,
+        client_db: db,
+        server_info: ServerInfo {
+            server_version: "test".to_string(),
+            host_label: None,
+        },
+    };
+    let InMemoryTransportPair {
+        a: daemon_transport,
+        b: client_transport,
+    } = InMemoryTransportPair::new(16);
+    let daemon_keypair = daemon_id.keypair.clone();
+    let daemon_task = tokio::spawn(async move {
+        run_connection_with_handshake(daemon_transport, &daemon_keypair, None, deps).await
+    });
+
+    let mut client_transport = client_transport;
+    let mut session = connect_paired_client(&mut client_transport, &client_keypair, &daemon_pub)
+        .await
+        .expect("connect paired client");
+
+    let stream_id = create_terminal(
+        &mut client_transport,
+        &mut session,
+        live_output_terminal_cmd(),
+    )
+    .await
+    .expect("create terminal");
+    drain_optional_output(&mut client_transport, &mut session).await;
+
+    let input = live_output_input();
+    let expected = b"cli-pocket-live-output";
+    send_frame(
+        &mut client_transport,
+        &mut session,
+        &Frame::body(FrameBody::Input {
+            stream: stream_id,
+            bytes: input.into(),
+        }),
+    )
+    .await
+    .expect("send input");
+
+    recv_output_containing(&mut client_transport, &mut session, stream_id, expected)
+        .await
+        .expect("recv live output");
+
+    daemon_task.abort();
+    let _ = daemon_task.await;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -204,6 +283,111 @@ async fn recv_with_timeout(t: &mut InMemoryTransport) -> Option<Vec<u8>> {
         .await
         .expect("transport recv timed out")
         .expect("transport recv error")
+}
+
+async fn connect_paired_client(
+    client_transport: &mut InMemoryTransport,
+    client_keypair: &KeyPair,
+    daemon_pub: &[u8; 32],
+) -> Result<NoiseSession, String> {
+    let mut init = NoiseInitiator::new(client_keypair, daemon_pub, None)
+        .map_err(|e| format!("initiator: {e}"))?;
+
+    let msg1 = init
+        .write_handshake()
+        .map_err(|e| format!("write msg1: {e}"))?;
+    client_transport
+        .send(msg1)
+        .await
+        .map_err(|e| format!("send msg1: {e}"))?;
+
+    let msg2 = recv_with_timeout(client_transport)
+        .await
+        .ok_or_else(|| "recv msg2: closed".to_string())?;
+    init.read_handshake(&msg2)
+        .map_err(|e| format!("read msg2: {e}"))?;
+
+    let msg3 = init
+        .write_handshake()
+        .map_err(|e| format!("write msg3: {e}"))?;
+    client_transport
+        .send(msg3)
+        .await
+        .map_err(|e| format!("send msg3: {e}"))?;
+
+    let mut session = init.finish().map_err(|e| format!("finish: {e}"))?;
+    let hello = Frame::body(FrameBody::Hello(Hello {
+        protocol_min: PROTOCOL_VERSION,
+        protocol_max: PROTOCOL_VERSION,
+        capabilities: Capabilities::NONE,
+        client_kind: ClientKind::Cli,
+        resume: None,
+    }));
+    send_frame(client_transport, &mut session, &hello).await?;
+
+    let resp = recv_frame(client_transport, &mut session).await?;
+    if !matches!(resp.body, FrameBody::HelloOk(_)) {
+        return Err(format!("expected HelloOk, got {:?}", resp.body));
+    }
+
+    Ok(session)
+}
+
+async fn create_terminal(
+    client_transport: &mut InMemoryTransport,
+    session: &mut NoiseSession,
+    cmd: Vec<String>,
+) -> Result<StreamId, String> {
+    let create = Frame::body(FrameBody::TerminalCreate {
+        request_id: 1,
+        params: TerminalCreateParams {
+            cols: 80,
+            rows: 24,
+            cwd: None,
+            cmd,
+            env: Vec::new(),
+            scrollback_bytes: None,
+        },
+    });
+    send_frame(client_transport, session, &create).await?;
+
+    let create_ok = recv_frame(client_transport, session).await?;
+    match create_ok.body {
+        FrameBody::TerminalCreateOk { stream, .. } => Ok(stream),
+        other => Err(format!("expected TerminalCreateOk, got {other:?}")),
+    }
+}
+
+async fn drain_optional_output(
+    client_transport: &mut InMemoryTransport,
+    session: &mut NoiseSession,
+) {
+    let _ = timeout(
+        Duration::from_millis(200),
+        recv_frame_inner(client_transport, session),
+    )
+    .await;
+}
+
+async fn recv_output_containing(
+    client_transport: &mut InMemoryTransport,
+    session: &mut NoiseSession,
+    stream_id: StreamId,
+    marker: &[u8],
+) -> Result<(), String> {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let frame = recv_frame_inner(client_transport, session).await?;
+            if let FrameBody::Output { stream, bytes, .. } = frame.body {
+                if stream == stream_id && bytes.as_ref().windows(marker.len()).any(|w| w == marker)
+                {
+                    return Ok(());
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|_| "timed out waiting for live output".to_string())?
 }
 
 async fn send_frame(
@@ -254,4 +438,34 @@ fn terminal_cmd() -> Vec<String> {
 fn terminal_cmd() -> Vec<String> {
     // `cat` with no args blocks reading from stdin, keeping the PTY alive.
     vec!["/bin/cat".to_string()]
+}
+
+#[cfg(unix)]
+fn live_output_terminal_cmd() -> Vec<String> {
+    vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        "IFS= read -r line; printf '%s\\n' \"$line\"; sleep 30".to_string(),
+    ]
+}
+
+#[cfg(unix)]
+fn live_output_input() -> Vec<u8> {
+    b"cli-pocket-live-output\n".to_vec()
+}
+
+#[cfg(windows)]
+fn live_output_terminal_cmd() -> Vec<String> {
+    vec![
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".to_string(),
+        "-NoLogo".to_string(),
+        "-NoProfile".to_string(),
+        "-Command".to_string(),
+        "$line = [Console]::In.ReadLine(); Write-Output $line; Start-Sleep -Seconds 30".to_string(),
+    ]
+}
+
+#[cfg(windows)]
+fn live_output_input() -> Vec<u8> {
+    b"cli-pocket-live-output\r\n".to_vec()
 }

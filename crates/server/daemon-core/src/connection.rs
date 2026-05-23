@@ -122,8 +122,12 @@ async fn run_connection_post_handshake<T: Transport>(
     .await?;
 
     // 3. Main frame loop.
-    let mut stream_map: HashMap<StreamId, AttachedStream> = HashMap::new();
-    let mut next_local_stream_id = 1u32;
+    let (output_tx, mut output_rx) = mpsc::channel::<OutboundOutput>(64);
+    let mut streams = StreamContext {
+        map: HashMap::new(),
+        next_local_stream_id: 1,
+        output_tx,
+    };
 
     // Subscribe to revocation updates so we can drop a live session as soon as
     // its `client_id` is revoked. `watch::Receiver::changed()` resolves after
@@ -153,6 +157,24 @@ async fn run_connection_post_handshake<T: Transport>(
                 }
                 continue;
             }
+            maybe_output = output_rx.recv() => {
+                let Some(output) = maybe_output else {
+                    continue;
+                };
+                if let Some(attached) = streams.map.get_mut(&output.stream) {
+                    if attached.permitted_bytes < output.chunk.bytes.len() {
+                        continue;
+                    }
+                    attached.permitted_bytes -= output.chunk.bytes.len();
+                    chan.send_frame(&Frame::body(FrameBody::Output {
+                        stream: output.stream,
+                        seq: output.chunk.seq_at_end,
+                        bytes: output.chunk.bytes.to_vec().into(),
+                    }))
+                    .await?;
+                }
+                continue;
+            }
             frame = chan.recv_frame() => frame?,
         };
         match frame.body {
@@ -164,8 +186,7 @@ async fn run_connection_post_handshake<T: Transport>(
                     &client_id,
                     request_id,
                     params,
-                    &mut stream_map,
-                    &mut next_local_stream_id,
+                    &mut streams,
                 )
                 .await?;
             }
@@ -175,20 +196,12 @@ async fn run_connection_post_handshake<T: Transport>(
                 terminal,
                 since,
             } => {
-                handle_terminal_attach(
-                    &mut chan,
-                    &deps,
-                    request_id,
-                    terminal,
-                    since,
-                    &mut stream_map,
-                    &mut next_local_stream_id,
-                )
-                .await?;
+                handle_terminal_attach(&mut chan, &deps, request_id, terminal, since, &mut streams)
+                    .await?;
             }
 
             FrameBody::TerminalDetach { stream } => {
-                if let Some(attached) = stream_map.remove(&stream) {
+                if let Some(attached) = streams.map.remove(&stream) {
                     debug!(?stream, "terminal detached by client");
                     drop(attached);
                 }
@@ -220,19 +233,19 @@ async fn run_connection_post_handshake<T: Transport>(
 
             // ---- Data plane ----
             FrameBody::Input { stream, bytes } => {
-                if let Some(attached) = stream_map.get(&stream) {
+                if let Some(attached) = streams.map.get(&stream) {
                     let _ = attached.terminal.write_input(&bytes);
                 }
             }
 
             FrameBody::Resize { stream, cols, rows } => {
-                if let Some(attached) = stream_map.get(&stream) {
+                if let Some(attached) = streams.map.get(&stream) {
                     let _ = attached.terminal.resize(cols, rows);
                 }
             }
 
             FrameBody::Window { stream, credit } => {
-                if let Some(attached) = stream_map.get_mut(&stream) {
+                if let Some(attached) = streams.map.get_mut(&stream) {
                     attached.permitted_bytes += credit as usize;
                 }
             }
@@ -311,6 +324,17 @@ struct AttachedStream {
     _writer: tokio::task::JoinHandle<()>,
 }
 
+struct OutboundOutput {
+    stream: StreamId,
+    chunk: OutputChunk,
+}
+
+struct StreamContext {
+    map: HashMap<StreamId, AttachedStream>,
+    next_local_stream_id: u32,
+    output_tx: mpsc::Sender<OutboundOutput>,
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle handlers
 // ---------------------------------------------------------------------------
@@ -321,32 +345,23 @@ async fn handle_terminal_create(
     client_id: &cli_pocket_proto::ClientId,
     request_id: u32,
     params: TerminalCreateParams,
-    stream_map: &mut HashMap<StreamId, AttachedStream>,
-    next_local_stream_id: &mut u32,
+    streams: &mut StreamContext,
 ) -> crate::DaemonResult<()> {
     let info = deps.session_mgr.create(params).await?;
     let terminal_id = info.terminal;
 
     // Create a local stream ID for this terminal's output.
-    let stream_id = StreamId(*next_local_stream_id);
-    *next_local_stream_id += 1;
+    let stream_id = StreamId(streams.next_local_stream_id);
+    streams.next_local_stream_id += 1;
 
     // Subscribe to terminal output and spawn writer.
     let terminal = deps.session_mgr.attach(&terminal_id).ok_or_else(|| {
         crate::DaemonError::Internal("terminal vanished immediately after create".into())
     })?;
 
-    let (out_tx, out_rx) = mpsc::channel::<OutputChunk>(64);
-    let writer = spawn_output_writer(
-        stream_id,
-        chan,
-        out_rx,
-        deps.session_mgr.clone(),
-        terminal_id,
-        terminal.clone(),
-    );
+    let writer = spawn_output_forwarder(stream_id, terminal.subscribe(), streams.output_tx.clone());
 
-    stream_map.insert(
+    streams.map.insert(
         stream_id,
         AttachedStream {
             terminal: terminal.clone(),
@@ -377,9 +392,6 @@ async fn handle_terminal_create(
         .await?;
     }
 
-    // Kick off the writer task with the output channel.
-    spawn_writer_task(stream_id, out_tx, terminal.subscribe(), terminal_id);
-
     info!(terminal_id = ?terminal_id, stream_id = ?stream_id, client_id = ?client_id, "terminal created");
     Ok(())
 }
@@ -390,8 +402,7 @@ async fn handle_terminal_attach(
     request_id: u32,
     terminal_id: TerminalId,
     since_seq: Option<StreamSeq>,
-    stream_map: &mut HashMap<StreamId, AttachedStream>,
-    next_local_stream_id: &mut u32,
+    streams: &mut StreamContext,
 ) -> crate::DaemonResult<()> {
     let terminal = match deps.session_mgr.attach(&terminal_id) {
         Some(t) => t,
@@ -405,24 +416,16 @@ async fn handle_terminal_attach(
         }
     };
 
-    let stream_id = StreamId(*next_local_stream_id);
-    *next_local_stream_id += 1;
+    let stream_id = StreamId(streams.next_local_stream_id);
+    streams.next_local_stream_id += 1;
 
     let snapshot = terminal.snapshot();
     let head_seq = terminal.head_seq();
 
     // Subscribe for live output after snapshot.
-    let (out_tx, out_rx) = mpsc::channel::<OutputChunk>(64);
-    let writer = spawn_output_writer(
-        stream_id,
-        chan,
-        out_rx,
-        deps.session_mgr.clone(),
-        terminal_id,
-        terminal.clone(),
-    );
+    let writer = spawn_output_forwarder(stream_id, terminal.subscribe(), streams.output_tx.clone());
 
-    stream_map.insert(
+    streams.map.insert(
         stream_id,
         AttachedStream {
             terminal: terminal.clone(),
@@ -453,8 +456,6 @@ async fn handle_terminal_attach(
         }
     }
 
-    spawn_writer_task(stream_id, out_tx, terminal.subscribe(), terminal_id);
-
     info!(terminal_id = ?terminal_id, stream_id = ?stream_id, "terminal attached");
     Ok(())
 }
@@ -463,46 +464,25 @@ async fn handle_terminal_attach(
 // Output writer tasks
 // ---------------------------------------------------------------------------
 
-/// Writer task: receives `OutputChunk` from terminal subscribers and
-/// forwards them as `FrameBody::Output` through the encrypted channel.
-///
-/// This task owns the `EncryptedChannel` for writes. The main loop handles
-/// reads. This split avoids `NoiseSession` non-Send/non-Sync issues.
-fn spawn_output_writer<T: Transport + 'static>(
+/// Spawn a task that reads PTY output and hands it to the main connection loop.
+/// The loop owns the encrypted transport, so all writes stay ordered there.
+fn spawn_output_forwarder(
     stream_id: StreamId,
-    chan: &mut EncryptedChannel<T>,
-    out_rx: mpsc::Receiver<OutputChunk>,
-    _session_mgr: Arc<SessionManager>,
-    terminal_id: TerminalId,
-    terminal: Arc<Terminal>,
-) -> tokio::task::JoinHandle<()> {
-    // The full writer-task design (mpsc<Frame> feeding a single task that owns
-    // `EncryptedChannel`) graduates from skeleton to full impl in Plan F's
-    // client-driven integration. For now, the per-attached-stream JoinHandle is
-    // a no-op sentinel: the initial snapshot Output is sent inline by
-    // `handle_terminal_create` / `handle_terminal_attach` before they return,
-    // and live PTY output is consumed by `spawn_writer_task` below (which reads
-    // from `terminal.subscribe()` and drains it via `out_tx` so the channel
-    // doesn't fill up). End-to-end TerminalCreateOk roundtrips therefore work;
-    // streaming Output past the snapshot is the Plan F integration milestone.
-    let _ = (stream_id, chan, out_rx, terminal_id, terminal);
-    tokio::spawn(async {})
-}
-
-/// Spawn a task that reads OutputChunk from the terminal subscription and
-/// sends serialized Output frames to the main loop via mpsc.
-fn spawn_writer_task(
-    stream_id: StreamId,
-    out_tx: mpsc::Sender<OutputChunk>,
     mut subscription: cli_pocket_pty::OutputStream,
-    terminal_id: TerminalId,
+    output_tx: mpsc::Sender<OutboundOutput>,
 ) -> tokio::task::JoinHandle<()> {
-    let _ = (stream_id, terminal_id);
     tokio::spawn(async move {
         loop {
             match subscription.recv().await {
                 OutputRecv::Chunk(chunk) => {
-                    if out_tx.send(chunk).await.is_err() {
+                    if output_tx
+                        .send(OutboundOutput {
+                            stream: stream_id,
+                            chunk,
+                        })
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
