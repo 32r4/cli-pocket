@@ -133,6 +133,12 @@ impl WsTransport {
     }
 }
 
+impl Drop for WsTransport {
+    fn drop(&mut self) {
+        clear_handlers(&self.ws);
+    }
+}
+
 fn clear_handlers(ws: &WebSocket) {
     ws.set_onopen(None);
     ws.set_onmessage(None);
@@ -162,6 +168,7 @@ impl Transport for WsTransport {
     }
 
     async fn close(&mut self) -> ClientResult<()> {
+        clear_handlers(&self.ws);
         // Best-effort: the JS-side `close()` may throw if already closing.
         let _ = self.ws.close();
         Ok(())
