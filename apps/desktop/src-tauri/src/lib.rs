@@ -4,6 +4,8 @@ mod event_pump;
 mod state;
 
 use state::AppState;
+use std::sync::Mutex;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,9 +13,12 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
 
+    // Create app state with the session handle
+    let app_state = Mutex::new(AppState::new());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
-        .manage(AppState::new())
+        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::create_terminal,
@@ -25,7 +30,14 @@ pub fn run() {
             commands::close,
         ])
         .setup(|app| {
-            event_pump::start(app.handle().clone());
+            // Take the event receiver from state and start the event pump
+            {
+                let state = app.state::<Mutex<AppState>>();
+                let mut guard = state.lock().unwrap();
+                if let Some(event_rx) = guard.take_event_rx() {
+                    event_pump::start(app.handle().clone(), event_rx);
+                }
+            }
             deep_link::install(app.handle().clone());
             Ok(())
         })

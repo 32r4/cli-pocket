@@ -10,5 +10,8 @@ pub mod transport;
 pub use clock::TokioClock;
 pub use kv_store::FileKvStore;
 pub use rng::OsRandom;
-pub use session_handle::SessionHandle;
+pub use session_handle::{LocalSpawner, SessionHandle};
 pub use transport::TokioWsTransport;
+
+// Re-export ClientEvent for convenience in event_pump
+pub use cli_pocket_client_core::ClientEvent;
