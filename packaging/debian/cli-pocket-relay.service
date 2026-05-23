@@ -1,0 +1,19 @@
+[Unit]
+Description=cli-pocket relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cli-pocket-relay
+Group=cli-pocket-relay
+ExecStart=/usr/bin/cli-pocket-relay serve --config /etc/cli-pocket/relay.toml
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

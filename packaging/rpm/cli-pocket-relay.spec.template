@@ -1,0 +1,32 @@
+Name:           cli-pocket-relay
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        cli-pocket relay
+License:        MIT OR Apache-2.0
+URL:            https://github.com/32r4/cli-pocket
+
+Requires(pre):  shadow-utils
+Requires:       systemd
+
+%description
+The cli-pocket relay, exposing PTY sessions over an end-to-end-encrypted
+Noise channel to authenticated clients.
+
+%install
+mkdir -p %{buildroot}/usr/bin
+mkdir -p %{buildroot}/lib/systemd/system
+install -m 0755 cli-pocket-relay %{buildroot}/usr/bin/cli-pocket-relay
+install -m 0644 cli-pocket-relay.service %{buildroot}/lib/systemd/system/cli-pocket-relay.service
+
+%pre
+getent group  cli-pocket-relay >/dev/null || groupadd --system cli-pocket-relay
+getent passwd cli-pocket-relay >/dev/null || \
+    useradd --system -g cli-pocket-relay -d /var/lib/cli-pocket-relay -s /usr/sbin/nologin cli-pocket-relay
+
+%files
+/usr/bin/cli-pocket-relay
+/lib/systemd/system/cli-pocket-relay.service
+
+%changelog
+* Sun Jan 01 2026 cli-pocket maintainers - @VERSION@-1
+- Release @VERSION@

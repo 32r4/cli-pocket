@@ -1,0 +1,20 @@
+[Unit]
+Description=cli-pocket daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cli-pocket
+Group=cli-pocket
+ExecStart=/usr/bin/cli-pocket-daemon start --config /etc/cli-pocket/daemon.toml
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/cli-pocket
+
+[Install]
+WantedBy=multi-user.target

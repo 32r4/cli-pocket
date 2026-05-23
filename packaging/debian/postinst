@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+if ! getent passwd cli-pocket >/dev/null; then
+  adduser --system --group --home /var/lib/cli-pocket --shell /usr/sbin/nologin cli-pocket
+fi
+if ! getent passwd cli-pocket-relay >/dev/null; then
+  adduser --system --group --home /var/lib/cli-pocket-relay --shell /usr/sbin/nologin cli-pocket-relay
+fi
+mkdir -p /var/lib/cli-pocket
+chown cli-pocket:cli-pocket /var/lib/cli-pocket
+mkdir -p /etc/cli-pocket
+chmod 0750 /etc/cli-pocket
+exit 0
