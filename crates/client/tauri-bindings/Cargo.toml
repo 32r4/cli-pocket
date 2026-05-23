@@ -14,3 +14,11 @@ workspace = true
 
 [dependencies]
 cli-pocket-client-core = { path = "../client-core" }
+
+async-trait = { workspace = true }
+futures-util = { workspace = true, features = ["sink"] }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

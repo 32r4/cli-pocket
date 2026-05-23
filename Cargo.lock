@@ -588,7 +588,11 @@ dependencies = [
 name = "cli-pocket-tauri-bindings"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "cli-pocket-client-core",
+ "futures-util",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
