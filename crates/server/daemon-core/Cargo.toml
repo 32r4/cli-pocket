@@ -14,11 +14,15 @@ cli-pocket-proto      = { path = "../../shared/proto" }
 cli-pocket-crypto     = { path = "../../shared/crypto" }
 cli-pocket-transport  = { path = "../../shared/transport" }
 cli-pocket-pty        = { path = "../pty" }
+hmac                  = "0.12"
 serde                 = { workspace = true }
 serde_json            = { workspace = true }
+sha2                  = "0.10"
+subtle                = "2"
 thiserror             = { workspace = true }
 tokio                 = { workspace = true }
 toml                  = "=0.8.23"
+uuid                  = { workspace = true }
 
 [lints]
 workspace = true
