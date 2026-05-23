@@ -44,7 +44,7 @@ use crate::registry::{HostMsg, HostRegistry};
 ///    (route via `pairs.get(pair_id).client_tx.send(PairMsg::HostToClient(..))`).
 #[allow(clippy::unused_async)] // async signature required for Task E7 wiring
 pub async fn run_host_side<WS>(
-    ws: WS,
+    mut ws: WS,
     host_id: HostId,
     rx: mpsc::Receiver<HostMsg>,
     registry: HostRegistry,
@@ -58,8 +58,14 @@ where
         + Send
         + 'static,
 {
-    let _ = (ws, host_id, rx, registry, pairs, caps);
-    todo!("host-side forwarder; see module docs for structure")
+    // The full split-stream wiring lands in a follow-up task. For now we
+    // cleanly close the WebSocket so a connection that reaches this stub does
+    // not leak; the `_` bindings document the surface the follow-up will use.
+    let _ = (host_id, rx, registry, pairs, caps);
+    tracing::warn!("host-side forwarder reached stub; closing socket");
+    let _ = SinkExt::send(&mut ws, Message::Close(None)).await;
+    let _ = SinkExt::close(&mut ws).await;
+    Ok(())
 }
 
 /// Drive the client-side forwarder.
@@ -72,7 +78,7 @@ where
 /// `RelayData::Forward` frames onto the host side via the per-pair sender.
 #[allow(clippy::unused_async)] // async signature required for Task E7 wiring
 pub async fn run_client_side<WS>(
-    ws: WS,
+    mut ws: WS,
     target_host: HostId,
     registry: HostRegistry,
     pairs: PairManager,
@@ -85,8 +91,11 @@ where
         + Send
         + 'static,
 {
-    let _ = (ws, target_host, registry, pairs, caps);
-    todo!("client-side forwarder; see module docs for structure")
+    let _ = (target_host, registry, pairs, caps);
+    tracing::warn!("client-side forwarder reached stub; closing socket");
+    let _ = SinkExt::send(&mut ws, Message::Close(None)).await;
+    let _ = SinkExt::close(&mut ws).await;
+    Ok(())
 }
 
 /// Peel the leading discriminator byte from a binary WS frame and return

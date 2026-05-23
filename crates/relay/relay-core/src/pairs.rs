@@ -1,5 +1,6 @@
-//! Pair management. Plan E5 skeleton — types only. The forwarder wires these
-//! into per-pair routing in subsequent tasks (E6 guillotine, E7 server facade).
+//! Pair management. Plan E5 ships the concrete `Pair`/`PairManager` types;
+//! Plan E7 wires them into the [`crate::guillotine`] sweeper traits so the
+//! background sweep operates on the real registry.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,8 +8,11 @@ use std::time::Instant;
 
 use bytes::Bytes;
 use cli_pocket_proto::{HostId, PairId};
+use futures_util::future::{BoxFuture, FutureExt};
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
+
+use crate::guillotine::{PairHandle, PairSweep};
 
 /// Per-pair routed payload. `HostToClient` / `ClientToHost` carry already-
 /// encoded `RelayData` ciphertext frames; `Close` signals the writer task
@@ -129,4 +133,36 @@ impl PairManager {
 #[must_use]
 pub fn now_marker() -> Instant {
     Instant::now()
+}
+
+impl PairHandle for Pair {
+    fn pair_id(&self) -> PairId {
+        self.pair_id
+    }
+
+    fn last_progress(&self) -> Instant {
+        Pair::last_progress(self)
+    }
+
+    fn close_stuck(self: Arc<Self>) -> BoxFuture<'static, ()> {
+        async move {
+            // Best-effort: a full or closed channel means the peer is already
+            // gone, so we just drop the signal silently.
+            let _ = self.host_tx.send(PairMsg::Close("stuck")).await;
+            let _ = self.client_tx.send(PairMsg::Close("stuck")).await;
+        }
+        .boxed()
+    }
+}
+
+impl PairSweep for PairManager {
+    type Pair = Pair;
+
+    fn list_for_sweep(&self) -> Vec<Arc<Pair>> {
+        PairManager::list_for_sweep(self)
+    }
+
+    fn remove(&self, pair_id: &PairId) {
+        let _ = PairManager::remove(self, pair_id);
+    }
 }

@@ -33,10 +33,10 @@ parking_lot = "0.12"
 thiserror = { workspace = true }
 anyhow = "1"
 bytes = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread", "time"] }
 reqwest = { version = "=0.12.12", default-features = false, features = ["json"] }
 tokio-tungstenite = { workspace = true }
 tempfile = "3"
-uuid = { workspace = true }
