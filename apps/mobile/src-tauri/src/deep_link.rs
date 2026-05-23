@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_deep_link::DeepLinkExt;
 
+#[allow(clippy::needless_pass_by_value)]
 pub fn install(app: AppHandle) {
     let emit_app = app.clone();
     app.deep_link().on_open_url(move |event| {

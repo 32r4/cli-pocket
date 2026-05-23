@@ -22,6 +22,8 @@ release), but a maintainer must approve and publish.
 6. Push: `git push && git push --tags`. CI runs the `release` workflow.
 7. Watch the workflow; on success it creates a **draft** release with all
    artifacts attached.
+   - Android/iOS jobs run only when `apps/mobile/src-tauri/tauri.conf.json`
+     exists in the tagged revision.
 8. Download `SHA256SUMS` and `SHA256SUMS.minisig`; verify locally:
 
    ```

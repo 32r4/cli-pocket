@@ -9,32 +9,95 @@ on:
         description: "Version (without leading v)"
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: build (${{ matrix.os }} / ${{ matrix.target }})
+    name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - name: linux-x86_64
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            kinds: "daemon,relay,desktop,web"
-          - os: ubuntu-22.04
+            build_daemon: true
+            build_relay: true
+            build_desktop: true
+            build_web: true
+            build_android: false
+            build_ios: false
+            node_required: true
+            tauri_required: true
+            wasm_pack_install: shell
+            tauri_bundles: deb,rpm,appimage
+          - name: linux-aarch64
+            os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
-            kinds: "daemon,relay"
-          - os: macos-14
+            build_daemon: true
+            build_relay: true
+            build_desktop: false
+            build_web: false
+            build_android: false
+            build_ios: false
+            node_required: false
+            tauri_required: false
+            wasm_pack_install: none
+            tauri_bundles: ""
+          - name: macos-x86_64
+            os: macos-13
             target: x86_64-apple-darwin
-            kinds: "daemon,relay,desktop"
-          - os: macos-14
+            build_daemon: true
+            build_relay: true
+            build_desktop: true
+            build_web: false
+            build_android: false
+            build_ios: false
+            node_required: true
+            tauri_required: true
+            wasm_pack_install: none
+            tauri_bundles: dmg,app
+          - name: macos-aarch64
+            os: macos-14
             target: aarch64-apple-darwin
-            kinds: "daemon,relay,desktop,mobile-ios"
-          - os: windows-2022
+            build_daemon: true
+            build_relay: true
+            build_desktop: true
+            build_web: false
+            build_android: false
+            build_ios: true
+            node_required: true
+            tauri_required: true
+            wasm_pack_install: none
+            tauri_bundles: dmg,app
+          - name: windows-x86_64
+            os: windows-2022
             target: x86_64-pc-windows-msvc
-            kinds: "daemon,relay,desktop"
-          - os: ubuntu-22.04
+            build_daemon: true
+            build_relay: true
+            build_desktop: true
+            build_web: false
+            build_android: false
+            build_ios: false
+            node_required: true
+            tauri_required: true
+            wasm_pack_install: none
+            tauri_bundles: msi
+          - name: android
+            os: ubuntu-22.04
             target: android
-            kinds: "mobile-android"
+            build_daemon: false
+            build_relay: false
+            build_desktop: false
+            build_web: false
+            build_android: true
+            build_ios: false
+            node_required: true
+            tauri_required: true
+            wasm_pack_install: none
+            tauri_bundles: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -49,48 +112,77 @@ jobs:
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check mobile scaffold
+        id: mobile
+        shell: bash
+        run: |
+          if [ -f apps/mobile/src-tauri/tauri.conf.json ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target == 'android' && '' || matrix.target }}
+          targets: ${{ matrix.target == 'android' && 'aarch64-linux-android' || matrix.target }}
 
       - name: Add cross-linker (linux aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           mkdir -p .cargo
-          cat >> .cargo/config.toml <<EOF
+          cat >> .cargo/config.toml <<'EOF'
           [target.aarch64-unknown-linux-gnu]
           linker = "aarch64-linux-gnu-gcc"
           EOF
 
       - uses: actions/setup-node@v4
+        if: matrix.node_required
         with:
           node-version: 22
-        if: contains(matrix.kinds, 'desktop') || contains(matrix.kinds, 'web') || contains(matrix.kinds, 'mobile')
+          cache: npm
+          cache-dependency-path: webview/terminal/package-lock.json
 
       - name: Install Tauri prerequisites (linux)
-        if: runner.os == 'Linux' && (contains(matrix.kinds, 'desktop') || contains(matrix.kinds, 'mobile-android'))
+        if: runner.os == 'Linux' && (matrix.build_desktop || matrix.build_android)
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libssl-dev pkg-config librsvg2-dev
 
-      - name: Install wasm-pack
-        if: contains(matrix.kinds, 'web')
+      - name: Install wasm-pack (unix)
+        if: matrix.wasm_pack_install == 'shell' && runner.os != 'Windows'
+        shell: bash
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
+      - name: Install wasm-pack (windows)
+        if: matrix.wasm_pack_install == 'shell' && runner.os == 'Windows'
+        shell: bash
+        run: cargo install wasm-pack --locked
+
       - name: Install tauri-cli
-        if: contains(matrix.kinds, 'desktop') || contains(matrix.kinds, 'mobile-android') || contains(matrix.kinds, 'mobile-ios')
+        if: matrix.tauri_required
+        shell: bash
         run: cargo install tauri-cli --version "^2.1" --locked
 
-      - name: Install minisign
+      - name: Install minisign (linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |
-          case "${{ runner.os }}" in
-            Linux)   sudo apt-get install -y minisign ;;
-            macOS)   brew install minisign ;;
-            Windows) choco install minisign -y ;;
-          esac
+          sudo apt-get update
+          sudo apt-get install -y minisign
+
+      - name: Install minisign (macos)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install minisign
+
+      - name: Install minisign (windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: choco install minisign -y
 
       - name: Materialise signing key
         if: secrets.MINISIGN_SECRET_KEY != ''
@@ -102,7 +194,7 @@ jobs:
           chmod 600 cli-pocket-minisign.key
 
       - name: Build daemon
-        if: contains(matrix.kinds, 'daemon')
+        if: matrix.build_daemon
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           TARGET: ${{ matrix.target }}
@@ -110,7 +202,7 @@ jobs:
         run: bash scripts/release/build-daemon.sh
 
       - name: Build relay
-        if: contains(matrix.kinds, 'relay')
+        if: matrix.build_relay
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           TARGET: ${{ matrix.target }}
@@ -118,42 +210,42 @@ jobs:
         run: bash scripts/release/build-relay.sh
 
       - name: Build desktop
-        if: contains(matrix.kinds, 'desktop')
+        if: matrix.build_desktop
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          TAURI_BUNDLES: ${{ runner.os == 'Linux' && 'deb,rpm,appimage' || runner.os == 'macOS' && 'dmg,app' || 'msi' }}
+          TAURI_BUNDLES: ${{ matrix.tauri_bundles }}
         shell: bash
         run: bash scripts/release/build-desktop.sh
 
       - name: Build web
-        if: contains(matrix.kinds, 'web')
+        if: matrix.build_web
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         shell: bash
         run: bash scripts/release/build-web.sh
 
-      - name: Setup Java + Android SDK
-        if: contains(matrix.kinds, 'mobile-android')
+      - name: Setup Java
+        if: matrix.build_android && steps.mobile.outputs.enabled == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
       - name: Setup Android NDK
-        if: contains(matrix.kinds, 'mobile-android')
+        if: matrix.build_android && steps.mobile.outputs.enabled == 'true'
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
 
       - name: Build mobile (android)
-        if: contains(matrix.kinds, 'mobile-android')
+        if: matrix.build_android
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         shell: bash
         run: bash scripts/release/build-mobile-android.sh
 
       - name: Build mobile (ios)
-        if: contains(matrix.kinds, 'mobile-ios')
+        if: matrix.build_ios
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         shell: bash
@@ -168,9 +260,10 @@ jobs:
         run: bash scripts/release/sign.sh dist/
 
       - name: Upload artifacts
+        if: always() && hashFiles('dist/*') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.os }}-${{ matrix.target }}
+          name: dist-${{ matrix.name }}
           path: dist/
 
   publish:
@@ -188,34 +281,49 @@ jobs:
           path: aggregated/
 
       - name: Flatten
+        shell: bash
         run: |
           mkdir -p dist
           find aggregated -type f -exec cp -n {} dist/ \;
           ls -lh dist/
 
+      - name: Verify signing secrets exist
+        if: ${{ secrets.MINISIGN_SECRET_KEY == '' || secrets.MINISIGN_PASSWORD == '' }}
+        shell: bash
+        run: |
+          echo "MINISIGN_SECRET_KEY and MINISIGN_PASSWORD must both be configured for release publishing." >&2
+          exit 1
+
       - name: Generate SHA256SUMS
+        shell: bash
         run: bash scripts/release/sha256sums.sh dist/
 
       - name: Install minisign
-        run: sudo apt-get update && sudo apt-get install -y minisign
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
 
       - name: Sign SHA256SUMS
         env:
           MINISIGN_KEY_FILE: cli-pocket-minisign.key
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        shell: bash
         run: |
           printf '%s' "$KEY" > cli-pocket-minisign.key
           chmod 600 cli-pocket-minisign.key
           echo "$MINISIGN_PASSWORD" | minisign -S -s cli-pocket-minisign.key -m dist/SHA256SUMS -t "cli-pocket release"
 
+      - name: Extract minisign public key
+        shell: bash
+        run: bash scripts/release/extract-public-key.sh docs/release/PUBLIC_KEY.md cli-pocket-minisign.pub
+
       - name: Verify everything
-        run: |
-          curl -fsSL -o cli-pocket-minisign.pub https://raw.githubusercontent.com/${{ github.repository }}/main/docs/release/PUBLIC_KEY.md \
-            && true # cleaning the markdown wrap is done by the next step
-          # Extract the inline `untrusted comment: ...\n<base64>` block from the doc.
-          awk '/```text/{flag=1;next}/```/{flag=0}flag' cli-pocket-minisign.pub > tmp.pub && mv tmp.pub cli-pocket-minisign.pub
-          MINISIGN_PUB_FILE=cli-pocket-minisign.pub bash scripts/release/verify.sh dist/
+        env:
+          MINISIGN_PUB_FILE: cli-pocket-minisign.pub
+        shell: bash
+        run: bash scripts/release/verify.sh dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

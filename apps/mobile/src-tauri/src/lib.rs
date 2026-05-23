@@ -11,7 +11,7 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
 
-    let (app_state, event_rx) = AppState::new().expect("desktop app state should initialize");
+    let (app_state, event_rx) = AppState::new().expect("mobile app state should initialize");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())

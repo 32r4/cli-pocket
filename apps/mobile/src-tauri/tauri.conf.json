@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "productName": "cli-pocket",
+  "version": "0.1.0",
+  "identifier": "dev.cli-pocket.mobile",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../../../webview/terminal run dev -- --mode tauri",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm --prefix ../../../webview/terminal run build:tauri",
+    "frontendDist": "../../../webview/terminal/dist/tauri"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "android": {
+      "minSdkVersion": 26
+    },
+    "iOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "schemes": ["cli-pocket"],
+      "mobile": [
+        {
+          "host": "pair",
+          "pathPrefix": ["/"]
+        }
+      ]
+    }
+  }
+}

@@ -138,6 +138,7 @@ pub async fn cli_pocket_kill(
     state.session.kill(terminal_id).await
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn cli_pocket_export_identity(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
     let identity = async_runtime::block_on(ClientIdentity::load_or_create(&state.kv, &OsRandom))
@@ -147,6 +148,7 @@ pub fn cli_pocket_export_identity(state: State<'_, AppState>) -> Result<Vec<u8>,
         .map_err(|error| error.to_string())
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn cli_pocket_import_identity(state: State<'_, AppState>, blob: Vec<u8>) -> Result<(), String> {
     async_runtime::block_on(ClientIdentity::import_serialized(&state.kv, &blob))

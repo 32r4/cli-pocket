@@ -6,7 +6,11 @@ OUT_DIR="${OUT_DIR:-dist}"
 mkdir -p "$OUT_DIR"
 
 cd apps/web
-npm ci
+if [ -f package-lock.json ]; then
+  npm ci
+else
+  npm install --no-package-lock
+fi
 npm run build
 cd "$OLDPWD"
 
