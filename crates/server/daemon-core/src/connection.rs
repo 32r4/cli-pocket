@@ -454,26 +454,17 @@ fn spawn_output_writer<T: Transport + 'static>(
     terminal_id: TerminalId,
     terminal: Arc<Terminal>,
 ) -> tokio::task::JoinHandle<()> {
-    // We can't move `chan` into the task since the main loop still uses it.
-    // Instead, we use an mpsc to send frames back to the main loop.
-    // The actual design: spawn_output_writer creates a task that reads from
-    // the terminal and sends via a channel to the main loop's writer path.
-    //
-    // But since we're inside spawn_output_writer which is called from the
-    // handler that doesn't own a write channel, let's restructure.
-    //
-    // Simplified approach: the writer task sends serialized frames back to
-    // a writer task that owns the channel. For now, we use a simpler pattern
-    // where the main loop drains a channel.
-    //
-    // Actually, the cleanest approach for this implementation:
-    // We'll have a separate outbound mpsc that feeds into the main loop.
-    // Let me restructure to use an mpsc for outbound frames.
-
+    // The full writer-task design (mpsc<Frame> feeding a single task that owns
+    // `EncryptedChannel`) graduates from skeleton to full impl in Plan F's
+    // client-driven integration. For now, the per-attached-stream JoinHandle is
+    // a no-op sentinel: the initial snapshot Output is sent inline by
+    // `handle_terminal_create` / `handle_terminal_attach` before they return,
+    // and live PTY output is consumed by `spawn_writer_task` below (which reads
+    // from `terminal.subscribe()` and drains it via `out_tx` so the channel
+    // doesn't fill up). End-to-end TerminalCreateOk roundtrips therefore work;
+    // streaming Output past the snapshot is the Plan F integration milestone.
     let _ = (stream_id, chan, out_rx, terminal_id, terminal);
-    // The real implementation uses an mpsc::Sender<Frame> passed from the
-    // main loop. See the restructured `run_connection_post_handshake_v2` below.
-    unimplemented!("use mpsc-based writer instead")
+    tokio::spawn(async {})
 }
 
 /// Spawn a task that reads OutputChunk from the terminal subscription and
