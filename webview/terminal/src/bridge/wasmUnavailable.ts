@@ -36,7 +36,7 @@ export class CliPocketClient implements WasmClient {
     throwUnavailable();
   }
 
-  async import_identity(_bytes: Uint8Array): Promise<never> {
+  async import_identity(_blob: string): Promise<never> {
     throwUnavailable();
   }
 

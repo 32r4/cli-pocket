@@ -28,7 +28,7 @@ export interface WasmClient {
   kill: CurrentKill | FutureKill;
   next_event(): Promise<unknown>;
   export_identity(): Promise<unknown>;
-  import_identity(bytes: Uint8Array): Promise<void>;
+  import_identity(blob: string): Promise<void>;
   close?: () => Promise<void>;
 }
 
@@ -132,7 +132,7 @@ export class WebBridge implements ClientBridge {
   }
 
   async importIdentity(blob: Uint8Array): Promise<void> {
-    await this.client.import_identity(blob);
+    await this.client.import_identity(new TextDecoder().decode(blob));
   }
 
   async close(): Promise<void> {

@@ -16,8 +16,8 @@ declare module "cli-pocket-client-core-wasm" {
       | (() => Promise<void>)
       | ((terminalId: string, signal: string) => Promise<void>);
     next_event(): Promise<unknown>;
-    export_identity(): Promise<unknown>;
-    import_identity(bytes: Uint8Array): Promise<void>;
+    export_identity(): string;
+    import_identity(blob: string): Promise<void>;
     close?: () => Promise<void>;
   }
 }
