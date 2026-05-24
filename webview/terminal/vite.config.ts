@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 export default defineConfig(({ mode }): UserConfig => {
   const isTauri = mode === "tauri";
+  const tauriDevHost = process.env.TAURI_DEV_HOST;
   const wasmPackageDir = resolve(
     __dirname,
     "../../crates/client/client-core-wasm/pkg",
@@ -32,6 +33,7 @@ export default defineConfig(({ mode }): UserConfig => {
       },
     },
     server: {
+      ...(isTauri ? { host: tauriDevHost ?? "0.0.0.0" } : {}),
       port: 5173,
       strictPort: true,
     },

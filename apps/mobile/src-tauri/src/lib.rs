@@ -4,6 +4,7 @@ mod event_pump;
 mod state;
 
 use state::AppState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,11 +12,8 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
 
-    let (app_state, event_rx) = AppState::new().expect("mobile app state should initialize");
-
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
-        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::cli_pocket_connect,
             commands::cli_pocket_create_terminal,
@@ -26,7 +24,16 @@ pub fn run() {
             commands::cli_pocket_import_identity,
             commands::cli_pocket_close,
         ])
-        .setup(move |app| {
+        .setup(|app| {
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| std::io::Error::other(format!("resolve app data dir: {error}")))?;
+            let (app_state, event_rx) = AppState::new_at(&app_data_dir).map_err(|error| {
+                std::io::Error::other(format!("mobile app state should initialize: {error}"))
+            })?;
+
+            app.manage(app_state);
             event_pump::start(app.handle().clone(), event_rx);
             deep_link::install(app.handle().clone());
             Ok(())

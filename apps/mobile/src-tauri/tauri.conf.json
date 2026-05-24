@@ -7,10 +7,14 @@
     "beforeDevCommand": "npm --prefix ../../webview/terminal run dev -- --mode tauri",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm --prefix ../../webview/terminal run build:tauri",
-    "frontendDist": "../../webview/terminal/dist/tauri"
+    "frontendDist": "../../../webview/terminal/dist/tauri"
   },
   "app": {
-    "windows": [],
+    "windows": [
+      {
+        "title": "cli-pocket"
+      }
+    ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost"
     }
