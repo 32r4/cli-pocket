@@ -92,6 +92,26 @@ impl ClientDb {
         Ok(())
     }
 
+    pub async fn add_or_lookup_by_public(
+        &self,
+        record: ClientRecord,
+    ) -> crate::DaemonResult<ClientRecord> {
+        let mut state = self.inner.write().await;
+        if let Some(existing) = state
+            .by_public
+            .get(&record.public_key)
+            .and_then(|client_id| state.by_id.get(client_id))
+            .cloned()
+        {
+            return Ok(existing);
+        }
+
+        let next = state.with_added(record.clone())?;
+        write_clients_file(&self.clients_path, &next.clients_file())?;
+        *state = next;
+        Ok(record)
+    }
+
     pub async fn list(&self) -> Vec<ClientRecord> {
         let state = self.inner.read().await;
         let mut clients: Vec<_> = state.by_id.values().cloned().collect();
