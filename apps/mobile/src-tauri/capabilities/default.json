@@ -1,6 +1,8 @@
 {
+  "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "default",
   "description": "Default capabilities for cli-pocket mobile app",
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "core:event:default",
