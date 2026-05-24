@@ -7,7 +7,7 @@
 //   ConnectConfig: { endpointUrl, serverPublicHex, resumeTokenHex? } (camelCase)
 
 import init, { client_pair_with_code } from "cli-pocket-client-core-wasm";
-import { installHashHandlers } from "@/identity/IdentityActions";
+import { installHashHandlers } from "@web/identity/IdentityActions";
 import { mountPairingView, type PairingValues } from "./PairingView";
 import type { SavedServer } from "./relayEndpoint";
 
@@ -27,15 +27,27 @@ function saveSaved(s: SavedServer): void {
   localStorage.setItem(STORE_KEY, JSON.stringify(s));
 }
 
+function clearSaved(): void {
+  localStorage.removeItem(STORE_KEY);
+}
+
 export async function startWebApp(root: HTMLElement): Promise<void> {
   await init();
 
   const saved = loadSaved();
   if (saved) {
-    await launchTerminal(root, saved);
-    return;
+    try {
+      await launchTerminal(root, saved);
+      return;
+    } catch {
+      clearSaved();
+    }
   }
 
+  mountPairing(root);
+}
+
+function mountPairing(root: HTMLElement): void {
   mountPairingView(root, async (v: PairingValues) => {
     const result = (await client_pair_with_code(v.daemon_pairing_url, v.code)) as {
       server_public_hex: string;
@@ -48,7 +60,12 @@ export async function startWebApp(root: HTMLElement): Promise<void> {
       resume_token_hex: null,
     };
     saveSaved(sel);
-    await launchTerminal(root, sel);
+    try {
+      await launchTerminal(root, sel);
+    } catch (err) {
+      clearSaved();
+      throw err;
+    }
   });
 }
 
