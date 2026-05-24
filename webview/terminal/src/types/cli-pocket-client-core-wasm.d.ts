@@ -2,6 +2,10 @@ declare module "cli-pocket-client-core-wasm" {
   import type { WasmClient } from "@/bridge/WebBridge";
 
   export default function init(): Promise<unknown> | unknown;
+  export function client_pair_with_code(
+    daemon_pairing_url: string,
+    code: string,
+  ): Promise<unknown>;
 
   export class CliPocketClient implements WasmClient {
     connect(configJson: string): Promise<void>;
