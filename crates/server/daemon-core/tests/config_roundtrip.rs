@@ -13,6 +13,7 @@ fn default_then_serialize_then_deserialize() {
     assert_eq!(parsed.listen.addr, cfg.listen.addr);
     assert_eq!(parsed.listen.port, cfg.listen.port);
     assert_eq!(parsed.security.identity_path, cfg.security.identity_path);
+    assert_eq!(parsed.pairing.code_ttl_secs, 120);
 }
 
 #[test]
@@ -30,11 +31,15 @@ revoked_path = "/var/lib/cli-pocket/revoked.json"
 [relay]
 url = "wss://relay.example.com"
 psk_hex = "deadbeef"
+
+[pairing]
+code_ttl_secs = 60
 "#;
 
     let cfg: DaemonConfig = toml::from_str(toml_text).unwrap();
 
     assert_eq!(cfg.listen.port, 8443);
+    assert_eq!(cfg.pairing.code_ttl_secs, 60);
     let relay = cfg.relay.unwrap();
     assert_eq!(relay.url, "wss://relay.example.com");
     assert_eq!(relay.psk_hex, "deadbeef");

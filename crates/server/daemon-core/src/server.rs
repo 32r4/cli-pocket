@@ -2,8 +2,10 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cli_pocket_proto::ServerInfo;
+use cli_pocket_transport::{TokioWsTransport, Transport};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -12,6 +14,7 @@ use crate::client_db::ClientDb;
 use crate::config::DaemonConfig;
 use crate::identity_store::{load_or_create, DaemonIdentity};
 use crate::listener::{serve, ListenerDeps};
+use crate::pairing::PairingCodes;
 use crate::session::SessionManager;
 
 /// Top-level daemon struct owning all subsystems.
@@ -24,10 +27,12 @@ pub struct Daemon {
     pub identity: DaemonIdentity,
     pub session_mgr: Arc<SessionManager>,
     pub client_db: Arc<ClientDb>,
+    pub pairing_codes: PairingCodes,
     pub server_info: ServerInfo,
     pub config: DaemonConfig,
     listener_handle: Option<JoinHandle<()>>,
     relay_handle: Option<JoinHandle<()>>,
+    pairing_code_handle: Option<JoinHandle<()>>,
 }
 
 impl Daemon {
@@ -43,6 +48,7 @@ impl Daemon {
         );
 
         let session_mgr = Arc::new(SessionManager::new(config.limits.max_terminals));
+        let pairing_codes = PairingCodes::new(Duration::from_secs(config.pairing.code_ttl_secs));
 
         let server_info = ServerInfo {
             server_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -53,10 +59,12 @@ impl Daemon {
             identity,
             session_mgr,
             client_db,
+            pairing_codes,
             server_info,
             config,
             listener_handle: None,
             relay_handle: None,
+            pairing_code_handle: None,
         })
     }
 
@@ -76,6 +84,7 @@ impl Daemon {
         });
         let session_mgr = Arc::clone(&self.session_mgr);
         let client_db = Arc::clone(&self.client_db);
+        let pairing_codes = self.pairing_codes.clone();
         let server_info = self.server_info.clone();
 
         let listener_deps = ListenerDeps {
@@ -83,6 +92,7 @@ impl Daemon {
             psk,
             session_mgr,
             client_db,
+            pairing_codes,
             server_info,
         };
 
@@ -92,6 +102,19 @@ impl Daemon {
             }
         });
         self.listener_handle = Some(handle);
+
+        let pairing_codes = self.pairing_codes.clone();
+        let tick_secs = self.config.pairing.code_ttl_secs.max(1);
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(tick_secs));
+            loop {
+                interval.tick().await;
+                if let Some(code) = pairing_codes.rotate_if_expired() {
+                    info!(pairing_code = %code, "pairing code rotated");
+                }
+            }
+        });
+        self.pairing_code_handle = Some(handle);
 
         if let Some(relay_config) = self.config.relay.clone() {
             let host_id = self.identity.host_id;
@@ -106,7 +129,7 @@ impl Daemon {
             self.relay_handle = Some(handle);
         }
 
-        info!("daemon started");
+        info!(pairing_code = %self.pairing_codes.current_code(), "daemon started");
         Ok(())
     }
 
@@ -118,84 +141,71 @@ impl Daemon {
         if let Some(h) = self.relay_handle {
             h.abort();
         }
+        if let Some(h) = self.pairing_code_handle {
+            h.abort();
+        }
     }
 
     /// Utility: return the daemon's public key as a hex string.
     pub fn public_key_hex(&self) -> String {
         hex::encode(self.identity.keypair.public)
     }
+}
 
-    /// Run the one-shot SPAKE2 pairing flow.
-    ///
-    /// Binds a short-lived TCP listener on `bind`, accepts a single inbound
-    /// WebSocket connection, completes SPAKE2 with `code` as the shared
-    /// password, then exchanges the client's static public key (encrypted with
-    /// the SPAKE2-derived PSK) and the daemon's static public key. The new
-    /// client record is appended to `clients.json`.
-    pub async fn run_pairing(
-        &self,
-        code: String,
-        label: String,
-        bind: SocketAddr,
-    ) -> crate::DaemonResult<crate::client_db::ClientRecord> {
-        use cli_pocket_crypto::Spake2Side;
-        use cli_pocket_proto::ClientId;
-        use cli_pocket_transport::{TokioWsTransport, Transport};
-        use tokio::net::TcpListener;
-        use tokio_tungstenite::accept_async;
-        use tokio_tungstenite::MaybeTlsStream;
-        use uuid::Uuid;
+pub async fn run_pairing_transport(
+    mut transport: TokioWsTransport,
+    identity: &cli_pocket_crypto::KeyPair,
+    client_db: &ClientDb,
+    pairing_codes: &PairingCodes,
+) -> crate::DaemonResult<crate::client_db::ClientRecord> {
+    use cli_pocket_crypto::Spake2Side;
+    use cli_pocket_proto::ClientId;
+    use uuid::Uuid;
 
-        let listener = TcpListener::bind(bind).await?;
-        info!(addr = %bind, "pairing listener up");
-        let (sock, _peer) = listener.accept().await?;
-        let ws = accept_async(MaybeTlsStream::Plain(sock))
-            .await
-            .map_err(|e| crate::DaemonError::Internal(format!("ws upgrade during pairing: {e}")))?;
-        let mut transport = TokioWsTransport::new(ws);
+    let _rotated = pairing_codes.rotate_if_expired();
+    let code = pairing_codes.current_code();
+    let sp = Spake2Side::start_host(code.as_bytes(), PAIRING_HOST_ID, PAIRING_CLIENT_ID);
+    let outbound = sp.outbound().to_vec();
+    transport.send(outbound).await?;
+    let peer_msg = transport.recv().await?.ok_or_else(|| {
+        crate::DaemonError::Internal("pairing peer closed before SPAKE2 reply".into())
+    })?;
+    let outcome = sp
+        .finish(&peer_msg)
+        .map_err(|e| crate::DaemonError::Internal(format!("SPAKE2 finish failed: {e}")))?;
 
-        // SPAKE2 — host side. Both sides bind to fixed identity strings so
-        // the client can complete the handshake without prior knowledge of
-        // the daemon's host_id.
-        let sp = Spake2Side::start_host(code.as_bytes(), PAIRING_HOST_ID, PAIRING_CLIENT_ID);
-        let outbound = sp.outbound().to_vec();
-        transport.send(outbound).await?;
-        let peer_msg = transport.recv().await?.ok_or_else(|| {
-            crate::DaemonError::Internal("pairing peer closed before SPAKE2 reply".into())
-        })?;
-        let outcome = sp
-            .finish(&peer_msg)
-            .map_err(|e| crate::DaemonError::Internal(format!("SPAKE2 finish failed: {e}")))?;
-
-        // The client now uses the SPAKE2 PSK to encrypt their static public
-        // key + label hint. We use ChaCha20Poly1305 with a zero nonce; the
-        // PSK is single-use so reuse is safe.
-        let payload = transport.recv().await?.ok_or_else(|| {
-            crate::DaemonError::Internal("pairing peer closed before client pk".into())
-        })?;
-        let client_pk_vec = decrypt_pairing_payload(&outcome.psk, &payload)?;
-        let client_pk: [u8; 32] = client_pk_vec
-            .as_slice()
-            .try_into()
-            .map_err(|_| crate::DaemonError::Internal("expected 32-byte client pk".into()))?;
-
-        let record = crate::client_db::ClientRecord {
-            client_id: ClientId(Uuid::now_v7()),
-            public_key: client_pk,
-            label,
-            paired_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs()),
-        };
-        self.client_db.add(record.clone()).await?;
-
-        // Send confirmation (encrypted host public key for the client to pin).
-        let host_pk = &self.identity.keypair.public;
-        let ack = encrypt_pairing_payload(&outcome.psk, host_pk)?;
-        transport.send(ack).await?;
-
-        Ok(record)
+    if !pairing_codes.match_current(&code) {
+        return Err(crate::DaemonError::Internal(
+            "pairing code expired during handshake".into(),
+        ));
     }
+
+    let payload = transport.recv().await?.ok_or_else(|| {
+        crate::DaemonError::Internal("pairing peer closed before client pk".into())
+    })?;
+    let client_pk_vec = decrypt_pairing_payload(&outcome.psk, &payload)?;
+    let client_pk: [u8; 32] = client_pk_vec
+        .as_slice()
+        .try_into()
+        .map_err(|_| crate::DaemonError::Internal("expected 32-byte client pk".into()))?;
+
+    let _next_code = pairing_codes.consume_current(&code).ok_or_else(|| {
+        crate::DaemonError::Internal("pairing code expired before client registration".into())
+    })?;
+
+    let record = crate::client_db::ClientRecord {
+        client_id: ClientId(Uuid::now_v7()),
+        public_key: client_pk,
+        paired_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+    };
+    let record = client_db.add_or_lookup_by_public(record).await?;
+
+    let ack = encrypt_pairing_payload(&outcome.psk, &identity.public)?;
+    transport.send(ack).await?;
+
+    Ok(record)
 }
 
 /// Identity binding used by the daemon side of the SPAKE2 pairing exchange.

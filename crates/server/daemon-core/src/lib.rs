@@ -6,6 +6,7 @@ pub mod connection;
 pub mod handshake;
 pub mod identity_store;
 pub mod listener;
+pub mod pairing;
 pub mod relay_dialer;
 pub mod resume;
 pub mod server;

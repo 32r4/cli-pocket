@@ -49,12 +49,12 @@ export async function startWebApp(root: HTMLElement): Promise<void> {
 
 function mountPairing(root: HTMLElement): void {
   mountPairingView(root, async (v: PairingValues) => {
-    const result = (await client_pair_with_code(v.daemon_pairing_url, v.code)) as {
+    const result = (await client_pair_with_code(v.pairing_url, v.code)) as {
       server_public_hex: string;
       client_public_hex: string;
     };
     const sel: SavedServer = {
-      endpoint_url: v.daemon_pairing_url, // For v1, reconnect to the same daemon URL
+      endpoint_url: v.session_url,
       server_public_hex: result.server_public_hex,
       client_public_hex: result.client_public_hex,
       resume_token_hex: null,

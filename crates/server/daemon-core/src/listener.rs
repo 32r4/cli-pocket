@@ -8,12 +8,17 @@ use cli_pocket_crypto::KeyPair;
 use cli_pocket_proto::ServerInfo;
 use cli_pocket_transport::TokioWsTransport;
 use tokio::net::TcpListener;
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::accept_hdr_async;
+use tokio_tungstenite::tungstenite::handshake::server::{
+    Callback, ErrorResponse, Request, Response,
+};
 use tokio_tungstenite::MaybeTlsStream;
 use tracing::{error, info};
 
 use crate::client_db::ClientDb;
 use crate::connection::{run_connection_with_handshake, ConnectionDeps};
+use crate::pairing::PairingCodes;
+use crate::server::run_pairing_transport;
 use crate::session::SessionManager;
 
 /// Shared dependencies handed to each accepted connection.
@@ -23,6 +28,7 @@ pub struct ListenerDeps {
     pub psk: Option<Arc<[u8; 32]>>,
     pub session_mgr: Arc<SessionManager>,
     pub client_db: Arc<ClientDb>,
+    pub pairing_codes: PairingCodes,
     pub server_info: ServerInfo,
 }
 
@@ -53,7 +59,16 @@ pub async fn serve(listener: TcpListener, deps: ListenerDeps) -> crate::DaemonRe
         tokio::spawn(async move {
             info!(%peer, "connection opened");
 
-            let ws = match accept_async(MaybeTlsStream::Plain(sock)).await {
+            let request_path = Arc::new(parking_lot::Mutex::new(None));
+            let callback_path = Arc::clone(&request_path);
+            let ws = match accept_hdr_async(
+                MaybeTlsStream::Plain(sock),
+                PathCapture {
+                    request_path: callback_path,
+                },
+            )
+            .await
+            {
                 Ok(ws) => ws,
                 Err(e) => {
                     error!(%peer, error = %e, "ws upgrade failed");
@@ -62,6 +77,36 @@ pub async fn serve(listener: TcpListener, deps: ListenerDeps) -> crate::DaemonRe
             };
 
             let transport = TokioWsTransport::new(ws);
+            let path = request_path
+                .lock()
+                .clone()
+                .unwrap_or_else(|| "/".to_string());
+
+            if path == "/pair" {
+                match run_pairing_transport(
+                    transport,
+                    &deps.identity,
+                    &deps.client_db,
+                    &deps.pairing_codes,
+                )
+                .await
+                {
+                    Ok(record) => {
+                        info!(
+                            %peer,
+                            client_id = %record.client_id.0,
+                            "client paired"
+                        );
+                    }
+                    Err(e) => error!(%peer, error = %e, "pairing ended with error"),
+                }
+                return;
+            }
+
+            if path != "/session" {
+                error!(%peer, %path, "unsupported websocket path");
+                return;
+            }
 
             let psk_ref = deps.psk.as_ref().map(|arc| arc.as_ref());
             if let Err(e) = run_connection_with_handshake(
@@ -81,5 +126,17 @@ pub async fn serve(listener: TcpListener, deps: ListenerDeps) -> crate::DaemonRe
                 info!(%peer, "connection closed cleanly");
             }
         });
+    }
+}
+
+struct PathCapture {
+    request_path: Arc<parking_lot::Mutex<Option<String>>>,
+}
+
+impl Callback for PathCapture {
+    #[allow(clippy::result_large_err, clippy::unnecessary_wraps)]
+    fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
+        *self.request_path.lock() = Some(request.uri().path().to_string());
+        Ok(response)
     }
 }

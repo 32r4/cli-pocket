@@ -13,6 +13,8 @@ pub struct DaemonConfig {
     pub relay: Option<RelayConfig>,
     #[serde(default)]
     pub limits: LimitsConfig,
+    #[serde(default)]
+    pub pairing: PairingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +75,17 @@ impl Default for LimitsConfig {
             scrollback_anchor_interval: 64 * 1024,
             broadcast_capacity: 1024,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingConfig {
+    pub code_ttl_secs: u64,
+}
+
+impl Default for PairingConfig {
+    fn default() -> Self {
+        Self { code_ttl_secs: 120 }
     }
 }
 

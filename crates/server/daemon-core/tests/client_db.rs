@@ -15,7 +15,6 @@ async fn pair_persists_and_lookup_works() {
     db.add(ClientRecord {
         client_id: cid,
         public_key: pk,
-        label: "phone".into(),
         paired_at: 0,
     })
     .await
@@ -45,7 +44,6 @@ async fn revocation_propagates_through_watch() {
     db.add(ClientRecord {
         client_id: cid,
         public_key: [9_u8; 32],
-        label: "laptop".into(),
         paired_at: 0,
     })
     .await
@@ -103,7 +101,6 @@ async fn duplicate_client_id_is_rejected_without_changing_indexes() {
     db.add(ClientRecord {
         client_id: cid,
         public_key: first_pk,
-        label: "phone".into(),
         paired_at: 0,
     })
     .await
@@ -113,7 +110,6 @@ async fn duplicate_client_id_is_rejected_without_changing_indexes() {
         .add(ClientRecord {
             client_id: cid,
             public_key: second_pk,
-            label: "tablet".into(),
             paired_at: 1,
         })
         .await
@@ -150,7 +146,6 @@ async fn duplicate_public_key_is_rejected_without_changing_indexes() {
     db.add(ClientRecord {
         client_id: first_cid,
         public_key: pk,
-        label: "phone".into(),
         paired_at: 0,
     })
     .await
@@ -160,7 +155,6 @@ async fn duplicate_public_key_is_rejected_without_changing_indexes() {
         .add(ClientRecord {
             client_id: second_cid,
             public_key: pk,
-            label: "tablet".into(),
             paired_at: 1,
         })
         .await
@@ -186,8 +180,8 @@ async fn open_rejects_duplicate_records_from_disk() {
         &clients,
         format!(
             "{{\"clients\":[\
-             {{\"client_id\":{},\"public_key\":[7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7],\"label\":\"phone\",\"paired_at\":0}},\
-             {{\"client_id\":{},\"public_key\":[8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],\"label\":\"tablet\",\"paired_at\":1}}\
+             {{\"client_id\":{},\"public_key\":[7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7],\"paired_at\":0}},\
+             {{\"client_id\":{},\"public_key\":[8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8],\"paired_at\":1}}\
              ]}}",
             serde_json::to_string(&cid).unwrap(),
             serde_json::to_string(&cid).unwrap()
@@ -213,8 +207,8 @@ async fn open_rejects_duplicate_public_keys_from_disk() {
         &clients,
         format!(
             "{{\"clients\":[\
-             {{\"client_id\":{},\"public_key\":[10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10],\"label\":\"phone\",\"paired_at\":0}},\
-             {{\"client_id\":{},\"public_key\":[10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10],\"label\":\"tablet\",\"paired_at\":1}}\
+             {{\"client_id\":{},\"public_key\":[10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10],\"paired_at\":0}},\
+             {{\"client_id\":{},\"public_key\":[10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10],\"paired_at\":1}}\
              ]}}",
             serde_json::to_string(&first_cid).unwrap(),
             serde_json::to_string(&second_cid).unwrap()
@@ -244,7 +238,6 @@ async fn add_persistence_failure_does_not_change_memory() {
         .add(ClientRecord {
             client_id: cid,
             public_key: pk,
-            label: "phone".into(),
             paired_at: 0,
         })
         .await

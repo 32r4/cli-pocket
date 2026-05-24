@@ -1,6 +1,6 @@
 //! SPAKE2 client-side pairing flow exposed to JavaScript.
 //!
-//! The daemon (server) runs [`daemon_core::server::Daemon::run_pairing`] which:
+//! The daemon (server) exposes a `/pair` WebSocket path which:
 //!   1. Sends its SPAKE2 host outbound bytes (raw binary WS frame).
 //!   2. Receives the client's SPAKE2 outbound bytes.
 //!   3. Receives the client's static public key encrypted with the SPAKE2 PSK.
@@ -29,20 +29,15 @@ const PAIRING_AEAD_NONCE: [u8; 12] = [0_u8; 12];
 
 /// Drive the SPAKE2 client side against a daemon's pairing endpoint.
 ///
-/// `daemon_pairing_url` is the WebSocket URL of the daemon's pairing
-/// listener (e.g. `ws://192.168.1.x:9443`). The daemon must currently
-/// be running with `cli-pocket-daemon pair --code <CODE>`.
+/// `pairing_url` is the daemon's `/pair` WebSocket URL.
 ///
 /// On success returns a JS object: `{ server_public_hex, client_public_hex }`.
 /// The browser caller persists the result and feeds `server_public_hex`
 /// into `CliPocketClient.connect()` later.
 #[wasm_bindgen]
-pub async fn client_pair_with_code(
-    daemon_pairing_url: String,
-    code: String,
-) -> Result<JsValue, JsValue> {
+pub async fn client_pair_with_code(pairing_url: String, code: String) -> Result<JsValue, JsValue> {
     // 1. Open a WebSocket to the daemon's pairing endpoint.
-    let mut transport = WsTransport::connect(&daemon_pairing_url, None)
+    let mut transport = WsTransport::connect(&pairing_url, None)
         .await
         .map_err(|e| JsValue::from_str(&format!("connect: {e}")))?;
 

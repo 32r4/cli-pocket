@@ -1,13 +1,32 @@
 export interface ServerSelector {
-  daemon_pairing_url: string; // e.g. ws://192.168.1.10:9443  (direct daemon pairing socket)
+  daemon_url: string; // e.g. ws://127.0.0.1:7842
   code: string; // 6-digit code displayed by daemon at pair time
 }
 
 export interface SavedServer {
-  endpoint_url: string; // post-pairing connect URL (same as daemon_pairing_url for v1)
+  endpoint_url: string; // post-pairing connect URL, derived as /session
   server_public_hex: string; // 64 hex chars
   client_public_hex: string;
   resume_token_hex?: string | null;
+}
+
+export interface DaemonEndpoints {
+  pairing_url: string;
+  session_url: string;
+}
+
+export function deriveDaemonEndpoints(daemonUrl: string): DaemonEndpoints {
+  const url = new URL(daemonUrl);
+  url.pathname = "/pair";
+  url.search = "";
+  url.hash = "";
+  const pairingUrl = url.toString();
+
+  url.pathname = "/session";
+  return {
+    pairing_url: pairingUrl,
+    session_url: url.toString(),
+  };
 }
 
 export function validateUrl(s: string): string | null {

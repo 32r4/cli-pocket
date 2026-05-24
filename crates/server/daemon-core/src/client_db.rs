@@ -14,7 +14,6 @@ use tokio::time::{sleep, Duration};
 pub struct ClientRecord {
     pub client_id: ClientId,
     pub public_key: [u8; 32],
-    pub label: String,
     pub paired_at: u64,
 }
 

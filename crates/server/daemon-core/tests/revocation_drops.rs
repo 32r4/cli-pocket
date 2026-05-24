@@ -54,7 +54,6 @@ async fn revocation_drops_live_session() {
     db.add(ClientRecord {
         client_id,
         public_key: client_pub,
-        label: "test-client".into(),
         paired_at: 0,
     })
     .await

@@ -52,7 +52,6 @@ async fn paired_client_creates_terminal_end_to_end() {
     db.add(ClientRecord {
         client_id,
         public_key: client_pub,
-        label: "test-client".into(),
         paired_at: 0,
     })
     .await
@@ -215,7 +214,6 @@ async fn paired_client_receives_live_output_after_input() {
     db.add(ClientRecord {
         client_id: ClientId(Uuid::from_bytes([0x88; 16])),
         public_key: client_pub,
-        label: "test-client".into(),
         paired_at: 0,
     })
     .await
