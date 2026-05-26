@@ -10,12 +10,12 @@ default:
 check:
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
-    cargo deny check
-    just webview-check
+    cargo deny check --disable-fetch
+    just frontend-check
 
 test:
     cargo test --workspace
-    npm --prefix webview/terminal test
+    npm --prefix frontend/app test
 
 # ---- one-time setup ----
 
@@ -24,8 +24,7 @@ test:
 setup:
     cargo install tauri-cli --version "^2.1" --locked
     cargo install wasm-pack --locked
-    just webview-install
-    just web-install
+    just frontend-install
     just mobile-android-init
 
 # ---- per-target builds ----
@@ -39,30 +38,22 @@ build-relay:
 build-wasm:
     wasm-pack build crates/client/client-core-wasm --target web --release
 
-build-webview-tauri:
-    npm --prefix webview/terminal run build:tauri
-
-build-webview-web:
-    npm --prefix webview/terminal run build:web
-
-# Built in Plan H — recipes shown here so `just --list` is the single index.
 build-desktop:
-    just build-webview-tauri
+    npm --prefix frontend/app run build
     cd apps/desktop; cargo tauri build
 
 build-mobile-android:
     just mobile-android-init
-    just build-webview-tauri
+    npm --prefix frontend/app run build
     cd apps/mobile; cargo tauri android build --apk --aab
 
 build-mobile-ios:
-    just build-webview-tauri
+    npm --prefix frontend/app run build
     cd apps/mobile; cargo tauri ios build
 
-# Built in Plan I — needs `just build-wasm` first.
 build-web:
     just build-wasm
-    npm --prefix apps/web run build
+    npm --prefix frontend/app run build:web
 
 # ---- dev workflows ----
 
@@ -83,13 +74,13 @@ dev-mobile-ios:
     cd apps/mobile; cargo tauri ios dev
 
 dev-web:
-    npm --prefix apps/web run dev
+    npm --prefix frontend/app run dev -- --mode web
 
 # ---- maintenance ----
 
 fmt:
     cargo fmt
-    npm --prefix webview/terminal exec tsc -- --noEmit
+    npm --prefix frontend/app exec tsc -- --noEmit
 
 clean:
     cargo clean
@@ -97,11 +88,11 @@ clean:
 
 [windows]
 _clean-node:
-    Remove-Item -LiteralPath 'webview/terminal/dist', 'webview/terminal/node_modules', 'apps/web/dist', 'apps/web/node_modules' -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'frontend/app/dist', 'frontend/app/node_modules' -Recurse -Force -ErrorAction SilentlyContinue
 
 [unix]
 _clean-node:
-    rm -rf webview/terminal/dist webview/terminal/node_modules apps/web/dist apps/web/node_modules
+    rm -rf frontend/app/dist frontend/app/node_modules
 
 # ---- release ----
 
@@ -110,31 +101,19 @@ dist:
     just build-daemon
     just build-relay
     just build-wasm
-    just build-webview-tauri
-    just build-webview-web
+    npm --prefix frontend/app run build
+    npm --prefix frontend/app run build:web
 
-# ---- webview (Plan G) ----
+# ---- frontend ----
 
-webview-install:
-    npm --prefix webview/terminal install
-
-web-install:
-    npm --prefix apps/web install
+frontend-install:
+    npm --prefix frontend/app install
 
 mobile-android-init:
     cd apps/mobile; cargo tauri android init --ci
 
-webview-dev:
-    npm --prefix webview/terminal run dev
-
-webview-build:
-    npm --prefix webview/terminal run build
-
-webview-test:
-    npm --prefix webview/terminal run test
-
-webview-check:
-    npm --prefix webview/terminal run check
+frontend-check:
+    npm --prefix frontend/app run check
 
 # ---- guardrails ----
 

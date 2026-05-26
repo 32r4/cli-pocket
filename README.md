@@ -13,10 +13,11 @@ implemented per the plans under `docs/superpowers/plans/`.
 ## Quick start (developer)
 
 ```bash
-just --list           # see all entry points
-just check            # fmt + clippy + cargo-deny + webview lint
-just test             # cargo test --workspace
-just build-daemon     # release build of the daemon
+just --list
+just check
+just test
+just build-daemon
+just build-web
 ```
 
 Requires Rust (pinned in `rust-toolchain.toml`), Node (pinned in `.nvmrc`),
@@ -24,14 +25,14 @@ Requires Rust (pinned in `rust-toolchain.toml`), Node (pinned in `.nvmrc`),
 
 ## Architecture
 
-| Crate group | What it does |
+| Area | What it does |
 |---|---|
+| `frontend/app` | Shared UI application for web, desktop, and mobile |
+| `apps/{desktop,mobile}/src-tauri` | Native host shells and platform commands |
 | `crates/shared/{proto,crypto,transport}` | Wire protocol, Noise XK + SPAKE2, WebSocket transport |
 | `crates/server/{pty,daemon-core,daemon-bin}` | The host-side daemon |
 | `crates/relay/{relay-core,relay-bin}` | Optional self-hosted relay |
-| `crates/client/{client-core,client-core-wasm}` | Client state machine, native + wasm |
-| `apps/{desktop,mobile,web}` | Tauri 2 desktop, Tauri Mobile, browser app |
-| `webview/terminal` | Shared xterm.js view loaded by every app |
+| `crates/client/{client-core,client-core-wasm}` | Shared client runtime |
 
 ## Security
 

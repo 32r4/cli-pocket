@@ -1,0 +1,48 @@
+{
+	"name": "cli-pocket-frontend-app",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite --mode tauri",
+		"build": "vite build --mode tauri --outDir dist/tauri",
+		"build:web": "npm run typecheck && vite build --mode web --outDir dist/web",
+		"typecheck": "tsc --noEmit",
+		"lint": "npm run lint:web",
+		"lint:web": "biome check package.json tsconfig.json vite.config.ts index.html src",
+		"lint:fix": "biome check --write package.json tsconfig.json vite.config.ts index.html src",
+		"format": "npm run format:web",
+		"format:web": "biome format --write package.json tsconfig.json vite.config.ts index.html src",
+		"format:check": "npm run format:check:web",
+		"format:check:web": "biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false package.json tsconfig.json vite.config.ts index.html src",
+		"check": "npm run typecheck && npm run lint && npm run format:check",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"dependencies": {
+		"@tauri-apps/api": "^2.11.0",
+		"@xterm/addon-fit": "^0.10.0",
+		"@xterm/xterm": "^5.5.0",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1",
+		"zod": "^3.23.8",
+		"zustand": "^5.0.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.5",
+		"@testing-library/jest-dom": "^6.4.8",
+		"@testing-library/react": "^16.0.1",
+		"@testing-library/user-event": "^14.5.2",
+		"@types/node": "^22.10.5",
+		"@types/react": "^18.3.3",
+		"@types/react-dom": "^18.3.0",
+		"@vitejs/plugin-react": "^4.3.1",
+		"jsdom": "^25.0.1",
+		"typescript": "^5.9.2",
+		"vite": "^5.4.0",
+		"vitest": "^3.2.4"
+	},
+	"engines": {
+		"node": ">=20.19.0"
+	}
+}
