@@ -9,7 +9,9 @@
 //! axum's [`WebSocket`] to the `tokio-tungstenite::Message`-typed sink/stream
 //! is a follow-up task.
 
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -23,6 +25,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::caps::Caps;
+use crate::forward::{run_client_side, run_host_side};
 use crate::pairs::PairManager;
 use crate::registry::HostRegistry;
 
@@ -78,26 +81,120 @@ async fn ws_client(
         .into_response()
 }
 
-/// Placeholder host-side handler.
-///
-/// Closes the upgraded socket cleanly. The full host-side forwarder
-/// (parse `RelayCtrl::HostRegister`, register in `s.registry`, run
-/// [`crate::forward::run_host_side`]) lands in a follow-up task because it
-/// needs the axum -> tungstenite `Message` shim.
 async fn handle_host(socket: WebSocket, s: AppState) {
-    tracing::debug!(
-        hosts = s.caps.snapshot().hosts,
-        "ws/host upgrade received (forwarder wiring deferred)"
-    );
-    let _ = socket.close().await;
+    let ws = AxumWs(socket);
+    if let Err(err) = run_host_side(ws, s.registry, s.pairs, s.caps).await {
+        tracing::warn!(error = %err, "host relay websocket exited");
+    }
 }
 
-/// Placeholder client-side handler. See [`handle_host`] for status.
 async fn handle_client(socket: WebSocket, target: HostId, s: AppState) {
-    tracing::debug!(
-        ?target,
-        pairs = s.caps.snapshot().pairs,
-        "ws/client upgrade received (forwarder wiring deferred)"
-    );
-    let _ = socket.close().await;
+    let ws = AxumWs(socket);
+    if let Err(err) = run_client_side(ws, target, s.registry, s.pairs, s.caps).await {
+        tracing::warn!(error = %err, ?target, "client relay websocket exited");
+    }
+}
+
+struct AxumWs(WebSocket);
+
+impl futures_util::stream::Stream for AxumWs {
+    type Item =
+        Result<tokio_tungstenite::tungstenite::Message, tokio_tungstenite::tungstenite::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.0).poll_next(cx) {
+            Poll::Ready(Some(Ok(msg))) => Poll::Ready(Some(Ok(axum_to_tungstenite(msg)))),
+            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(
+                tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(err.to_string())),
+            ))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl futures_util::sink::Sink<tokio_tungstenite::tungstenite::Message> for AxumWs {
+    type Error = tokio_tungstenite::tungstenite::Error;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.0).poll_ready(cx).map_err(|err| {
+            tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(err.to_string()))
+        })
+    }
+
+    fn start_send(
+        mut self: Pin<&mut Self>,
+        item: tokio_tungstenite::tungstenite::Message,
+    ) -> Result<(), Self::Error> {
+        Pin::new(&mut self.0)
+            .start_send(tungstenite_to_axum(item))
+            .map_err(|err| {
+                tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(err.to_string()))
+            })
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.0).poll_flush(cx).map_err(|err| {
+            tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(err.to_string()))
+        })
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.0).poll_close(cx).map_err(|err| {
+            tokio_tungstenite::tungstenite::Error::Io(std::io::Error::other(err.to_string()))
+        })
+    }
+}
+
+fn axum_to_tungstenite(msg: axum::extract::ws::Message) -> tokio_tungstenite::tungstenite::Message {
+    match msg {
+        axum::extract::ws::Message::Text(text) => {
+            tokio_tungstenite::tungstenite::Message::Text(text)
+        }
+        axum::extract::ws::Message::Binary(bytes) => {
+            tokio_tungstenite::tungstenite::Message::Binary(bytes)
+        }
+        axum::extract::ws::Message::Ping(bytes) => {
+            tokio_tungstenite::tungstenite::Message::Ping(bytes)
+        }
+        axum::extract::ws::Message::Pong(bytes) => {
+            tokio_tungstenite::tungstenite::Message::Pong(bytes)
+        }
+        axum::extract::ws::Message::Close(frame) => {
+            tokio_tungstenite::tungstenite::Message::Close(frame.map(|frame| {
+                tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::from(
+                        frame.code,
+                    ),
+                    reason: frame.reason,
+                }
+            }))
+        }
+    }
+}
+
+fn tungstenite_to_axum(msg: tokio_tungstenite::tungstenite::Message) -> axum::extract::ws::Message {
+    match msg {
+        tokio_tungstenite::tungstenite::Message::Text(text) => {
+            axum::extract::ws::Message::Text(text)
+        }
+        tokio_tungstenite::tungstenite::Message::Binary(bytes) => {
+            axum::extract::ws::Message::Binary(bytes)
+        }
+        tokio_tungstenite::tungstenite::Message::Ping(bytes) => {
+            axum::extract::ws::Message::Ping(bytes)
+        }
+        tokio_tungstenite::tungstenite::Message::Pong(bytes) => {
+            axum::extract::ws::Message::Pong(bytes)
+        }
+        tokio_tungstenite::tungstenite::Message::Close(frame) => {
+            axum::extract::ws::Message::Close(frame.map(|frame| axum::extract::ws::CloseFrame {
+                code: frame.code.into(),
+                reason: frame.reason,
+            }))
+        }
+        tokio_tungstenite::tungstenite::Message::Frame(frame) => {
+            axum::extract::ws::Message::Binary(frame.payload().clone())
+        }
+    }
 }

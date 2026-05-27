@@ -10,6 +10,8 @@ pub mod pairs;
 pub mod registry;
 pub mod server;
 
+use cli_pocket_proto::codec::{encode_relay_ctrl, encode_relay_data};
+use cli_pocket_proto::{RelayCtrl, RelayData};
 pub use config::RelayConfig;
 pub use server::RelayServer;
 
@@ -35,3 +37,17 @@ pub enum RelayError {
 }
 
 pub type RelayResult<T> = std::result::Result<T, RelayError>;
+
+#[must_use]
+pub fn encode_ctrl_frame(ctrl: &RelayCtrl) -> Vec<u8> {
+    encode_relay_ctrl(ctrl).expect("relay ctrl encoding should be infallible for valid enums")
+}
+
+#[must_use]
+pub fn encode_data_frame(data: &RelayData) -> Vec<u8> {
+    encode_relay_data(data).expect("relay data encoding should be infallible for valid enums")
+}
+
+pub fn codec_err_to_protocol(err: &cli_pocket_proto::CodecError) -> RelayError {
+    RelayError::Internal(format!("relay codec error: {err}"))
+}

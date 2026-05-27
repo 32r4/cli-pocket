@@ -9,12 +9,34 @@ use tauri::async_runtime;
 use tauri::State;
 
 #[derive(Debug, Deserialize)]
-struct ConnectArgs {
-    #[serde(alias = "endpointUrl")]
-    endpoint_url: String,
-    #[serde(alias = "serverPublicHex")]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ConnectArgs {
+    Direct {
+        #[serde(alias = "endpointUrl")]
+        endpoint_url: String,
+        #[serde(alias = "serverPublicHex")]
+        server_public_hex: String,
+        #[serde(default, alias = "resumeTokenHex")]
+        resume_token_hex: Option<String>,
+    },
+    Relay {
+        #[serde(alias = "relayUrl")]
+        relay_url: String,
+        #[serde(alias = "hostId")]
+        host_id: String,
+        #[serde(alias = "pskHex")]
+        psk_hex: String,
+        #[serde(alias = "serverPublicHex")]
+        server_public_hex: String,
+        #[serde(default, alias = "resumeTokenHex")]
+        resume_token_hex: Option<String>,
+    },
+}
+
+struct ParsedConnectArgs {
+    endpoint: SessionEndpoint,
+    transport_url: String,
     server_public_hex: String,
-    #[serde(default, alias = "resumeTokenHex")]
     resume_token_hex: Option<String>,
 }
 
@@ -40,6 +62,7 @@ pub async fn cli_pocket_connect(
     config: serde_json::Value,
 ) -> Result<(), String> {
     let config: ConnectArgs = serde_json::from_value(config).map_err(|error| error.to_string())?;
+    let config = parse_connect_args(config)?;
     let server_public: [u8; 32] = hex::decode(&config.server_public_hex)
         .map_err(|error| format!("server_public_hex: {error}"))?
         .try_into()
@@ -49,15 +72,15 @@ pub async fn cli_pocket_connect(
     let kv = state.kv.clone();
     let identity = async_runtime::block_on(ClientIdentity::load_or_create(&kv, &OsRandom))
         .map_err(|error| error.to_string())?;
-    let endpoint = config.endpoint_url.clone();
-    let transport_url = config.endpoint_url;
+    let endpoint = config.endpoint;
+    let transport_url = config.transport_url;
 
     session
         .connect(move |spawner| {
             SessionBuilder::new(
                 identity,
                 SessionConfig {
-                    endpoint: SessionEndpoint::Direct(endpoint),
+                    endpoint,
                     server_public,
                     resume_token,
                     capabilities: Capabilities::NONE,
@@ -169,6 +192,39 @@ fn parse_resume_token(value: Option<&str>) -> Result<Option<ResumeToken>, String
     postcard::from_bytes(&bytes).map_err(|error| format!("resume_token_hex: {error}"))
 }
 
+fn parse_connect_args(config: ConnectArgs) -> Result<ParsedConnectArgs, String> {
+    match config {
+        ConnectArgs::Direct {
+            endpoint_url,
+            server_public_hex,
+            resume_token_hex,
+        } => Ok(ParsedConnectArgs {
+            endpoint: SessionEndpoint::Direct(endpoint_url.clone()),
+            transport_url: endpoint_url,
+            server_public_hex,
+            resume_token_hex,
+        }),
+        ConnectArgs::Relay {
+            relay_url,
+            host_id,
+            psk_hex,
+            server_public_hex,
+            resume_token_hex,
+        } => Ok(ParsedConnectArgs {
+            endpoint: SessionEndpoint::Relay {
+                url: relay_url.clone(),
+                host_id: cli_pocket_proto::HostId(
+                    uuid::Uuid::parse_str(&host_id).map_err(|error| format!("host_id: {error}"))?,
+                ),
+                psk_hex,
+            },
+            transport_url: relay_url,
+            server_public_hex,
+            resume_token_hex,
+        }),
+    }
+}
+
 fn parse_terminal_id(value: &str) -> Result<TerminalId, String> {
     let uuid = uuid::Uuid::parse_str(value).map_err(|error| format!("terminal_id: {error}"))?;
     Ok(TerminalId(uuid))
@@ -187,7 +243,10 @@ fn validate_signal(signal: Option<&str>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_resume_token, parse_terminal_id, validate_signal};
+    use super::{
+        parse_connect_args, parse_resume_token, parse_terminal_id, validate_signal, ConnectArgs,
+    };
+    use cli_pocket_client_core::SessionEndpoint;
     use cli_pocket_proto::{ResumeAttachment, ResumeToken, SessionId, StreamSeq, TerminalId};
 
     #[test]
@@ -231,5 +290,34 @@ mod tests {
             validate_signal(Some("INT")).expect_err("reject unsupported signal"),
             "unsupported signal: INT"
         );
+    }
+
+    #[test]
+    fn parse_connect_args_accepts_relay_union() {
+        let host_id = uuid::Uuid::now_v7();
+
+        let parsed = parse_connect_args(ConnectArgs::Relay {
+            relay_url: "wss://relay.example/ws/client".to_owned(),
+            host_id: host_id.to_string(),
+            psk_hex: "aa".repeat(32),
+            server_public_hex: "bb".repeat(32),
+            resume_token_hex: None,
+        })
+        .expect("parse relay connect args");
+
+        match parsed.endpoint {
+            SessionEndpoint::Relay {
+                url,
+                host_id: parsed_host_id,
+                psk_hex,
+            } => {
+                assert_eq!(url, "wss://relay.example/ws/client");
+                assert_eq!(parsed_host_id.0, host_id);
+                assert_eq!(psk_hex, "aa".repeat(32));
+            }
+            other @ SessionEndpoint::Direct(_) => {
+                panic!("expected relay endpoint, got {other:?}")
+            }
+        }
     }
 }

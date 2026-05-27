@@ -4,14 +4,10 @@ export function PairingScreen() {
 			<h2>Pairing</h2>
 			<form>
 				<label>
-					Daemon URL
-					<input name="daemonUrl" />
+					Pairing link
+					<input name="pairUrl" />
 				</label>
-				<label>
-					6-digit code
-					<input name="code" />
-				</label>
-				<button type="submit">Pair</button>
+				<button type="submit">Import</button>
 			</form>
 		</section>
 	);

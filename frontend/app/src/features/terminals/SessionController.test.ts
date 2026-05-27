@@ -20,6 +20,7 @@ describe("SessionController", () => {
 		const controller = new SessionController(bridge, workspace);
 
 		await controller.connectAndCreate({
+			kind: "direct",
 			endpointUrl: "ws://127.0.0.1:7842",
 			serverPublicHex: "abcd",
 		});

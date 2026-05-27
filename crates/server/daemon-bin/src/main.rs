@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use cli_pocket_daemon_core::client_db::ClientDb;
-use cli_pocket_daemon_core::config::DaemonConfig;
-use cli_pocket_daemon_core::identity_store::load_or_create;
+use cli_pocket_daemon_core::config::{build_pairing_offer_url, DaemonConfig, PairingOffer};
+use cli_pocket_daemon_core::identity_store::{load_or_create, DaemonIdentity};
 use cli_pocket_daemon_core::Daemon;
 use cli_pocket_proto::ClientId;
 use uuid::Uuid;
@@ -32,6 +32,8 @@ enum Cmd {
     Start,
     /// Print the host's pairing public key.
     PairKey,
+    /// Print the canonical relay pairing URL.
+    PairUrl,
     /// List paired clients.
     ListClients,
     /// Revoke a client by ID.
@@ -80,6 +82,12 @@ async fn main() -> Result<()> {
             println!("host_id   = {}", id.host_id.0);
             println!("public_pk = {}", hex::encode(id.keypair.public));
         }
+        Cmd::PairUrl => {
+            let id = load_or_create(&cfg.security.identity_path)
+                .context("load or create daemon identity")?;
+            let url = build_pair_url(&cfg, &id)?;
+            println!("{url}");
+        }
         Cmd::ListClients => {
             let db = ClientDb::open(&cfg.security.clients_path, &cfg.security.revoked_path)
                 .await
@@ -121,6 +129,37 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn build_pair_url(cfg: &DaemonConfig, identity: &DaemonIdentity) -> Result<String> {
+    let relay = cfg
+        .relay
+        .as_ref()
+        .context("pair-url requires [relay] configuration")?;
+    let relay_url = relay.url.trim();
+    anyhow::ensure!(!relay_url.is_empty(), "pair-url requires relay.url");
+
+    let relay_psk_hex = relay.psk_hex.trim();
+    anyhow::ensure!(!relay_psk_hex.is_empty(), "pair-url requires relay.psk_hex");
+
+    let relay_psk =
+        hex::decode(relay_psk_hex).context("pair-url relay.psk_hex must be valid hex")?;
+    anyhow::ensure!(
+        relay_psk.len() == 32,
+        "pair-url requires relay.psk_hex to decode to 32 bytes"
+    );
+
+    build_pairing_offer_url(
+        &cfg.app.base_url,
+        &PairingOffer {
+            label: None,
+            host_id: identity.host_id,
+            server_public_hex: hex::encode(identity.keypair.public),
+            relay_url: relay_url.to_owned(),
+            relay_psk_hex: relay_psk_hex.to_owned(),
+        },
+    )
+    .map_err(Into::into)
+}
+
 async fn run_start(cfg: DaemonConfig) -> Result<()> {
     let mut daemon = Daemon::boot(cfg).await.context("boot daemon")?;
     daemon.start().await.context("start daemon")?;
@@ -128,4 +167,77 @@ async fn run_start(cfg: DaemonConfig) -> Result<()> {
     tracing::info!("ctrl-c received, shutting down");
     daemon.shutdown().await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_pair_url, Cli};
+    use clap::Parser;
+    use cli_pocket_crypto::KeyPair;
+    use cli_pocket_daemon_core::config::{AppConfig, RelayConfig, SecurityConfig};
+    use cli_pocket_daemon_core::identity_store::DaemonIdentity;
+    use cli_pocket_daemon_core::DaemonConfig;
+    use cli_pocket_proto::HostId;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    #[test]
+    fn pair_url_subcommand_parses() {
+        let cli = Cli::try_parse_from(["cli-pocket-daemon", "pair-url"])
+            .expect("pair-url subcommand should parse");
+
+        assert!(matches!(cli.cmd, super::Cmd::PairUrl));
+    }
+
+    #[test]
+    fn pair_url_builds_canonical_offer_url() {
+        let identity = test_identity();
+        let config = DaemonConfig {
+            app: AppConfig {
+                base_url: "https://cli-pocket.example/".to_owned(),
+            },
+            relay: Some(RelayConfig {
+                url: "wss://relay.example/ws/client?host=test".to_owned(),
+                psk_hex: "22".repeat(32),
+                host_token: None,
+            }),
+            security: test_security_config(),
+            ..DaemonConfig::default()
+        };
+
+        let url = build_pair_url(&config, &identity).expect("build pair url");
+
+        assert!(url.starts_with("https://cli-pocket.example/#pair="));
+    }
+
+    #[test]
+    fn pair_url_requires_relay_configuration() {
+        let err = build_pair_url(
+            &DaemonConfig {
+                security: test_security_config(),
+                ..DaemonConfig::default()
+            },
+            &test_identity(),
+        )
+        .expect_err("missing relay should fail");
+
+        assert!(err.to_string().contains("[relay] configuration"));
+    }
+
+    fn test_identity() -> DaemonIdentity {
+        let keypair = KeyPair::generate().expect("generate keypair");
+
+        DaemonIdentity {
+            host_id: HostId(Uuid::now_v7()),
+            keypair,
+        }
+    }
+
+    fn test_security_config() -> SecurityConfig {
+        SecurityConfig {
+            identity_path: PathBuf::from("identity.json"),
+            clients_path: PathBuf::from("clients.json"),
+            revoked_path: PathBuf::from("revoked.json"),
+        }
+    }
 }

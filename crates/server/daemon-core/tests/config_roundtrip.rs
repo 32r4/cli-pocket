@@ -13,7 +13,7 @@ fn default_then_serialize_then_deserialize() {
     assert_eq!(parsed.listen.addr, cfg.listen.addr);
     assert_eq!(parsed.listen.port, cfg.listen.port);
     assert_eq!(parsed.security.identity_path, cfg.security.identity_path);
-    assert_eq!(parsed.pairing.code_ttl_secs, 120);
+    assert_eq!(parsed.app.base_url, cfg.app.base_url);
 }
 
 #[test]
@@ -32,17 +32,38 @@ revoked_path = "/var/lib/cli-pocket/revoked.json"
 url = "wss://relay.example.com"
 psk_hex = "deadbeef"
 
-[pairing]
-code_ttl_secs = 60
+[app]
+base_url = "https://cli-pocket.example"
 "#;
 
     let cfg: DaemonConfig = toml::from_str(toml_text).unwrap();
 
     assert_eq!(cfg.listen.port, 8443);
-    assert_eq!(cfg.pairing.code_ttl_secs, 60);
+    assert_eq!(cfg.app.base_url, "https://cli-pocket.example");
     let relay = cfg.relay.unwrap();
     assert_eq!(relay.url, "wss://relay.example.com");
     assert_eq!(relay.psk_hex, "deadbeef");
+}
+
+#[test]
+fn app_base_url_roundtrips() {
+    let toml_text = r#"
+[security]
+identity_path = "id.json"
+clients_path = "clients.json"
+revoked_path = "revoked.json"
+
+[app]
+base_url = "https://cli-pocket.32r4.asia/"
+"#;
+
+    let cfg: DaemonConfig = toml::from_str(toml_text).unwrap();
+
+    assert_eq!(cfg.app.base_url, "https://cli-pocket.32r4.asia/");
+
+    let roundtrip = toml::to_string(&cfg).unwrap();
+    let reparsed: DaemonConfig = toml::from_str(&roundtrip).unwrap();
+    assert_eq!(reparsed.app.base_url, "https://cli-pocket.32r4.asia/");
 }
 
 #[test]

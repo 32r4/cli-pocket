@@ -1,13 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use cli_pocket_crypto::{KeyPair, NoiseInitiator, Spake2Side};
+use cli_pocket_crypto::{KeyPair, NoiseInitiator};
 use cli_pocket_daemon_core::client_db::{ClientDb, ClientRecord};
 use cli_pocket_daemon_core::identity_store::load_or_create;
 use cli_pocket_daemon_core::listener::{serve, ListenerDeps};
-use cli_pocket_daemon_core::pairing::PairingCodes;
 use cli_pocket_daemon_core::session::SessionManager;
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
@@ -19,30 +16,18 @@ use tokio::net::TcpListener;
 use tokio::time::timeout;
 use uuid::Uuid;
 
-const PAIRING_HOST_ID: &[u8] = b"cli-pocket pairing host v1";
-const PAIRING_CLIENT_ID: &[u8] = b"cli-pocket pairing client v1";
-const PAIRING_AEAD_NONCE: [u8; 12] = [0_u8; 12];
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn pair_path_completes_pairing_and_rotates_code() {
+async fn pair_path_is_rejected() {
     let fixture = ListenerFixture::start().await;
-    let before_code = fixture.pairing_codes.current_code();
-    let client_keypair = KeyPair::generate().expect("client keypair");
+    let mut transport = TokioWsTransport::connect(&format!("ws://{}/pair", fixture.addr))
+        .await
+        .expect("websocket upgrade succeeds before path validation");
+    let first = timeout(Duration::from_secs(5), transport.recv()).await;
 
-    pair_client(
-        &format!("ws://{}/pair", fixture.addr),
-        &before_code,
-        &client_keypair,
-        &fixture.identity.public,
-    )
-    .await
-    .expect("pair client");
-
-    let clients = fixture.client_db.list().await;
-    assert!(clients
-        .iter()
-        .any(|record| record.public_key == client_keypair.public));
-    assert_ne!(fixture.pairing_codes.current_code(), before_code);
+    assert!(
+        matches!(first, Ok(Ok(None) | Err(_))),
+        "/pair should become unusable immediately because direct pairing is removed"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -90,7 +75,6 @@ struct ListenerFixture {
     addr: std::net::SocketAddr,
     identity: Arc<KeyPair>,
     client_db: Arc<ClientDb>,
-    pairing_codes: PairingCodes,
     _task: tokio::task::JoinHandle<()>,
     _dir: TempDir,
 }
@@ -111,7 +95,6 @@ impl ListenerFixture {
             .await
             .expect("client db"),
         );
-        let pairing_codes = PairingCodes::new(Duration::from_secs(120));
         let session_mgr = Arc::new(SessionManager::new(4));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
@@ -120,7 +103,6 @@ impl ListenerFixture {
             psk: None,
             session_mgr,
             client_db: Arc::clone(&client_db),
-            pairing_codes: pairing_codes.clone(),
             server_info: ServerInfo {
                 server_version: "test".to_string(),
                 host_label: None,
@@ -134,48 +116,10 @@ impl ListenerFixture {
             addr,
             identity,
             client_db,
-            pairing_codes,
             _task: task,
             _dir: dir,
         }
     }
-}
-
-async fn pair_client(
-    url: &str,
-    code: &str,
-    client_keypair: &KeyPair,
-    expected_server_pk: &[u8; 32],
-) -> Result<(), String> {
-    let mut transport = TokioWsTransport::connect(url)
-        .await
-        .map_err(|e| format!("connect: {e}"))?;
-    let daemon_sp_bytes = recv_transport(&mut transport).await;
-    let sp = Spake2Side::start_client(code.as_bytes(), PAIRING_HOST_ID, PAIRING_CLIENT_ID);
-    transport
-        .send(sp.outbound().to_vec())
-        .await
-        .map_err(|e| format!("send spake2: {e}"))?;
-    let outcome = sp
-        .finish(&daemon_sp_bytes)
-        .map_err(|e| format!("finish spake2: {e}"))?;
-
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(&outcome.psk));
-    let nonce = Nonce::from_slice(&PAIRING_AEAD_NONCE);
-    let client_pk_ct = cipher
-        .encrypt(nonce, client_keypair.public.as_ref())
-        .map_err(|e| format!("encrypt client pk: {e}"))?;
-    transport
-        .send(client_pk_ct)
-        .await
-        .map_err(|e| format!("send client pk: {e}"))?;
-
-    let server_pk_ct = recv_transport(&mut transport).await;
-    let server_pk = cipher
-        .decrypt(nonce, server_pk_ct.as_ref())
-        .map_err(|e| format!("decrypt server pk: {e}"))?;
-    assert_eq!(server_pk, expected_server_pk);
-    Ok(())
 }
 
 async fn recv_transport(transport: &mut TokioWsTransport) -> Vec<u8> {

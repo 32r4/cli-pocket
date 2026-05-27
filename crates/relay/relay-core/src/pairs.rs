@@ -7,31 +7,20 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use cli_pocket_proto::{HostId, PairId};
+use cli_pocket_proto::{HostId, PairCloseReason, PairId, RelayCtrl};
 use futures_util::future::{BoxFuture, FutureExt};
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
+use crate::caps::PairTicket;
 use crate::guillotine::{PairHandle, PairSweep};
-
-/// Per-pair routed payload. `HostToClient` / `ClientToHost` carry already-
-/// encoded `RelayData` ciphertext frames; `Close` signals the writer task
-/// should flush a `PairClose` and shut its side of the pair down.
-#[derive(Debug)]
-pub enum PairMsg {
-    /// Ciphertext flowing host -> client.
-    HostToClient(Bytes),
-    /// Ciphertext flowing client -> host.
-    ClientToHost(Bytes),
-    /// Tear-down signal carrying a static reason tag.
-    Close(&'static str),
-}
+use crate::registry::HostMsg;
 
 /// Convenience bundle returned by the pair-opening path so callers can stash
 /// the two writer-task senders together.
 pub struct PairEnds {
-    pub to_host: mpsc::Sender<PairMsg>,
-    pub to_client: mpsc::Sender<PairMsg>,
+    pub to_host: mpsc::Sender<HostMsg>,
+    pub to_client: mpsc::Sender<HostMsg>,
 }
 
 /// A live pair. Identifies the participants and exposes the per-side senders
@@ -42,10 +31,11 @@ pub struct Pair {
     pub host_id: HostId,
     pub created_at: Instant,
     pub last_progress: Mutex<Instant>,
+    _ticket: PairTicket,
     /// Sender into the host-WS writer task (Data direction).
-    pub host_tx: mpsc::Sender<PairMsg>,
+    pub host_tx: mpsc::Sender<HostMsg>,
     /// Sender into the client-WS writer task (Data direction).
-    pub client_tx: mpsc::Sender<PairMsg>,
+    pub client_tx: mpsc::Sender<HostMsg>,
 }
 
 impl Pair {
@@ -55,8 +45,9 @@ impl Pair {
     pub fn new(
         pair_id: PairId,
         host_id: HostId,
-        host_tx: mpsc::Sender<PairMsg>,
-        client_tx: mpsc::Sender<PairMsg>,
+        ticket: PairTicket,
+        host_tx: mpsc::Sender<HostMsg>,
+        client_tx: mpsc::Sender<HostMsg>,
     ) -> Self {
         let now = Instant::now();
         Self {
@@ -64,6 +55,7 @@ impl Pair {
             host_id,
             created_at: now,
             last_progress: Mutex::new(now),
+            _ticket: ticket,
             host_tx,
             client_tx,
         }
@@ -146,10 +138,17 @@ impl PairHandle for Pair {
 
     fn close_stuck(self: Arc<Self>) -> BoxFuture<'static, ()> {
         async move {
+            let frame = crate::encode_ctrl_frame(&RelayCtrl::PairClose {
+                pair_id: self.pair_id,
+                reason: PairCloseReason::Stuck,
+            });
             // Best-effort: a full or closed channel means the peer is already
             // gone, so we just drop the signal silently.
-            let _ = self.host_tx.send(PairMsg::Close("stuck")).await;
-            let _ = self.client_tx.send(PairMsg::Close("stuck")).await;
+            let _ = self
+                .host_tx
+                .send(HostMsg::Ctrl(Bytes::from(frame.clone())))
+                .await;
+            let _ = self.client_tx.send(HostMsg::Ctrl(Bytes::from(frame))).await;
         }
         .boxed()
     }

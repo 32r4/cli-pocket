@@ -17,8 +17,6 @@ use tracing::{error, info};
 
 use crate::client_db::ClientDb;
 use crate::connection::{run_connection_with_handshake, ConnectionDeps};
-use crate::pairing::PairingCodes;
-use crate::server::run_pairing_transport;
 use crate::session::SessionManager;
 
 /// Shared dependencies handed to each accepted connection.
@@ -28,7 +26,6 @@ pub struct ListenerDeps {
     pub psk: Option<Arc<[u8; 32]>>,
     pub session_mgr: Arc<SessionManager>,
     pub client_db: Arc<ClientDb>,
-    pub pairing_codes: PairingCodes,
     pub server_info: ServerInfo,
 }
 
@@ -81,27 +78,6 @@ pub async fn serve(listener: TcpListener, deps: ListenerDeps) -> crate::DaemonRe
                 .lock()
                 .clone()
                 .unwrap_or_else(|| "/".to_string());
-
-            if path == "/pair" {
-                match run_pairing_transport(
-                    transport,
-                    &deps.identity,
-                    &deps.client_db,
-                    &deps.pairing_codes,
-                )
-                .await
-                {
-                    Ok(record) => {
-                        info!(
-                            %peer,
-                            client_id = %record.client_id.0,
-                            "client paired"
-                        );
-                    }
-                    Err(e) => error!(%peer, error = %e, "pairing ended with error"),
-                }
-                return;
-            }
 
             if path != "/session" {
                 error!(%peer, %path, "unsupported websocket path");

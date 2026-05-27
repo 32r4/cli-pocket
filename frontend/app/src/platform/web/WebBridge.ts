@@ -14,8 +14,21 @@ export class WebBridge implements ClientBridge {
 	constructor(private readonly client: CliPocketClient) {}
 
 	async connect(config: ConnectConfig) {
+		if (config.kind === "direct") {
+			await this.client.connect({
+				kind: "direct",
+				endpoint_url: config.endpointUrl,
+				server_public_hex: config.serverPublicHex,
+				resume_token_hex: config.resumeTokenHex ?? null,
+			});
+			return;
+		}
+
 		await this.client.connect({
-			endpoint_url: config.endpointUrl,
+			kind: "relay",
+			relay_url: config.relayUrl,
+			host_id: config.hostId,
+			psk_hex: config.pskHex,
 			server_public_hex: config.serverPublicHex,
 			resume_token_hex: config.resumeTokenHex ?? null,
 		});

@@ -8,11 +8,8 @@
 //!
 mod clock_perf;
 mod kv_idb;
-mod pairing;
 mod rng_crypto;
 mod ws_transport;
-
-pub use pairing::*;
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -39,6 +36,7 @@ use crate::ws_transport::WsTransport;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cli_pocket_client_core::session::SessionEndpoint;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -149,6 +147,63 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn relay_config_parses_into_relay_endpoint() {
+        let expected_host_id = uuid::Uuid::now_v7();
+        let config = parse_connect_config_json(&serde_json::json!({
+            "kind": "relay",
+            "relayUrl": "wss://relay.example/ws/client",
+            "hostId": expected_host_id.to_string(),
+            "pskHex": "aa".repeat(32),
+            "serverPublicHex": "bb".repeat(32),
+            "resumeTokenHex": null,
+        }))
+        .expect("parse relay config");
+
+        match config.endpoint {
+            SessionEndpoint::Relay {
+                url,
+                host_id,
+                psk_hex,
+            } => {
+                assert_eq!(url, "wss://relay.example/ws/client");
+                assert_eq!(host_id.0, expected_host_id);
+                assert_eq!(psk_hex, "aa".repeat(32));
+            }
+            other @ SessionEndpoint::Direct(_) => {
+                panic!("expected relay endpoint, got {other:?}")
+            }
+        }
+        assert_eq!(config.server_public_hex, "bb".repeat(32));
+        assert!(config.resume_token_hex.is_none());
+    }
+
+    #[test]
+    fn relay_config_rejects_missing_required_fields() {
+        for value in [
+            serde_json::json!({
+                "kind": "relay",
+                "hostId": uuid::Uuid::now_v7().to_string(),
+                "pskHex": "aa".repeat(32),
+                "serverPublicHex": "bb".repeat(32),
+            }),
+            serde_json::json!({
+                "kind": "relay",
+                "relayUrl": "wss://relay.example/ws/client",
+                "pskHex": "aa".repeat(32),
+                "serverPublicHex": "bb".repeat(32),
+            }),
+            serde_json::json!({
+                "kind": "relay",
+                "relayUrl": "wss://relay.example/ws/client",
+                "hostId": uuid::Uuid::now_v7().to_string(),
+                "serverPublicHex": "bb".repeat(32),
+            }),
+        ] {
+            assert!(parse_connect_config_json(&value).is_err());
+        }
+    }
 }
 
 #[wasm_bindgen(start)]
@@ -196,15 +251,33 @@ struct JsCreateTerminalParams {
 /// `serde-wasm-bindgen` does not round-trip raw `Uint8Array` cleanly
 /// through `serde_json::from_str`.
 #[derive(Deserialize)]
-struct JsConfig {
-    /// `wss://…` (direct) or `wss://relay/...` (relay-mediated).
-    #[serde(alias = "endpointUrl")]
-    endpoint_url: String,
-    /// Hex-encoded 32-byte X25519 server static public key.
-    #[serde(alias = "serverPublicHex")]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum JsConfig {
+    Direct {
+        #[serde(alias = "endpointUrl")]
+        endpoint_url: String,
+        #[serde(alias = "serverPublicHex")]
+        server_public_hex: String,
+        #[serde(default, alias = "resumeTokenHex")]
+        resume_token_hex: Option<String>,
+    },
+    Relay {
+        #[serde(alias = "relayUrl")]
+        relay_url: String,
+        #[serde(alias = "hostId")]
+        host_id: String,
+        #[serde(alias = "pskHex")]
+        psk_hex: String,
+        #[serde(alias = "serverPublicHex")]
+        server_public_hex: String,
+        #[serde(default, alias = "resumeTokenHex")]
+        resume_token_hex: Option<String>,
+    },
+}
+
+struct ParsedConnectConfig {
+    endpoint: SessionEndpoint,
     server_public_hex: String,
-    /// Optional hex-encoded resume token from a previous session.
-    #[serde(default, alias = "resumeTokenHex")]
     resume_token_hex: Option<String>,
 }
 
@@ -228,7 +301,7 @@ impl CliPocketClient {
     ///
     #[wasm_bindgen]
     pub async fn connect(&self, config: JsValue) -> Result<(), JsValue> {
-        let cfg = parse_config(config)?;
+        let cfg = parse_connect_config(config)?;
         let server_public: [u8; 32] = hex::decode(&cfg.server_public_hex)
             .map_err(|e| JsValue::from_str(&format!("server_public_hex: {e}")))?
             .try_into()
@@ -236,13 +309,15 @@ impl CliPocketClient {
         let resume_token = parse_resume_token(cfg.resume_token_hex.as_deref())?;
         let kv = self.kv().await?;
         let identity = self.identity(&kv).await?;
-        let endpoint_url = cfg.endpoint_url.clone();
-        let transport_url = cfg.endpoint_url;
+        let endpoint = cfg.endpoint;
+        let transport_url = match &endpoint {
+            SessionEndpoint::Direct(url) | SessionEndpoint::Relay { url, .. } => url.clone(),
+        };
 
         let builder = SessionBuilder::new(
             identity,
             SessionConfig {
-                endpoint: SessionEndpoint::Direct(endpoint_url),
+                endpoint,
                 server_public,
                 resume_token,
                 capabilities: Capabilities::NONE,
@@ -485,13 +560,57 @@ impl KeyValueStore for SharedIdbStore {
     }
 }
 
-fn parse_config(config: JsValue) -> Result<JsConfig, JsValue> {
+fn parse_config(config: JsValue) -> Result<JsConfig, String> {
     if let Some(config_json) = config.as_string() {
-        serde_json::from_str(&config_json)
-            .map_err(|e| JsValue::from_str(&format!("config json: {e}")))
+        parse_config_json_str(&config_json)
     } else {
-        serde_wasm_bindgen::from_value(config)
-            .map_err(|e| JsValue::from_str(&format!("config object: {e}")))
+        serde_wasm_bindgen::from_value(config).map_err(|e| format!("config object: {e}"))
+    }
+}
+
+fn parse_connect_config(config: JsValue) -> Result<ParsedConnectConfig, JsValue> {
+    parse_connect_config_inner(parse_config(config)?).map_err(|e| JsValue::from_str(&e))
+}
+
+fn parse_config_json_str(config_json: &str) -> Result<JsConfig, String> {
+    serde_json::from_str(config_json).map_err(|e| format!("config json: {e}"))
+}
+
+#[cfg(test)]
+fn parse_connect_config_json(value: &serde_json::Value) -> Result<ParsedConnectConfig, String> {
+    let cfg: JsConfig =
+        serde_json::from_value(value.clone()).map_err(|e| format!("config json: {e}"))?;
+    parse_connect_config_inner(cfg)
+}
+
+fn parse_connect_config_inner(cfg: JsConfig) -> Result<ParsedConnectConfig, String> {
+    match cfg {
+        JsConfig::Direct {
+            endpoint_url,
+            server_public_hex,
+            resume_token_hex,
+        } => Ok(ParsedConnectConfig {
+            endpoint: SessionEndpoint::Direct(endpoint_url),
+            server_public_hex,
+            resume_token_hex,
+        }),
+        JsConfig::Relay {
+            relay_url,
+            host_id,
+            psk_hex,
+            server_public_hex,
+            resume_token_hex,
+        } => Ok(ParsedConnectConfig {
+            endpoint: SessionEndpoint::Relay {
+                url: relay_url,
+                host_id: cli_pocket_proto::HostId(
+                    uuid::Uuid::parse_str(&host_id).map_err(|e| format!("host_id: {e}"))?,
+                ),
+                psk_hex,
+            },
+            server_public_hex,
+            resume_token_hex,
+        }),
     }
 }
 

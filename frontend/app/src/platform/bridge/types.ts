@@ -1,8 +1,18 @@
-export interface ConnectConfig {
-	endpointUrl: string;
-	serverPublicHex: string;
-	resumeTokenHex?: string;
-}
+export type ConnectConfig =
+	| {
+			kind: "direct";
+			endpointUrl: string;
+			serverPublicHex: string;
+			resumeTokenHex?: string;
+	  }
+	| {
+			kind: "relay";
+			relayUrl: string;
+			hostId: string;
+			pskHex: string;
+			serverPublicHex: string;
+			resumeTokenHex?: string;
+	  };
 
 export interface TerminalSummary {
 	id: string;
