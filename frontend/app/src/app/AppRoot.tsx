@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { pairAndStoreDaemon } from "@/features/pairing/pairingFlow";
 import { importPairingOfferUrl } from "@/features/pairing/pairingOffer";
@@ -23,7 +23,7 @@ interface AppRootProps {
 	mobile?: boolean;
 }
 
-type DetailMode = "view" | "add" | "edit";
+type HostModalMode = "closed" | "chooser" | "direct" | "pairing";
 
 interface HostFormState {
 	kind: "direct" | "relay";
@@ -141,12 +141,15 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	const [bridge, setBridge] = useState<ClientBridge | null>(null);
 	const [bridgeError, setBridgeError] = useState<string | null>(null);
 	const [controller, setController] = useState<SessionController | null>(null);
-	const [detailMode, setDetailMode] = useState<DetailMode>("view");
+	const [hostModalMode, setHostModalMode] = useState<HostModalMode>("closed");
 	const [hostForm, setHostForm] = useState<HostFormState>(() =>
 		initialFormState(),
 	);
 	const [pairingUrl, setPairingUrl] = useState("");
 	const [inlineError, setInlineError] = useState<string | null>(null);
+	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
+	);
 
 	const selectedHost =
 		registry.daemons.find((daemon) => daemon.id === ui.selectedHostId) ?? null;
@@ -192,6 +195,22 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	}, [clientKind]);
 
 	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+
+		const updateViewport = () => {
+			setIsNarrowViewport(window.innerWidth <= 900);
+		};
+
+		updateViewport();
+		window.addEventListener("resize", updateViewport);
+		return () => {
+			window.removeEventListener("resize", updateViewport);
+		};
+	}, []);
+
+	useEffect(() => {
 		const fallbackHostId = registry.daemons[0]?.id ?? null;
 		const selectedHostStillExists = registry.daemons.some(
 			(daemon) => daemon.id === ui.selectedHostId,
@@ -210,16 +229,6 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		ui.selectedHostId,
 		registry,
 	]);
-
-	useEffect(() => {
-		if (selectedHost == null) {
-			return;
-		}
-
-		if (detailMode === "view") {
-			setHostForm(initialFormState(selectedHost));
-		}
-	}, [detailMode, selectedHost]);
 
 	useEffect(() => {
 		if (
@@ -332,19 +341,6 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		};
 	}, [bridge, workspace.activeConnectionHostId, workspace.connectionState]);
 
-	const statusText = useMemo(() => {
-		switch (workspace.connectionState) {
-			case "connecting":
-				return "connecting";
-			case "connected":
-				return "connected";
-			case "failed":
-				return "failed";
-			default:
-				return "idle";
-		}
-	}, [workspace.connectionState]);
-
 	const connectSelectedHost = async () => {
 		if (selectedHost == null || controller == null) {
 			return;
@@ -389,66 +385,40 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		}
 	};
 
-	const disconnectActiveHost = () => {
-		void bridge?.close();
-		workspaceState.getState().markDisconnected();
-	};
-
 	const openHost = (hostId: string) => {
 		uiState.getState().setSelectedHostId(hostId);
-		uiState.getState().setOverlaySection("host");
-		setDetailMode("view");
 	};
 
-	const startAddHost = () => {
-		setDetailMode("add");
+	const openAddHostChooser = () => {
+		setInlineError(null);
+		setPairingUrl("");
+		setHostModalMode("chooser");
+	};
+
+	const openDirectHostModal = () => {
 		setInlineError(null);
 		setHostForm(initialFormState());
-		uiState.getState().openOverlay("host");
-		uiState.getState().setOverlaySection("host");
+		setPairingUrl("");
+		setHostModalMode("direct");
 	};
 
-	const startEditHost = () => {
-		if (selectedHost == null) {
-			return;
-		}
-		setDetailMode("edit");
+	const openPairingHostModal = () => {
 		setInlineError(null);
-		setHostForm(initialFormState(selectedHost));
+		setPairingUrl("");
+		setHostModalMode("pairing");
+	};
+
+	const closeHostModal = () => {
+		setHostModalMode("closed");
+		setInlineError(null);
 	};
 
 	const saveHost = () => {
-		if (detailMode === "add" && hostForm.kind === "relay") {
-			return;
-		}
-
-		const wasAdding = detailMode === "add";
-		const currentHostId =
-			detailMode === "edit" ? (selectedHost?.id ?? null) : null;
-		const nextHost = makeHostRecord(hostForm, currentHostId);
+		const nextHost = makeHostRecord(hostForm, null);
 		registry.upsertDaemon(nextHost);
 		registry.selectDaemon(nextHost.id);
 		uiState.getState().setSelectedHostId(nextHost.id);
-		setDetailMode("view");
-		if (wasAdding) {
-			uiState.getState().closeOverlay();
-		}
-	};
-
-	const removeHost = () => {
-		if (selectedHost == null) {
-			return;
-		}
-
-		if (workspace.activeConnectionHostId === selectedHost.id) {
-			setInlineError("disconnect the active host before removing it");
-			return;
-		}
-
-		registry.removeDaemon(selectedHost.id);
-		const fallback = daemonRegistry.getState().daemons[0] ?? null;
-		uiState.getState().setSelectedHostId(fallback?.id ?? null);
-		setDetailMode("view");
+		closeHostModal();
 	};
 
 	const importPairingLink = async () => {
@@ -458,8 +428,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 			registry.selectDaemon(importedHost.id);
 			uiState.getState().setSelectedHostId(importedHost.id);
 			setPairingUrl("");
-			setInlineError(null);
-			setDetailMode("view");
+			closeHostModal();
 		} catch (error: unknown) {
 			setInlineError(
 				error instanceof Error
@@ -469,23 +438,108 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		}
 	};
 
-	const hostForConnectionPanel =
-		selectedHost ?? activeHost ?? registry.daemons[0] ?? null;
 	const errorMessage = inlineError ?? workspace.lastError ?? bridgeError;
-	const isRelayImportMode = detailMode === "add" && hostForm.kind === "relay";
-	const isRelayEditMode =
-		detailMode === "edit" &&
-		selectedHost?.kind === "relay" &&
-		hostForm.kind === "relay";
+	const hasSavedHosts = registry.daemons.length > 0;
+	const isMobileUi = mobile || isNarrowViewport;
+	const mobileOverlayShowsDetail = isMobileUi && !ui.isOverlayMenuRoot;
+	const overlayDetailSection =
+		ui.overlaySection === "settings" ? (
+			<section className="detail-section">
+				<h2>Settings</h2>
+				<div className="detail-grid">
+					<div>
+						<span>Theme</span>
+						<strong>Dark</strong>
+					</div>
+					<div>
+						<span>Shell</span>
+						<strong>default</strong>
+					</div>
+					<div>
+						<span>Scrollback</span>
+						<strong>4194304</strong>
+					</div>
+					<div>
+						<span>Keyboard</span>
+						<strong>virtual key bar on touch input</strong>
+					</div>
+				</div>
+			</section>
+		) : ui.overlaySection === "diagnostics" ? (
+			<section className="detail-section">
+				<h2>Diagnostics</h2>
+				<div className="detail-grid">
+					<div>
+						<span>Status</span>
+						<strong>{workspace.connectionState}</strong>
+					</div>
+					<div>
+						<span>Active host</span>
+						<strong>{activeHost?.label ?? "none"}</strong>
+					</div>
+					<div>
+						<span>Endpoint</span>
+						<strong>{activeHost ? endpointLabel(activeHost) : "none"}</strong>
+					</div>
+					<div>
+						<span>Last error</span>
+						<strong>{workspace.lastError ?? "none"}</strong>
+					</div>
+					<div>
+						<span>Client</span>
+						<strong>{isMobileUi ? "mobile" : clientKind}</strong>
+					</div>
+					<div>
+						<span>Active terminal</span>
+						<strong>{activeSession?.title ?? "none"}</strong>
+					</div>
+					<div>
+						<span>Terminal count</span>
+						<strong>{workspace.terminals.length}</strong>
+					</div>
+				</div>
+				<div className="action-row">
+					<button type="button" disabled>
+						Copy diagnostics
+					</button>
+					<button
+						type="button"
+						onClick={() => {
+							workspaceState.getState().clearError();
+							setInlineError(null);
+						}}
+					>
+						Clear errors
+					</button>
+				</div>
+			</section>
+		) : (
+			<section className="detail-section">
+				<h2>About</h2>
+				<div className="detail-grid">
+					<div>
+						<span>Version</span>
+						<strong>0.1.0</strong>
+					</div>
+					<div>
+						<span>Client</span>
+						<strong>{isMobileUi ? "mobile" : clientKind}</strong>
+					</div>
+					<div>
+						<span>Protocol</span>
+						<strong>v1</strong>
+					</div>
+				</div>
+				<p>Self-hosted remote terminal client.</p>
+			</section>
+		);
 
 	return (
 		<Shell
-			clientKind={clientKind}
-			statusText={statusText}
 			activeHostLabel={activeHost?.label ?? null}
-			activeEndpoint={activeHost ? endpointLabel(activeHost) : null}
+			connectionState={workspace.connectionState}
 			isOverlayOpen={ui.isOverlayOpen}
-			onOpenOverlay={() => ui.openOverlay("host")}
+			onOpenOverlay={() => ui.openOverlay("settings")}
 			onCloseOverlay={ui.closeOverlay}
 		>
 			<main className="app-shell__main">
@@ -522,9 +576,9 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							<span>{activeSession?.status ?? workspace.connectionState}</span>
 						</footer>
 					</section>
-				) : (
-					<section className="connect-panel" aria-label="Connect to a host">
-						<h2>Connect to a host</h2>
+				) : hasSavedHosts ? (
+					<section className="connect-panel" aria-label="Hosts">
+						<h2>Hosts</h2>
 						<div className="field-stack">
 							<label className="field">
 								<span>Selected host</span>
@@ -552,6 +606,13 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 									{mainHost ? endpointLabel(mainHost) : "No saved hosts"}
 								</strong>
 							</div>
+							<button
+								type="button"
+								className="host-inline-action"
+								onClick={openAddHostChooser}
+							>
+								+ Add host
+							</button>
 						</div>
 						<div className="action-row">
 							<button
@@ -561,14 +622,11 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							>
 								Connect
 							</button>
-							<button type="button" onClick={startAddHost}>
-								Add host
-							</button>
 							<button
 								type="button"
-								onClick={() => uiState.getState().openOverlay("host")}
+								onClick={() => uiState.getState().openOverlay("settings")}
 							>
-								Open hosts and settings
+								Open menu
 							</button>
 						</div>
 						<div className="field">
@@ -588,17 +646,93 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							Scan QR code
 						</button>
 					</section>
+				) : (
+					<section className="empty-hosts-panel" aria-label="Add host options">
+						<button type="button" onClick={openDirectHostModal}>
+							Direct connection
+						</button>
+						<button type="button" onClick={openPairingHostModal}>
+							Pairing link
+						</button>
+						<button type="button" disabled>
+							QR code
+						</button>
+					</section>
 				)}
 
 				<ErrorBanner message={errorMessage} />
 			</main>
 
-			{ui.isOverlayOpen ? (
+			{ui.isOverlayOpen && isMobileUi ? (
+				<aside
+					className="control-overlay control-overlay--mobile"
+					aria-label="Control overlay"
+				>
+					{mobileOverlayShowsDetail ? (
+						<div className="control-overlay__mobile-page">
+							<button
+								type="button"
+								className="back-button"
+								onClick={() => uiState.getState().showOverlayMenuRoot()}
+							>
+								Back
+							</button>
+							{overlayDetailSection}
+						</div>
+					) : (
+						<div className="control-overlay__mobile-page">
+							<button
+								type="button"
+								className="back-button"
+								onClick={ui.closeOverlay}
+							>
+								Back
+							</button>
+							<nav className="overlay-nav" aria-label="Overlay sections">
+								{(["settings", "diagnostics", "about"] as OverlaySection[]).map(
+									(section) => (
+										<button
+											type="button"
+											key={section}
+											onClick={() =>
+												uiState.getState().setOverlaySection(section)
+											}
+										>
+											{section.charAt(0).toUpperCase() + section.slice(1)}
+										</button>
+									),
+								)}
+							</nav>
+							<div className="overlay-divider" aria-hidden="true" />
+							<div className="host-list">
+								<p className="host-list__heading">Saved hosts</p>
+								{registry.daemons.map((host) => (
+									<button
+										type="button"
+										key={host.id}
+										className="host-list__item"
+										onClick={() => openHost(host.id)}
+									>
+										<span>{host.label}</span>
+										<small>{hostBadge(host)}</small>
+									</button>
+								))}
+								<button
+									type="button"
+									className="host-list__add"
+									onClick={openAddHostChooser}
+								>
+									+ Add host
+								</button>
+							</div>
+						</div>
+					)}
+				</aside>
+			) : null}
+
+			{ui.isOverlayOpen && !isMobileUi ? (
 				<aside className="control-overlay" aria-label="Control overlay">
-					<div
-						className="control-overlay__rail"
-						data-mobile={mobile ? "1" : "0"}
-					>
+					<div className="control-overlay__rail">
 						<button
 							type="button"
 							className="back-button"
@@ -607,27 +741,24 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							Back
 						</button>
 						<nav className="overlay-nav" aria-label="Overlay sections">
-							{(
-								["host", "settings", "diagnostics", "about"] as OverlaySection[]
-							).map((section) => (
-								<button
-									type="button"
-									key={section}
-									data-active={ui.overlaySection === section}
-									onClick={() => {
-										uiState.getState().setOverlaySection(section);
-										if (section !== "host") {
-											setDetailMode("view");
+							{(["settings", "diagnostics", "about"] as OverlaySection[]).map(
+								(section) => (
+									<button
+										type="button"
+										key={section}
+										data-active={ui.overlaySection === section}
+										onClick={() =>
+											uiState.getState().setOverlaySection(section)
 										}
-									}}
-								>
-									{section === "host"
-										? "Connection"
-										: section.charAt(0).toUpperCase() + section.slice(1)}
-								</button>
-							))}
+									>
+										{section.charAt(0).toUpperCase() + section.slice(1)}
+									</button>
+								),
+							)}
 						</nav>
+						<div className="overlay-divider" aria-hidden="true" />
 						<div className="host-list">
+							<p className="host-list__heading">Saved hosts</p>
 							{registry.daemons.map((host) => (
 								<button
 									type="button"
@@ -643,325 +774,101 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							<button
 								type="button"
 								className="host-list__add"
-								onClick={startAddHost}
+								onClick={openAddHostChooser}
 							>
 								+ Add host
 							</button>
 						</div>
 					</div>
-					<div className="control-overlay__detail">
-						{ui.overlaySection === "host" ? (
-							<section className="detail-section">
-								<h2>
-									{detailMode === "add"
-										? "Add host"
-										: detailMode === "edit"
-											? "Edit host"
-											: (hostForConnectionPanel?.label ?? "Connection")}
-								</h2>
-								{detailMode === "view" && hostForConnectionPanel != null ? (
-									<>
-										<div
-											className="status-chip"
-											data-state={workspace.connectionState}
-										>
-											{workspace.activeConnectionHostId ===
-											hostForConnectionPanel.id
-												? statusText
-												: "saved"}
-										</div>
-										<div className="detail-grid">
-											<div>
-												<span>Status</span>
-												<strong>
-													{workspace.activeConnectionHostId ===
-													hostForConnectionPanel.id
-														? statusText
-														: "not active"}
-												</strong>
-											</div>
-											<div>
-												<span>Endpoint</span>
-												<strong>{endpointLabel(hostForConnectionPanel)}</strong>
-											</div>
-											<div>
-												<span>Pairing</span>
-												<strong>
-													{hostForConnectionPanel.kind === "relay"
-														? "paired"
-														: "direct"}
-												</strong>
-											</div>
-										</div>
-										<div className="action-column">
-											<button
-												type="button"
-												onClick={() => void connectSelectedHost()}
-											>
-												Connect
-											</button>
-											<button type="button" onClick={disconnectActiveHost}>
-												Disconnect
-											</button>
-											<button type="button" onClick={startEditHost}>
-												Edit host
-											</button>
-											<button type="button" onClick={removeHost}>
-												Remove host
-											</button>
-										</div>
-									</>
-								) : detailMode === "view" ? (
-									<div className="empty-state">
-										<p>No saved hosts yet.</p>
-										<button type="button" onClick={startAddHost}>
-											Add host
-										</button>
-									</div>
-								) : (
-									<form
-										className="host-form"
-										onSubmit={(event) => {
-											event.preventDefault();
-											saveHost();
-										}}
-									>
-										{detailMode === "add" ? (
-											<label className="field">
-												<span>Mode</span>
-												<select
-													value={hostForm.kind}
-													onChange={(event) =>
-														setHostForm((state) => ({
-															...state,
-															kind: event.target.value as "direct" | "relay",
-														}))
-													}
-												>
-													<option value="direct">Direct</option>
-													<option value="relay">Relay</option>
-												</select>
-											</label>
-										) : (
-											<div className="field field--static">
-												<span>Mode</span>
-												<strong>
-													{hostForm.kind === "direct" ? "Direct" : "Relay"}
-												</strong>
-											</div>
-										)}
-										{hostForm.kind === "direct" ? (
-											<label className="field">
-												<span>Endpoint URL</span>
-												<input
-													value={hostForm.endpointUrl}
-													onChange={(event) =>
-														setHostForm((state) => ({
-															...state,
-															endpointUrl: event.target.value,
-														}))
-													}
-												/>
-											</label>
-										) : isRelayImportMode ? (
-											<label className="field">
-												<span>Pairing link</span>
-												<div className="inline-form">
-													<input
-														value={pairingUrl}
-														onChange={(event) =>
-															setPairingUrl(event.target.value)
-														}
-														placeholder="https://cli-pocket...#pair=..."
-													/>
-													<button
-														type="button"
-														onClick={() => void importPairingLink()}
-													>
-														Import
-													</button>
-												</div>
-											</label>
-										) : isRelayEditMode ? (
-											<p className="field-note">
-												Relay trust material comes from the pairing offer and is
-												not edited here.
-											</p>
-										) : (
-											<>
-												<label className="field">
-													<span>Relay URL</span>
-													<input
-														value={hostForm.relayUrl}
-														onChange={(event) =>
-															setHostForm((state) => ({
-																...state,
-																relayUrl: event.target.value,
-															}))
-														}
-													/>
-												</label>
-												<label className="field">
-													<span>Host ID</span>
-													<input
-														value={hostForm.hostId}
-														onChange={(event) =>
-															setHostForm((state) => ({
-																...state,
-																hostId: event.target.value,
-															}))
-														}
-													/>
-												</label>
-												<label className="field">
-													<span>Relay PSK</span>
-													<input
-														value={hostForm.relayPskHex}
-														onChange={(event) =>
-															setHostForm((state) => ({
-																...state,
-																relayPskHex: event.target.value,
-															}))
-														}
-													/>
-												</label>
-											</>
-										)}
-										{hostForm.kind === "relay" &&
-										!isRelayImportMode &&
-										!isRelayEditMode ? (
-											<label className="field">
-												<span>Server public key</span>
-												<input
-													value={hostForm.serverPublicHex}
-													onChange={(event) =>
-														setHostForm((state) => ({
-															...state,
-															serverPublicHex: event.target.value,
-														}))
-													}
-												/>
-											</label>
-										) : null}
-										<div className="action-row">
-											{!isRelayImportMode ? (
-												<button type="submit">Save host</button>
-											) : null}
-											<button
-												type="button"
-												onClick={() => {
-													setDetailMode("view");
-													if (selectedHost != null) {
-														setHostForm(initialFormState(selectedHost));
-													}
-												}}
-											>
-												Cancel
-											</button>
-										</div>
-									</form>
-								)}
-							</section>
+					<div className="control-overlay__detail">{overlayDetailSection}</div>
+				</aside>
+			) : null}
+
+			{hostModalMode !== "closed" ? (
+				<div className="host-modal-backdrop">
+					<div
+						className="host-modal"
+						role="dialog"
+						aria-modal="true"
+						aria-label="Add host modal"
+					>
+						<h2>
+							{hostModalMode === "chooser"
+								? "Add host"
+								: hostModalMode === "direct"
+									? "Direct connection"
+									: "Pairing link"}
+						</h2>
+
+						{hostModalMode === "chooser" ? (
+							<div className="host-option-list">
+								<button type="button" onClick={openDirectHostModal}>
+									Direct connection
+								</button>
+								<button type="button" onClick={openPairingHostModal}>
+									Pairing link
+								</button>
+								<button type="button" disabled>
+									QR code
+								</button>
+							</div>
 						) : null}
 
-						{ui.overlaySection === "settings" ? (
-							<section className="detail-section">
-								<h2>Settings</h2>
-								<div className="detail-grid">
-									<div>
-										<span>Theme</span>
-										<strong>Dark</strong>
-									</div>
-									<div>
-										<span>Shell</span>
-										<strong>default</strong>
-									</div>
-									<div>
-										<span>Scrollback</span>
-										<strong>4194304</strong>
-									</div>
-									<div>
-										<span>Keyboard</span>
-										<strong>virtual key bar on touch input</strong>
-									</div>
-								</div>
-							</section>
-						) : null}
-
-						{ui.overlaySection === "diagnostics" ? (
-							<section className="detail-section">
-								<h2>Diagnostics</h2>
-								<div className="detail-grid">
-									<div>
-										<span>Connection state</span>
-										<strong>{workspace.connectionState}</strong>
-									</div>
-									<div>
-										<span>Active host</span>
-										<strong>{activeHost?.label ?? "none"}</strong>
-									</div>
-									<div>
-										<span>Endpoint</span>
-										<strong>
-											{activeHost ? endpointLabel(activeHost) : "none"}
-										</strong>
-									</div>
-									<div>
-										<span>Last error</span>
-										<strong>{workspace.lastError ?? "none"}</strong>
-									</div>
-									<div>
-										<span>Client</span>
-										<strong>{mobile ? "mobile" : clientKind}</strong>
-									</div>
-									<div>
-										<span>Active terminal</span>
-										<strong>{activeSession?.title ?? "none"}</strong>
-									</div>
-									<div>
-										<span>Terminal count</span>
-										<strong>{workspace.terminals.length}</strong>
-									</div>
-								</div>
+						{hostModalMode === "direct" ? (
+							<form
+								className="host-form"
+								onSubmit={(event) => {
+									event.preventDefault();
+									saveHost();
+								}}
+							>
+								<label className="field">
+									<span>Endpoint URL</span>
+									<input
+										value={hostForm.endpointUrl}
+										onChange={(event) =>
+											setHostForm((state) => ({
+												...state,
+												kind: "direct",
+												endpointUrl: event.target.value,
+											}))
+										}
+									/>
+								</label>
 								<div className="action-row">
-									<button type="button" disabled>
-										Copy diagnostics
+									<button type="submit">Save host</button>
+									<button type="button" onClick={closeHostModal}>
+										Cancel
 									</button>
+								</div>
+							</form>
+						) : null}
+
+						{hostModalMode === "pairing" ? (
+							<div className="host-form">
+								<label className="field">
+									<span>Pairing link</span>
+									<input
+										value={pairingUrl}
+										onChange={(event) => setPairingUrl(event.target.value)}
+										placeholder="https://cli-pocket...#pair=..."
+									/>
+								</label>
+								<div className="action-row">
 									<button
 										type="button"
-										onClick={() => {
-											workspaceState.getState().clearError();
-											setInlineError(null);
-										}}
+										onClick={() => void importPairingLink()}
 									>
-										Clear errors
+										Import
+									</button>
+									<button type="button" onClick={closeHostModal}>
+										Cancel
 									</button>
 								</div>
-							</section>
-						) : null}
-
-						{ui.overlaySection === "about" ? (
-							<section className="detail-section">
-								<h2>About</h2>
-								<div className="detail-grid">
-									<div>
-										<span>Version</span>
-										<strong>0.1.0</strong>
-									</div>
-									<div>
-										<span>Client</span>
-										<strong>{mobile ? "mobile" : clientKind}</strong>
-									</div>
-									<div>
-										<span>Protocol</span>
-										<strong>v1</strong>
-									</div>
-								</div>
-								<p>Self-hosted remote terminal client.</p>
-							</section>
+							</div>
 						) : null}
 					</div>
-				</aside>
+				</div>
 			) : null}
 		</Shell>
 	);

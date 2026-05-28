@@ -13,8 +13,6 @@ export function mountApp({ clientKind, mobile }: MountOptions) {
 		throw new Error("missing #root");
 	}
 
-	container.dataset.mobile = mobile ? "1" : "0";
-
 	createRoot(container).render(
 		<StrictMode>
 			<AppRoot clientKind={clientKind} mobile={mobile} />

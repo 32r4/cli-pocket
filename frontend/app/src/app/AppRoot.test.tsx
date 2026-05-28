@@ -3,15 +3,19 @@ import { describe, expect, it } from "vitest";
 import { AppRoot } from "./AppRoot";
 
 describe("AppRoot", () => {
-	it("renders the disconnected connection entry point", () => {
+	it("renders the disconnected host entry point", () => {
 		render(<AppRoot clientKind="tauri" />);
+		expect(screen.getByText("No host")).toBeInTheDocument();
+		expect(screen.getByLabelText("Status red")).toBeInTheDocument();
 		expect(
-			screen.getByRole("heading", { name: "cli-pocket" }),
+			screen.getByRole("button", { name: "Direct connection" }),
 		).toBeInTheDocument();
 		expect(
-			screen.getByRole("heading", { name: "Connect to a host" }),
+			screen.getByRole("button", { name: "Pairing link" }),
 		).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Menu" })).toBeInTheDocument();
-		expect(screen.getByText("No saved hosts")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "QR code" })).toBeDisabled();
+		expect(
+			screen.getByRole("button", { name: "Open control overlay" }),
+		).toBeInTheDocument();
 	});
 });

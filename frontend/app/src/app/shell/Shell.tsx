@@ -2,10 +2,8 @@ import type { ReactNode } from "react";
 
 interface ShellProps {
 	children: ReactNode;
-	clientKind: "web" | "tauri";
-	statusText: string;
 	activeHostLabel: string | null;
-	activeEndpoint: string | null;
+	connectionState: "idle" | "connecting" | "connected" | "failed";
 	isOverlayOpen: boolean;
 	onOpenOverlay: () => void;
 	onCloseOverlay: () => void;
@@ -13,14 +11,19 @@ interface ShellProps {
 
 export function Shell({
 	children,
-	clientKind,
-	statusText,
 	activeHostLabel,
-	activeEndpoint,
+	connectionState,
 	isOverlayOpen,
 	onOpenOverlay,
 	onCloseOverlay,
 }: ShellProps) {
+	const indicatorState =
+		connectionState === "connected"
+			? "green"
+			: connectionState === "connecting"
+				? "yellow"
+				: "red";
+
 	return (
 		<div className="app-shell">
 			<header className="app-shell__header">
@@ -32,16 +35,19 @@ export function Shell({
 						isOverlayOpen ? "Close control overlay" : "Open control overlay"
 					}
 				>
-					{isOverlayOpen ? "Close" : "Menu"}
+					<span className="menu-button__icon" aria-hidden="true">
+						<span />
+						<span />
+						<span />
+					</span>
 				</button>
-				<div className="app-shell__brand">
-					<h1>cli-pocket</h1>
-					<p>{clientKind}</p>
-				</div>
-				<div className="app-shell__status">
-					<strong>{statusText}</strong>
-					<span>{activeHostLabel ?? "No host"}</span>
-					<span>{activeEndpoint ?? "Not connected"}</span>
+				<div className="app-shell__host">
+					<strong>{activeHostLabel ?? "No host"}</strong>
+					<span className="sr-only">{`Status ${indicatorState}`}</span>
+					<span
+						className="app-shell__status-light"
+						data-state={indicatorState}
+					/>
 				</div>
 			</header>
 			{children}
