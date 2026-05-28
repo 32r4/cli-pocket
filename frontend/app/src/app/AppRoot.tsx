@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { pairAndStoreDaemon } from "@/features/pairing/pairingFlow";
 import { importPairingOfferUrl } from "@/features/pairing/pairingOffer";
@@ -59,6 +59,10 @@ function hostBadge(host: DaemonRecord) {
 
 function endpointLabel(host: DaemonRecord) {
 	return host.kind === "direct" ? host.endpointUrl : host.relayUrl;
+}
+
+function BackIcon() {
+	return <span className="back-button__icon" aria-hidden="true" />;
 }
 
 function initialFormState(host?: DaemonRecord): HostFormState {
@@ -150,6 +154,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
+	const autoConnectHostIdRef = useRef<string | null>(null);
 
 	const selectedHost =
 		registry.daemons.find((daemon) => daemon.id === ui.selectedHostId) ?? null;
@@ -229,6 +234,37 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		ui.selectedHostId,
 		registry,
 	]);
+
+	useEffect(() => {
+		if (mainHost == null) {
+			autoConnectHostIdRef.current = null;
+			return;
+		}
+		if (controller == null) {
+			return;
+		}
+		if (
+			workspace.connectionState === "connected" ||
+			workspace.connectionState === "connecting"
+		) {
+			return;
+		}
+		if (autoConnectHostIdRef.current === mainHost.id) {
+			return;
+		}
+
+		autoConnectHostIdRef.current = mainHost.id;
+		setInlineError(null);
+
+		void controller
+			.connectAndCreate(mainHost.id, toConnectConfig(mainHost))
+			.catch((error: unknown) => {
+				const message =
+					error instanceof Error ? error.message : "connection failed";
+				workspaceState.getState().markConnectionFailed(message);
+				setInlineError(message);
+			});
+	}, [controller, mainHost, workspace.connectionState]);
 
 	useEffect(() => {
 		if (
@@ -341,18 +377,29 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		};
 	}, [bridge, workspace.activeConnectionHostId, workspace.connectionState]);
 
-	const connectSelectedHost = async () => {
-		if (selectedHost == null || controller == null) {
+	const connectHost = async (
+		host: DaemonRecord,
+		options?: { closeOverlay?: boolean },
+	) => {
+		setInlineError(null);
+		autoConnectHostIdRef.current = host.id;
+		registry.selectDaemon(host.id);
+		uiState.getState().setSelectedHostId(host.id);
+		if (options?.closeOverlay === true) {
+			uiState.getState().closeOverlay();
+		}
+		if (
+			workspaceState.getState().connectionState === "connected" &&
+			workspaceState.getState().activeConnectionHostId === host.id
+		) {
+			return;
+		}
+		if (controller == null) {
 			return;
 		}
 
-		setInlineError(null);
 		try {
-			registry.selectDaemon(selectedHost.id);
-			await controller.connectAndCreate(
-				selectedHost.id,
-				toConnectConfig(selectedHost),
-			);
+			await controller.connectAndCreate(host.id, toConnectConfig(host));
 		} catch (error: unknown) {
 			const message =
 				error instanceof Error ? error.message : "connection failed";
@@ -383,10 +430,6 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 			workspaceState.getState().markTerminalClosed(tempId);
 			setInlineError(message);
 		}
-	};
-
-	const openHost = (hostId: string) => {
-		uiState.getState().setSelectedHostId(hostId);
 	};
 
 	const openAddHostChooser = () => {
@@ -577,74 +620,16 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 						</footer>
 					</section>
 				) : hasSavedHosts ? (
-					<section className="connect-panel" aria-label="Hosts">
-						<h2>Hosts</h2>
-						<div className="field-stack">
-							<label className="field">
-								<span>Selected host</span>
-								<select
-									value={mainHost?.id ?? ""}
-									onChange={(event) => {
-										registry.selectDaemon(event.target.value);
-										uiState.getState().setSelectedHostId(event.target.value);
-									}}
-									disabled={registry.daemons.length === 0}
-								>
-									{registry.daemons.length === 0 ? (
-										<option value="">No saved hosts</option>
-									) : null}
-									{registry.daemons.map((host) => (
-										<option value={host.id} key={host.id}>
-											{host.label}
-										</option>
-									))}
-								</select>
-							</label>
-							<div className="field field--static">
-								<span>Endpoint</span>
-								<strong>
-									{mainHost ? endpointLabel(mainHost) : "No saved hosts"}
-								</strong>
-							</div>
-							<button
-								type="button"
-								className="host-inline-action"
-								onClick={openAddHostChooser}
-							>
-								+ Add host
-							</button>
-						</div>
-						<div className="action-row">
-							<button
-								type="button"
-								onClick={() => void connectSelectedHost()}
-								disabled={mainHost == null || controller == null}
-							>
-								Connect
-							</button>
-							<button
-								type="button"
-								onClick={() => uiState.getState().openOverlay("settings")}
-							>
-								Open menu
-							</button>
-						</div>
-						<div className="field">
-							<span>Pair with link</span>
-							<div className="inline-form">
-								<input
-									value={pairingUrl}
-									onChange={(event) => setPairingUrl(event.target.value)}
-									placeholder="https://cli-pocket...#pair=..."
-								/>
-								<button type="button" onClick={() => void importPairingLink()}>
-									Import
-								</button>
-							</div>
-						</div>
-						<button type="button" className="ghost-button" disabled>
-							Scan QR code
-						</button>
+					<section
+						className="connection-status-panel"
+						aria-label="Connection status"
+					>
+						<h2>
+							{workspace.connectionState === "failed"
+								? "Connection failed"
+								: "Connecting"}
+						</h2>
+						<p>{mainHost?.label ?? "No host"}</p>
 					</section>
 				) : (
 					<section className="empty-hosts-panel" aria-label="Add host options">
@@ -674,8 +659,9 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 								type="button"
 								className="back-button"
 								onClick={() => uiState.getState().showOverlayMenuRoot()}
+								aria-label="Back to menu"
 							>
-								Back
+								<BackIcon />
 							</button>
 							{overlayDetailSection}
 						</div>
@@ -685,8 +671,9 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 								type="button"
 								className="back-button"
 								onClick={ui.closeOverlay}
+								aria-label="Close menu"
 							>
-								Back
+								<BackIcon />
 							</button>
 							<nav className="overlay-nav" aria-label="Overlay sections">
 								{(["settings", "diagnostics", "about"] as OverlaySection[]).map(
@@ -711,7 +698,9 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 										type="button"
 										key={host.id}
 										className="host-list__item"
-										onClick={() => openHost(host.id)}
+										onClick={() =>
+											void connectHost(host, { closeOverlay: true })
+										}
 									>
 										<span>{host.label}</span>
 										<small>{hostBadge(host)}</small>
@@ -737,8 +726,9 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							type="button"
 							className="back-button"
 							onClick={ui.closeOverlay}
+							aria-label="Close menu"
 						>
-							Back
+							<BackIcon />
 						</button>
 						<nav className="overlay-nav" aria-label="Overlay sections">
 							{(["settings", "diagnostics", "about"] as OverlaySection[]).map(
@@ -765,7 +755,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 									key={host.id}
 									className="host-list__item"
 									data-active={ui.selectedHostId === host.id}
-									onClick={() => openHost(host.id)}
+									onClick={() => void connectHost(host, { closeOverlay: true })}
 								>
 									<span>{host.label}</span>
 									<small>{hostBadge(host)}</small>

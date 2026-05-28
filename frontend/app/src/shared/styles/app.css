@@ -130,7 +130,17 @@ strong {
 	background: currentColor;
 }
 
+.back-button__icon {
+	display: block;
+	width: 1rem;
+	height: 1rem;
+	border-left: 1.5px solid currentColor;
+	border-bottom: 1.5px solid currentColor;
+	transform: rotate(45deg);
+}
+
 .connect-panel h2,
+.connection-status-panel h2,
 .detail-section h2 {
 	margin: 0;
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
@@ -180,6 +190,7 @@ strong {
 }
 
 .connect-panel,
+.connection-status-panel,
 .workspace-panel {
 	min-height: calc(100vh - 8.5rem);
 	padding: 0;
@@ -192,17 +203,30 @@ strong {
 	max-width: 58rem;
 }
 
-.empty-hosts-panel {
+.connection-status-panel {
 	display: grid;
 	align-content: start;
 	gap: 1rem;
 	max-width: 24rem;
 }
 
+.empty-hosts-panel {
+	display: grid;
+	align-content: center;
+	justify-items: center;
+	gap: 1rem;
+	max-width: 24rem;
+	min-height: calc(100vh - 8.5rem);
+	margin: 0 auto;
+}
+
 .empty-hosts-panel button {
-	justify-content: flex-start;
-	padding: 1rem 0;
-	border-bottom: 1px solid var(--line);
+	width: min(100%, 18rem);
+	justify-content: center;
+	padding: 1rem 1.25rem;
+	border: 1px solid var(--line);
+	border-radius: 0.6rem;
+	background: rgba(255, 255, 255, 0.04);
 }
 
 .connect-panel > * {
@@ -497,7 +521,12 @@ strong {
 	}
 
 	.connect-panel,
+	.connection-status-panel,
 	.workspace-panel {
+		min-height: calc(100vh - 10rem);
+	}
+
+	.empty-hosts-panel {
 		min-height: calc(100vh - 10rem);
 	}
 
