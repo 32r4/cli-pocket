@@ -1,5 +1,5 @@
 use crate::error::{ByeReason, ProtocolError};
-use crate::hello::{Hello, HelloErr, HelloOk};
+use crate::hello::{Hello, HelloOk};
 use crate::snapshot::Snapshot;
 use crate::terminal::{
     ExitInfo, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
@@ -17,7 +17,6 @@ pub enum FrameBody {
     // ---- Connection control ----
     Hello(Hello),
     HelloOk(HelloOk),
-    HelloErr(HelloErr),
     Ping {
         nonce: u32,
     },
@@ -60,9 +59,6 @@ pub enum FrameBody {
         error: ProtocolError,
     },
 
-    TerminalDetach {
-        stream: StreamId,
-    },
     TerminalKill {
         request_id: u32,
         terminal: TerminalId,

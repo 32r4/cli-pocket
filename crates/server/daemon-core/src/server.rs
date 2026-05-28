@@ -5,14 +5,15 @@ use std::sync::Arc;
 
 use cli_pocket_proto::ServerInfo;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+use crate::accept::{run_accepted_transport, AcceptDeps, AcceptedTransport};
 use crate::client_db::ClientDb;
 use crate::config::DaemonConfig;
-use crate::connection::{run_connection_with_handshake, ConnectionDeps};
 use crate::identity_store::{load_or_create, DaemonIdentity};
-use crate::listener::{serve, ListenerDeps};
+use crate::listener::serve;
 use crate::session::SessionManager;
 
 /// Top-level daemon struct owning all subsystems.
@@ -29,7 +30,8 @@ pub struct Daemon {
     pub config: DaemonConfig,
     listener_handle: Option<JoinHandle<()>>,
     relay_handle: Option<JoinHandle<()>>,
-    relay_session_handle: Option<JoinHandle<()>>,
+    listener_accept_handle: Option<JoinHandle<()>>,
+    relay_accept_handle: Option<JoinHandle<()>>,
 }
 
 impl Daemon {
@@ -59,7 +61,8 @@ impl Daemon {
             config,
             listener_handle: None,
             relay_handle: None,
-            relay_session_handle: None,
+            listener_accept_handle: None,
+            relay_accept_handle: None,
         })
     }
 
@@ -77,20 +80,28 @@ impl Daemon {
             let arr: [u8; 32] = bytes.try_into().ok()?;
             Some(Arc::new(arr))
         });
-        let session_mgr = Arc::clone(&self.session_mgr);
-        let client_db = Arc::clone(&self.client_db);
-        let server_info = self.server_info.clone();
-
-        let listener_deps = ListenerDeps {
+        let accept_deps = AcceptDeps {
             identity,
             psk: psk.clone(),
-            session_mgr,
-            client_db,
-            server_info,
+            session_mgr: Arc::clone(&self.session_mgr),
+            client_db: Arc::clone(&self.client_db),
+            server_info: self.server_info.clone(),
         };
+        let (listener_tx, mut listener_rx) =
+            mpsc::channel::<AcceptedTransport<cli_pocket_transport::TokioWsTransport>>(32);
+        let listener_deps = accept_deps.clone();
+        let handle = tokio::spawn(async move {
+            while let Some(accepted) = listener_rx.recv().await {
+                let deps = listener_deps.clone();
+                tokio::spawn(async move {
+                    let _ = run_accepted_transport(accepted, deps).await;
+                });
+            }
+        });
+        self.listener_accept_handle = Some(handle);
 
         let handle = tokio::spawn(async move {
-            if let Err(e) = serve(listener, listener_deps).await {
+            if let Err(e) = serve(listener, listener_tx).await {
                 error!(error = %e, "listener exited with error");
             }
         });
@@ -99,54 +110,28 @@ impl Daemon {
         if let Some(relay_config) = self.config.relay.clone() {
             let host_id = self.identity.host_id;
             let identity_keypair = self.identity.keypair.clone();
-            let (relay_pairs_tx, relay_pairs_rx) = tokio::sync::mpsc::channel(32);
+            let (relay_tx, mut relay_rx) =
+                mpsc::channel::<AcceptedTransport<crate::relay_dialer::PairTransport>>(32);
+            let relay_deps = accept_deps.clone();
             let handle = tokio::spawn(async move {
-                if let Err(e) = crate::relay_dialer::run(
-                    relay_config,
-                    host_id,
-                    identity_keypair,
-                    relay_pairs_tx,
-                )
-                .await
+                while let Some(accepted) = relay_rx.recv().await {
+                    let deps = relay_deps.clone();
+                    tokio::spawn(async move {
+                        let _ = run_accepted_transport(accepted, deps).await;
+                    });
+                }
+            });
+            self.relay_accept_handle = Some(handle);
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) =
+                    crate::relay_dialer::run(relay_config, host_id, identity_keypair, relay_tx)
+                        .await
                 {
                     error!(error = %e, "relay dialer exited with error");
                 }
             });
             self.relay_handle = Some(handle);
-
-            let relay_identity = self.identity.keypair.clone();
-            let relay_psk = psk.clone();
-            let relay_session_mgr = Arc::clone(&self.session_mgr);
-            let relay_client_db = Arc::clone(&self.client_db);
-            let relay_server_info = self.server_info.clone();
-            let handle = tokio::spawn(async move {
-                let mut relay_pairs_rx = relay_pairs_rx;
-                while let Some(inbound) = relay_pairs_rx.recv().await {
-                    let deps = ConnectionDeps {
-                        session_mgr: Arc::clone(&relay_session_mgr),
-                        client_db: Arc::clone(&relay_client_db),
-                        server_info: relay_server_info.clone(),
-                    };
-                    let identity = relay_identity.clone();
-                    let psk_bytes = relay_psk.clone();
-                    tokio::spawn(async move {
-                        let psk_ref = psk_bytes.as_deref();
-                        if let Err(e) = run_connection_with_handshake(
-                            inbound.transport,
-                            &identity,
-                            psk_ref,
-                            deps,
-                        )
-                        .await
-                        {
-                            error!(pair_id = ?inbound.pair_id, error = %e, "relay session ended with error");
-                        } else {
-                            info!(pair_id = ?inbound.pair_id, "relay session closed cleanly");
-                        }
-                    });
-                }
-            });
-            self.relay_session_handle = Some(handle);
         }
 
         info!("daemon started");
@@ -161,7 +146,10 @@ impl Daemon {
         if let Some(h) = self.relay_handle {
             h.abort();
         }
-        if let Some(h) = self.relay_session_handle {
+        if let Some(h) = self.listener_accept_handle {
+            h.abort();
+        }
+        if let Some(h) = self.relay_accept_handle {
             h.abort();
         }
     }

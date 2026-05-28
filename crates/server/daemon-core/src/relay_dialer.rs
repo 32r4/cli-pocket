@@ -12,16 +12,10 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::info;
 
+use crate::accept::AcceptedTransport;
 use crate::config::RelayConfig;
 
 const PAIR_QUEUE_CAPACITY: usize = 32;
-
-#[derive(Debug)]
-pub struct InboundPair {
-    pub pair_id: PairId,
-    pub attempt_token: u32,
-    pub transport: PairTransport,
-}
 
 #[derive(Debug)]
 pub struct PairTransport {
@@ -69,7 +63,7 @@ pub async fn run(
     config: RelayConfig,
     host_id: HostId,
     identity: KeyPair,
-    inbound_tx: mpsc::Sender<InboundPair>,
+    accepted_tx: mpsc::Sender<AcceptedTransport<PairTransport>>,
 ) -> crate::DaemonResult<()> {
     info!(
         url = %config.url,
@@ -135,7 +129,7 @@ pub async fn run(
     });
 
     let pairs: Arc<Mutex<HashMap<PairId, PairBridge>>> = Arc::new(Mutex::new(HashMap::new()));
-    let result = read_loop(stream, Arc::clone(&sink), pairs, inbound_tx).await;
+    let result = read_loop(stream, Arc::clone(&sink), pairs, accepted_tx).await;
     heartbeat.abort();
     result
 }
@@ -153,7 +147,7 @@ async fn read_loop<WS>(
         >,
     >,
     pairs: Arc<Mutex<HashMap<PairId, PairBridge>>>,
-    inbound_tx: mpsc::Sender<InboundPair>,
+    accepted_tx: mpsc::Sender<AcceptedTransport<PairTransport>>,
 ) -> crate::DaemonResult<()>
 where
     WS: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -161,10 +155,7 @@ where
     while let Some(msg) = stream.next().await {
         match msg.map_err(|err| ws_err(&err))? {
             Message::Binary(bytes) => match decode_relay(&bytes).map_err(|err| codec_err(&err))? {
-                RelayWire::Ctrl(RelayCtrl::PairInbound {
-                    pair_id,
-                    attempt_token,
-                }) => {
+                RelayWire::Ctrl(RelayCtrl::PairInbound { pair_id }) => {
                     let (to_daemon_tx, to_daemon_rx) =
                         mpsc::channel::<Vec<u8>>(PAIR_QUEUE_CAPACITY);
                     let (from_daemon_tx, mut from_daemon_rx) =
@@ -196,10 +187,9 @@ where
                         }
                     });
 
-                    inbound_tx
-                        .send(InboundPair {
-                            pair_id,
-                            attempt_token,
+                    accepted_tx
+                        .send(AcceptedTransport {
+                            label: format!("relay:{pair_id:?}"),
                             transport: PairTransport {
                                 to_daemon_rx,
                                 from_daemon_tx,

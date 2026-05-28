@@ -6,16 +6,6 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PairId(pub Uuid);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct OfferId(pub Uuid);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Endpoint {
-    Direct { host: String, port: u16 },
-    Loopback { port: u16 },
-    Relay { relay_url: String, host_id: HostId },
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PairCloseReason {
     Normal,
@@ -38,21 +28,11 @@ pub enum RelayCtrl {
         reason: String,
     },
     HostHeartbeat,
-    HostUnregister,
-    ClientPairRequest {
+    ClientConnect {
         host_id: HostId,
-        attempt_token: u32,
     },
-    ClientCodeLookup {
-        hint: ByteBuf,
-    },
-    ClientPairCancel,
     PairInbound {
         pair_id: PairId,
-        attempt_token: u32,
-    },
-    PairRejected {
-        reason: String,
     },
     PairOpen {
         pair_id: PairId,
@@ -60,23 +40,6 @@ pub enum RelayCtrl {
     PairClose {
         pair_id: PairId,
         reason: PairCloseReason,
-    },
-    OfferAvailable {
-        offer_id: OfferId,
-        host_pubkey: ByteBuf,
-        endpoints: Vec<Endpoint>,
-    },
-    OfferConsumed,
-    OfferStale,
-    OfferPublish {
-        offer_id: OfferId,
-        spake2_m_share: ByteBuf,
-        host_pubkey: ByteBuf,
-        endpoints: Vec<Endpoint>,
-        ttl_secs: u32,
-    },
-    OfferRetract {
-        offer_id: OfferId,
     },
 }
 

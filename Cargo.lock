@@ -636,6 +636,7 @@ dependencies = [
  "cli-pocket-transport",
  "futures-channel",
  "futures-util",
+ "hex",
  "serde",
  "serde_json",
  "snow",

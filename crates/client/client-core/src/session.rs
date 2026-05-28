@@ -2,9 +2,9 @@ use bytes::Bytes;
 use cli_pocket_crypto::{NoiseInitiator, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
-    ByeReason, Capabilities, ClientKind, Frame, FrameBody, Hello, HostId, ProtocolError,
-    ResumeAttachment, ResumeToken, SessionId, StreamId, StreamSeq, TerminalCreateParams,
-    TerminalId, TerminalInfo, PROTOCOL_VERSION,
+    ByeReason, Frame, FrameBody, Hello, HostId, ProtocolError, ResumeAttachment, ResumeToken,
+    SessionId, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
+    PROTOCOL_VERSION,
 };
 use futures_channel::mpsc;
 use futures_util::{
@@ -18,6 +18,7 @@ use std::rc::Rc;
 
 use crate::events::ClientEvent;
 use crate::identity::ClientIdentity;
+use crate::relay::open_client_pair;
 use crate::terminal::{TerminalCmd, TerminalHandle};
 use crate::{ClientError, ClientResult, Clock, KeyValueStore, Rng, Transport};
 
@@ -26,7 +27,6 @@ pub struct SessionConfig {
     pub endpoint: SessionEndpoint,
     pub server_public: [u8; 32],
     pub resume_token: Option<ResumeToken>,
-    pub capabilities: Capabilities,
     pub backoff: (u64, u64, u32),
 }
 
@@ -259,7 +259,16 @@ async fn run_one_connection<T: Transport>(
     pending_session_cmds: &mut VecDeque<SessionCommand>,
     state: ConnectionState<'_>,
 ) -> ClientResult<()> {
-    let mut noise = NoiseInitiator::new(&identity.keypair, &config.server_public, None)?;
+    let psk = match &config.endpoint {
+        SessionEndpoint::Direct(_) => None,
+        SessionEndpoint::Relay {
+            host_id, psk_hex, ..
+        } => {
+            open_client_pair(transport, *host_id).await?;
+            Some(parse_psk_hex(psk_hex)?)
+        }
+    };
+    let mut noise = NoiseInitiator::new(&identity.keypair, &config.server_public, psk.as_ref())?;
     let m1 = noise.write_handshake()?;
     transport.send(m1).await?;
 
@@ -274,8 +283,6 @@ async fn run_one_connection<T: Transport>(
     let hello = Frame::body(FrameBody::Hello(Hello {
         protocol_min: PROTOCOL_VERSION,
         protocol_max: PROTOCOL_VERSION,
-        capabilities: config.capabilities,
-        client_kind: client_kind(),
         resume: state.resume.token(),
     }));
     send_encrypted(transport, &mut session, &hello).await?;
@@ -283,13 +290,6 @@ async fn run_one_connection<T: Transport>(
     let hello_reply = recv_encrypted(transport, &mut session).await?;
     let (session_id, resumed) = match hello_reply.body {
         FrameBody::HelloOk(ok) => (ok.session_id, ok.resumed),
-        FrameBody::HelloErr(err) => {
-            if matches!(err.error, ProtocolError::ResumeStale) && state.resume.has_token() {
-                state.resume.clear();
-                return Err(ClientError::Closed);
-            }
-            return Err(ClientError::Rejected(ByeReason::ProtocolError(err.error)));
-        }
         other => {
             return Err(ClientError::Proto(format!(
                 "unexpected hello reply: {other:?}"
@@ -675,9 +675,6 @@ fn frame_for_command(resume: &ResumeState, cmd: TerminalCmd) -> Option<Frame> {
             request_id: 0,
             terminal,
         })),
-        TerminalCmd::Detach { terminal } => resume
-            .stream(terminal)
-            .map(|stream| Frame::body(FrameBody::TerminalDetach { stream })),
     }
 }
 
@@ -709,18 +706,6 @@ async fn sleep_backoff<C: Clock, R: Rng>(clock: &C, rng: &R, delay_ms: u64) {
     clock
         .sleep_ms(crate::reconnect::jitter(delay_ms, byte[0]))
         .await;
-}
-
-fn client_kind() -> ClientKind {
-    #[cfg(target_arch = "wasm32")]
-    {
-        ClientKind::Web
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        ClientKind::Cli
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -773,10 +758,6 @@ impl ResumeState {
             pending_attach: None,
             pending_creates: Vec::new(),
         }
-    }
-
-    fn has_token(&self) -> bool {
-        self.session_id.is_some() && !self.attachments.is_empty()
     }
 
     fn token(&self) -> Option<ResumeToken> {
@@ -954,4 +935,12 @@ fn is_recoverable_bye(reason: &ByeReason) -> bool {
                 ProtocolError::BackpressureExceeded | ProtocolError::ResumeStale
             )
     )
+}
+
+fn parse_psk_hex(psk_hex: &str) -> ClientResult<[u8; 32]> {
+    let bytes = hex::decode(psk_hex)
+        .map_err(|error| ClientError::Transport(format!("relay psk_hex: {error}")))?;
+    bytes
+        .try_into()
+        .map_err(|_| ClientError::Transport("relay psk_hex must be 32 bytes".to_owned()))
 }

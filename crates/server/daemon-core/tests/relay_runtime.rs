@@ -8,11 +8,11 @@ use cli_pocket_daemon_core::config::{
 };
 use cli_pocket_daemon_core::server::Daemon;
 use cli_pocket_proto::codec::{
-    decode_frame, decode_relay, encode_frame, encode_relay_ctrl, encode_relay_data, RelayWire,
+    decode_frame, decode_relay, encode_frame, encode_relay_ctrl, RelayWire,
 };
 use cli_pocket_proto::frame::{Frame, FrameBody};
-use cli_pocket_proto::hello::{Capabilities, ClientKind, Hello};
-use cli_pocket_proto::{ClientId, HostId, RelayCtrl, RelayData, PROTOCOL_VERSION};
+use cli_pocket_proto::hello::Hello;
+use cli_pocket_proto::{ClientId, HostId, RelayCtrl, PROTOCOL_VERSION};
 use cli_pocket_relay_core::http::router;
 use cli_pocket_relay_core::{RelayConfig as RelayServerConfig, RelayServer};
 use futures_util::{SinkExt, StreamExt};
@@ -67,55 +67,30 @@ async fn relay_transport_reaches_daemon_handshake() {
     .expect("connect client relay socket");
     client_ws
         .send(Message::Binary(
-            encode_relay_ctrl(&RelayCtrl::ClientPairRequest {
-                host_id,
-                attempt_token: 11,
-            })
-            .expect("encode pair request"),
+            encode_relay_ctrl(&RelayCtrl::ClientConnect { host_id }).expect("encode pair request"),
         ))
         .await
         .expect("send pair request");
 
-    let pair_id = match recv_relay(&mut client_ws).await {
-        RelayWire::Ctrl(RelayCtrl::PairOpen { pair_id }) => pair_id,
+    match recv_relay(&mut client_ws).await {
+        RelayWire::Ctrl(RelayCtrl::PairOpen { .. }) => {}
         other => panic!("expected PairOpen, got {other:?}"),
-    };
+    }
 
     let mut initiator =
         NoiseInitiator::new(&client_keypair, &daemon.public_key(), None).expect("initiator");
     let msg1 = initiator.write_handshake().expect("write msg1");
     client_ws
-        .send(Message::Binary(
-            encode_relay_data(&RelayData::Forward {
-                pair_id,
-                bytes: msg1.into(),
-            })
-            .expect("encode handshake msg1"),
-        ))
+        .send(Message::Binary(msg1))
         .await
         .expect("send handshake msg1");
 
-    let msg2 = match recv_relay(&mut client_ws).await {
-        RelayWire::Data(RelayData::Forward {
-            pair_id: forwarded_pair,
-            bytes,
-        }) => {
-            assert_eq!(forwarded_pair, pair_id);
-            bytes.to_vec()
-        }
-        other => panic!("expected handshake msg2, got {other:?}"),
-    };
+    let msg2 = recv_client_bytes(&mut client_ws).await;
     initiator.read_handshake(&msg2).expect("read msg2");
 
     let msg3 = initiator.write_handshake().expect("write msg3");
     client_ws
-        .send(Message::Binary(
-            encode_relay_data(&RelayData::Forward {
-                pair_id,
-                bytes: msg3.into(),
-            })
-            .expect("encode handshake msg3"),
-        ))
+        .send(Message::Binary(msg3))
         .await
         .expect("send handshake msg3");
 
@@ -123,35 +98,21 @@ async fn relay_transport_reaches_daemon_handshake() {
     let hello = Frame::body(FrameBody::Hello(Hello {
         protocol_min: PROTOCOL_VERSION,
         protocol_max: PROTOCOL_VERSION,
-        capabilities: Capabilities::NONE,
-        client_kind: ClientKind::Cli,
         resume: None,
     }));
     let hello_bytes = encode_frame(&hello).expect("encode hello");
     let hello_ciphertext = session.encrypt(&hello_bytes).expect("encrypt hello");
     client_ws
-        .send(Message::Binary(
-            encode_relay_data(&RelayData::Forward {
-                pair_id,
-                bytes: hello_ciphertext.into(),
-            })
-            .expect("encode hello frame"),
-        ))
+        .send(Message::Binary(hello_ciphertext))
         .await
         .expect("send hello");
 
-    match recv_relay(&mut client_ws).await {
-        RelayWire::Data(RelayData::Forward {
-            pair_id: forwarded_pair,
-            bytes,
-        }) => {
-            assert_eq!(forwarded_pair, pair_id);
-            let plaintext = session.decrypt(&bytes).expect("decrypt hello response");
-            let response = decode_frame(&plaintext).expect("decode hello response");
-            assert!(matches!(response.body, FrameBody::HelloOk(_)));
-        }
-        other => panic!("expected HelloOk response, got {other:?}"),
-    }
+    let hello_response = recv_client_bytes(&mut client_ws).await;
+    let plaintext = session
+        .decrypt(&hello_response)
+        .expect("decrypt hello response");
+    let response = decode_frame(&plaintext).expect("decode hello response");
+    assert!(matches!(response.body, FrameBody::HelloOk(_)));
 
     daemon.shutdown().await;
 }
@@ -267,4 +228,20 @@ where
         panic!("expected binary relay frame, got {frame:?}");
     };
     decode_relay(&bytes).expect("decode relay frame")
+}
+
+async fn recv_client_bytes<S>(ws: &mut tokio_tungstenite::WebSocketStream<S>) -> Vec<u8>
+where
+    tokio_tungstenite::WebSocketStream<S>:
+        StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let frame = timeout(Duration::from_secs(5), ws.next())
+        .await
+        .expect("timed out waiting for client bytes")
+        .expect("websocket closed")
+        .expect("websocket frame");
+    let Message::Binary(bytes) = frame else {
+        panic!("expected binary client bytes, got {frame:?}");
+    };
+    bytes.clone()
 }

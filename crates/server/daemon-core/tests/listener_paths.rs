@@ -2,17 +2,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cli_pocket_crypto::{KeyPair, NoiseInitiator};
+use cli_pocket_daemon_core::accept::{run_accepted_transport, AcceptDeps, AcceptedTransport};
 use cli_pocket_daemon_core::client_db::{ClientDb, ClientRecord};
 use cli_pocket_daemon_core::identity_store::load_or_create;
-use cli_pocket_daemon_core::listener::{serve, ListenerDeps};
+use cli_pocket_daemon_core::listener::serve;
 use cli_pocket_daemon_core::session::SessionManager;
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
-use cli_pocket_proto::hello::{Capabilities, ClientKind, Hello, ServerInfo};
+use cli_pocket_proto::hello::{Hello, ServerInfo};
 use cli_pocket_proto::{ClientId, PROTOCOL_VERSION};
 use cli_pocket_transport::{TokioWsTransport, Transport};
 use tempfile::TempDir;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -61,8 +63,6 @@ async fn session_path_accepts_paired_client() {
     let hello = Frame::body(FrameBody::Hello(Hello {
         protocol_min: PROTOCOL_VERSION,
         protocol_max: PROTOCOL_VERSION,
-        capabilities: Capabilities::NONE,
-        client_kind: ClientKind::Cli,
         resume: None,
     }));
     send_frame(&mut transport, &mut session, &hello).await;
@@ -98,7 +98,7 @@ impl ListenerFixture {
         let session_mgr = Arc::new(SessionManager::new(4));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
-        let deps = ListenerDeps {
+        let accept_deps = AcceptDeps {
             identity: Arc::clone(&identity),
             psk: None,
             session_mgr,
@@ -108,8 +108,19 @@ impl ListenerFixture {
                 host_label: None,
             },
         };
+        let (accepted_tx, mut accepted_rx) =
+            mpsc::channel::<AcceptedTransport<TokioWsTransport>>(8);
         let task = tokio::spawn(async move {
-            let _ = serve(listener, deps).await;
+            let deps = accept_deps.clone();
+            tokio::spawn(async move {
+                while let Some(accepted) = accepted_rx.recv().await {
+                    let deps = deps.clone();
+                    tokio::spawn(async move {
+                        let _ = run_accepted_transport(accepted, deps).await;
+                    });
+                }
+            });
+            let _ = serve(listener, accepted_tx).await;
         });
 
         Self {

@@ -93,11 +93,10 @@ async fn run_connection_post_handshake<T: Transport>(
 
     // 2. Wait for Hello.
     let hello_frame = chan.recv_frame().await?;
-    let (_client_kind, resumed) = match hello_frame.body {
+    let resumed = match hello_frame.body {
         FrameBody::Hello(hello) => {
             validate_hello(&hello, &deps)?;
-            let resumed = hello.resume.is_some();
-            (hello.client_kind, resumed)
+            hello.resume.is_some()
         }
         _ => {
             chan.send_frame(&Frame::body(FrameBody::Bye {
@@ -198,13 +197,6 @@ async fn run_connection_post_handshake<T: Transport>(
             } => {
                 handle_terminal_attach(&mut chan, &deps, request_id, terminal, since, &mut streams)
                     .await?;
-            }
-
-            FrameBody::TerminalDetach { stream } => {
-                if let Some(attached) = streams.map.remove(&stream) {
-                    debug!(?stream, "terminal detached by client");
-                    drop(attached);
-                }
             }
 
             FrameBody::TerminalKill {

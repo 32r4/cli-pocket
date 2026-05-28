@@ -27,9 +27,6 @@ pub(crate) enum TerminalCmd {
     Kill {
         terminal: TerminalId,
     },
-    Detach {
-        terminal: TerminalId,
-    },
 }
 
 impl TerminalHandle {
@@ -88,16 +85,6 @@ impl TerminalHandle {
         self.cmd_tx
             .clone()
             .send(TerminalCmd::Kill {
-                terminal: self.terminal_id(),
-            })
-            .await
-            .map_err(|_| crate::ClientError::Closed)
-    }
-
-    pub async fn detach(&self) -> crate::ClientResult<()> {
-        self.cmd_tx
-            .clone()
-            .send(TerminalCmd::Detach {
                 terminal: self.terminal_id(),
             })
             .await

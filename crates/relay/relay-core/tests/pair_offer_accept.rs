@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use cli_pocket_proto::codec::{decode_relay, encode_relay_ctrl, encode_relay_data, RelayWire};
-use cli_pocket_proto::{HostId, RelayCtrl, RelayData};
+use cli_pocket_proto::{HostId, PairId, RelayCtrl, RelayData};
 use cli_pocket_relay_core::http::router;
 use cli_pocket_relay_core::{RelayConfig, RelayServer};
 use futures_util::{SinkExt, StreamExt};
@@ -43,23 +43,13 @@ async fn host_and_client_can_open_one_pair_and_forward_bytes() {
             .expect("connect client websocket");
     client_ws
         .send(Message::Binary(
-            encode_relay_ctrl(&RelayCtrl::ClientPairRequest {
-                host_id,
-                attempt_token: 7,
-            })
-            .expect("encode pair request"),
+            encode_relay_ctrl(&RelayCtrl::ClientConnect { host_id }).expect("encode pair request"),
         ))
         .await
         .expect("send pair request");
 
     let pair_id = match recv_relay(&mut host_ws).await {
-        RelayWire::Ctrl(RelayCtrl::PairInbound {
-            pair_id,
-            attempt_token,
-        }) => {
-            assert_eq!(attempt_token, 7);
-            pair_id
-        }
+        RelayWire::Ctrl(RelayCtrl::PairInbound { pair_id }) => pair_id,
         other => panic!("expected PairInbound, got {other:?}"),
     };
 
@@ -72,26 +62,12 @@ async fn host_and_client_can_open_one_pair_and_forward_bytes() {
 
     let client_bytes = b"client->host".to_vec();
     client_ws
-        .send(Message::Binary(
-            encode_relay_data(&RelayData::Forward {
-                pair_id,
-                bytes: client_bytes.clone().into(),
-            })
-            .expect("encode client forward"),
-        ))
+        .send(Message::Binary(client_bytes.clone()))
         .await
         .expect("send client forward");
 
-    match recv_relay(&mut host_ws).await {
-        RelayWire::Data(RelayData::Forward {
-            pair_id: forwarded_pair,
-            bytes,
-        }) => {
-            assert_eq!(forwarded_pair, pair_id);
-            assert_eq!(bytes.as_ref(), client_bytes.as_slice());
-        }
-        other => panic!("expected forwarded host data, got {other:?}"),
-    }
+    let forwarded_host_bytes = recv_host_data(&mut host_ws, pair_id).await;
+    assert_eq!(forwarded_host_bytes.as_slice(), client_bytes.as_slice());
 
     let host_bytes = b"host->client".to_vec();
     host_ws
@@ -105,16 +81,8 @@ async fn host_and_client_can_open_one_pair_and_forward_bytes() {
         .await
         .expect("send host forward");
 
-    match recv_relay(&mut client_ws).await {
-        RelayWire::Data(RelayData::Forward {
-            pair_id: forwarded_pair,
-            bytes,
-        }) => {
-            assert_eq!(forwarded_pair, pair_id);
-            assert_eq!(bytes.as_ref(), host_bytes.as_slice());
-        }
-        other => panic!("expected forwarded client data, got {other:?}"),
-    }
+    let forwarded_client_bytes = recv_client_bytes(&mut client_ws).await;
+    assert_eq!(forwarded_client_bytes.as_slice(), host_bytes.as_slice());
 }
 
 async fn start_relay() -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -147,4 +115,37 @@ where
         panic!("expected binary relay frame, got {frame:?}");
     };
     decode_relay(&bytes).expect("decode relay frame")
+}
+
+async fn recv_host_data<S>(ws: &mut WebSocketStream<S>, pair_id: PairId) -> Vec<u8>
+where
+    WebSocketStream<S>:
+        StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    match recv_relay(ws).await {
+        RelayWire::Data(RelayData::Forward {
+            pair_id: forwarded_pair,
+            bytes,
+        }) => {
+            assert_eq!(forwarded_pair, pair_id);
+            bytes.to_vec()
+        }
+        other => panic!("expected forwarded host data, got {other:?}"),
+    }
+}
+
+async fn recv_client_bytes<S>(ws: &mut WebSocketStream<S>) -> Vec<u8>
+where
+    WebSocketStream<S>:
+        StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let frame = timeout(Duration::from_secs(5), ws.next())
+        .await
+        .expect("timed out waiting for client bytes")
+        .expect("websocket closed")
+        .expect("websocket frame");
+    let Message::Binary(bytes) = frame else {
+        panic!("expected binary client bytes, got {frame:?}");
+    };
+    bytes.clone()
 }

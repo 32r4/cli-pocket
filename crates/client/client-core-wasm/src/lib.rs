@@ -19,7 +19,7 @@ use cli_pocket_client_core::{
     ClientEvent, ClientIdentity, ClientResult, ClientSession, KeyValueStore, SessionBuilder,
     SessionConfig, SessionEndpoint,
 };
-use cli_pocket_proto::{Capabilities, ResumeToken, TerminalCreateParams};
+use cli_pocket_proto::{ResumeToken, TerminalCreateParams};
 use futures_channel::mpsc;
 use futures_util::{future::LocalBoxFuture, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -320,7 +320,6 @@ impl CliPocketClient {
                 endpoint,
                 server_public,
                 resume_token,
-                capabilities: Capabilities::NONE,
                 backoff: (50, 1_000, 20),
             },
             PerfClock,

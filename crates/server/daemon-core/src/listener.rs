@@ -1,13 +1,12 @@
 //! WebSocket listener task: accepts TCP connections, upgrades to WS,
-//! and spawns per-connection handlers.
+//! and yields accepted `/session` transports.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use cli_pocket_crypto::KeyPair;
-use cli_pocket_proto::ServerInfo;
 use cli_pocket_transport::TokioWsTransport;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::handshake::server::{
     Callback, ErrorResponse, Request, Response,
@@ -15,43 +14,34 @@ use tokio_tungstenite::tungstenite::handshake::server::{
 use tokio_tungstenite::MaybeTlsStream;
 use tracing::{error, info};
 
-use crate::client_db::ClientDb;
-use crate::connection::{run_connection_with_handshake, ConnectionDeps};
-use crate::session::SessionManager;
+use crate::accept::AcceptedTransport;
 
-/// Shared dependencies handed to each accepted connection.
-#[derive(Clone)]
-pub struct ListenerDeps {
-    pub identity: Arc<KeyPair>,
-    pub psk: Option<Arc<[u8; 32]>>,
-    pub session_mgr: Arc<SessionManager>,
-    pub client_db: Arc<ClientDb>,
-    pub server_info: ServerInfo,
-}
-
-/// Bind to the given address and accept inbound WebSocket connections.
+/// Bind to the given address and accept inbound WebSocket `/session` transports.
 ///
-/// Each accepted connection is upgraded to WebSocket, wrapped in a
-/// `TokioWsTransport`, and handed to `run_connection_with_handshake`
-/// in a spawned task.
-///
-/// This function only returns on listener error (e.g. port already in use).
-pub async fn listen(addr: SocketAddr, deps: ListenerDeps) -> crate::DaemonResult<()> {
+/// This function only returns on listener error (e.g. port already in use) or
+/// when the receiver side of `accepted_tx` has been dropped.
+pub async fn listen(
+    addr: SocketAddr,
+    accepted_tx: mpsc::Sender<AcceptedTransport<TokioWsTransport>>,
+) -> crate::DaemonResult<()> {
     let listener = TcpListener::bind(addr).await?;
-    serve(listener, deps).await
+    serve(listener, accepted_tx).await
 }
 
 /// Accept inbound WebSocket connections on an already-bound listener.
 ///
 /// This lets callers separate the bind step from the accept loop so startup
 /// can fail synchronously if the listen address is unavailable.
-pub async fn serve(listener: TcpListener, deps: ListenerDeps) -> crate::DaemonResult<()> {
+pub async fn serve(
+    listener: TcpListener,
+    accepted_tx: mpsc::Sender<AcceptedTransport<TokioWsTransport>>,
+) -> crate::DaemonResult<()> {
     let addr = listener.local_addr()?;
     info!(%addr, "daemon listening");
 
     loop {
         let (sock, peer) = listener.accept().await?;
-        let deps = deps.clone();
+        let accepted_tx = accepted_tx.clone();
 
         tokio::spawn(async move {
             info!(%peer, "connection opened");
@@ -84,22 +74,14 @@ pub async fn serve(listener: TcpListener, deps: ListenerDeps) -> crate::DaemonRe
                 return;
             }
 
-            let psk_ref = deps.psk.as_ref().map(|arc| arc.as_ref());
-            if let Err(e) = run_connection_with_handshake(
-                transport,
-                &deps.identity,
-                psk_ref,
-                ConnectionDeps {
-                    session_mgr: deps.session_mgr,
-                    client_db: deps.client_db,
-                    server_info: deps.server_info,
-                },
-            )
-            .await
+            if let Err(error) = accepted_tx
+                .send(AcceptedTransport {
+                    label: peer.to_string(),
+                    transport,
+                })
+                .await
             {
-                error!(%peer, error = %e, "connection ended with error");
-            } else {
-                info!(%peer, "connection closed cleanly");
+                error!(%peer, %error, "listener accept channel closed");
             }
         });
     }

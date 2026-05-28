@@ -8,9 +8,9 @@ use cli_pocket_client_core::{
 use cli_pocket_crypto::{KeyPair, NoiseResponder, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
-    AnchorState, Capabilities, CharsetState, ClientId, ClientKind, Color, Frame, FrameBody,
-    HelloOk, MouseMode, ServerInfo, SessionId, SgrAttrs, Snapshot, StreamId, StreamSeq, TerminalId,
-    TerminalInfo, TerminalModes, PROTOCOL_VERSION,
+    AnchorState, CharsetState, ClientId, Color, Frame, FrameBody, HelloOk, MouseMode, ServerInfo,
+    SessionId, SgrAttrs, Snapshot, StreamId, StreamSeq, TerminalId, TerminalInfo, TerminalModes,
+    PROTOCOL_VERSION,
 };
 use cli_pocket_transport::InMemoryTransportPair;
 use futures_channel::mpsc;
@@ -48,7 +48,6 @@ async fn session_emits_happy_path_terminal_output_inner() {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
             server_public: server_keypair.public,
             resume_token: None,
-            capabilities: Capabilities::NONE,
             backoff: (50, 100, 20),
         },
         TestClock,
@@ -109,8 +108,6 @@ impl HappyPathDaemon {
             FrameBody::Hello(hello) => {
                 assert_eq!(hello.protocol_min, PROTOCOL_VERSION);
                 assert_eq!(hello.protocol_max, PROTOCOL_VERSION);
-                assert_eq!(hello.client_kind, ClientKind::Cli);
-                assert_eq!(hello.capabilities, Capabilities::NONE);
                 assert_eq!(hello.resume, None);
             }
             other => panic!("expected Hello, got {other:?}"),

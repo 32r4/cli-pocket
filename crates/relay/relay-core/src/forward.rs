@@ -75,13 +75,11 @@ where
 {
     let (sink, mut stream) = ws.split();
     let first = read_binary_frame(&mut stream).await?;
-    let RelayWire::Ctrl(RelayCtrl::ClientPairRequest {
-        host_id,
-        attempt_token,
-    }) = decode_relay(&first).map_err(|err| crate::codec_err_to_protocol(&err))?
+    let RelayWire::Ctrl(RelayCtrl::ClientConnect { host_id }) =
+        decode_relay(&first).map_err(|err| crate::codec_err_to_protocol(&err))?
     else {
         return Err(crate::RelayError::Protocol(
-            "expected ClientPairRequest as first client frame",
+            "expected ClientConnect as first client frame",
         ));
     };
     if host_id != target_host {
@@ -113,10 +111,7 @@ where
     send_host_msg(
         &host_tx,
         HostMsg::Ctrl(Bytes::from(crate::encode_ctrl_frame(
-            &RelayCtrl::PairInbound {
-                pair_id,
-                attempt_token,
-            },
+            &RelayCtrl::PairInbound { pair_id },
         ))),
     )
     .await?;
@@ -151,13 +146,11 @@ where
         match msg.map_err(|err| ws_err(&err))? {
             Message::Binary(bytes) => {
                 match decode_relay(&bytes).map_err(|err| crate::codec_err_to_protocol(&err))? {
-                    RelayWire::Ctrl(ctrl) => match ctrl {
-                        RelayCtrl::HostUnregister => break,
-                        RelayCtrl::PairClose { pair_id, reason } => {
+                    RelayWire::Ctrl(ctrl) => {
+                        if let RelayCtrl::PairClose { pair_id, reason } = ctrl {
                             close_pair(&pairs, pair_id, reason).await;
                         }
-                        _ => {}
-                    },
+                    }
                     RelayWire::Data(RelayData::Forward { pair_id, bytes }) => {
                         let pair = pairs
                             .get(&pair_id)
@@ -215,30 +208,24 @@ where
     while let Some(msg) = stream.next().await {
         match msg.map_err(|err| ws_err(&err))? {
             Message::Binary(bytes) => {
-                match decode_relay(&bytes).map_err(|err| crate::codec_err_to_protocol(&err))? {
-                    RelayWire::Data(RelayData::Forward { pair_id, bytes }) => {
-                        if pair_id != pair.pair_id {
-                            return Err(crate::RelayError::Protocol(
-                                "client forwarded wrong pair id",
-                            ));
-                        }
-                        pair.touch();
-                        counter!("cli_pocket_relay_bytes_total", "direction" => "client_to_host")
-                            .increment(bytes.len() as u64);
-                        send_host_msg(
-                            &pair.host_tx,
-                            HostMsg::Data(Bytes::from(crate::encode_data_frame(
-                                &RelayData::Forward { pair_id, bytes },
-                            ))),
-                        )
-                        .await?;
-                    }
-                    RelayWire::Ctrl(RelayCtrl::PairClose { pair_id, reason }) => {
-                        close_pair(&pairs, pair_id, reason).await;
-                        break;
-                    }
-                    RelayWire::Ctrl(_) => {}
+                if let Ok(RelayWire::Ctrl(RelayCtrl::PairClose { pair_id, reason })) =
+                    decode_relay(&bytes)
+                {
+                    close_pair(&pairs, pair_id, reason).await;
+                    break;
                 }
+
+                pair.touch();
+                counter!("cli_pocket_relay_bytes_total", "direction" => "client_to_host")
+                    .increment(bytes.len() as u64);
+                send_host_msg(
+                    &pair.host_tx,
+                    HostMsg::Data(Bytes::from(crate::encode_data_frame(&RelayData::Forward {
+                        pair_id: pair.pair_id,
+                        bytes: bytes.clone().into(),
+                    }))),
+                )
+                .await?;
             }
             Message::Close(_) => break,
             Message::Ping(_) | Message::Pong(_) => {}

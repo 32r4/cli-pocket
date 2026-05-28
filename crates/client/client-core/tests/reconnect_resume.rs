@@ -9,9 +9,9 @@ use cli_pocket_client_core::{
 use cli_pocket_crypto::{KeyPair, NoiseResponder, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
-    AnchorState, Capabilities, CharsetState, ClientId, ClientKind, Color, Frame, FrameBody,
-    HelloOk, MouseMode, ServerInfo, SessionId, SgrAttrs, Snapshot, StreamId, StreamSeq, TerminalId,
-    TerminalInfo, TerminalModes, PROTOCOL_VERSION,
+    AnchorState, CharsetState, ClientId, Color, Frame, FrameBody, HelloOk, MouseMode, ServerInfo,
+    SessionId, SgrAttrs, Snapshot, StreamId, StreamSeq, TerminalId, TerminalInfo, TerminalModes,
+    PROTOCOL_VERSION,
 };
 use cli_pocket_transport::InMemoryTransportPair;
 use futures_channel::mpsc;
@@ -52,7 +52,6 @@ async fn reconnect_with_resume_inner() {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
             server_public: server_keypair.public,
             resume_token: None,
-            capabilities: Capabilities::NONE,
             backoff: (10, 100, 20),
         },
         TestClock,
@@ -135,8 +134,6 @@ impl ReconnectDaemon {
                 let resumed = conn == 2;
                 assert_eq!(hello.protocol_min, PROTOCOL_VERSION);
                 assert_eq!(hello.protocol_max, PROTOCOL_VERSION);
-                assert_eq!(hello.client_kind, ClientKind::Cli);
-                assert_eq!(hello.capabilities, Capabilities::NONE);
                 if resumed {
                     assert!(
                         hello.resume.is_some(),

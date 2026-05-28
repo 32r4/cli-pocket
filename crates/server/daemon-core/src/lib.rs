@@ -1,5 +1,6 @@
 //! Daemon core: session manager, Noise responder, terminal routing.
 
+pub mod accept;
 pub mod client_db;
 pub mod config;
 pub mod connection;

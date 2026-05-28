@@ -1,4 +1,3 @@
-use crate::error::ProtocolError;
 use crate::terminal::{ClientId, SessionId, StreamSeq, TerminalId};
 use serde::{Deserialize, Serialize};
 
@@ -6,8 +5,6 @@ use serde::{Deserialize, Serialize};
 pub struct Hello {
     pub protocol_min: u32,
     pub protocol_max: u32,
-    pub capabilities: Capabilities,
-    pub client_kind: ClientKind,
     pub resume: Option<ResumeToken>,
 }
 
@@ -20,34 +17,9 @@ pub struct HelloOk {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HelloErr {
-    pub error: ProtocolError,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerInfo {
     pub server_version: String,
     pub host_label: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ClientKind {
-    Daemon,
-    DesktopTauri,
-    MobileTauri,
-    Web,
-    Cli,
-}
-
-/// Bitfield-style additive capabilities. Reserved bits MUST be zero on the
-/// wire so a future peer that sets them can be detected.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Capabilities {
-    pub bits: u32,
-}
-
-impl Capabilities {
-    pub const NONE: Self = Self { bits: 0 };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

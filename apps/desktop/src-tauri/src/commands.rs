@@ -1,7 +1,6 @@
 use crate::state::AppState;
 use bytes::Bytes;
 use cli_pocket_client_core::{ClientIdentity, SessionBuilder, SessionConfig, SessionEndpoint};
-use cli_pocket_proto::Capabilities;
 use cli_pocket_proto::{ResumeToken, TerminalCreateParams, TerminalId};
 use cli_pocket_tauri_bindings::{OsRandom, TokioClock, TokioWsTransport};
 use serde::Deserialize;
@@ -83,7 +82,6 @@ pub async fn cli_pocket_connect(
                     endpoint,
                     server_public,
                     resume_token,
-                    capabilities: Capabilities::NONE,
                     backoff: (50, 1_000, 20),
                 },
                 TokioClock,

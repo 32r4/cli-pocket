@@ -21,7 +21,7 @@ use cli_pocket_daemon_core::identity_store::load_or_create;
 use cli_pocket_daemon_core::session::SessionManager;
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
-use cli_pocket_proto::hello::{Capabilities, ClientKind, Hello, ServerInfo};
+use cli_pocket_proto::hello::{Hello, ServerInfo};
 use cli_pocket_proto::{ByeReason, ClientId, TerminalCreateParams, PROTOCOL_VERSION};
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
 use tempfile::TempDir;
@@ -109,8 +109,6 @@ async fn revocation_drops_live_session() {
     let hello = Frame::body(FrameBody::Hello(Hello {
         protocol_min: PROTOCOL_VERSION,
         protocol_max: PROTOCOL_VERSION,
-        capabilities: Capabilities::NONE,
-        client_kind: ClientKind::Cli,
         resume: None,
     }));
     send_frame(&mut client_transport, &mut session, &hello)

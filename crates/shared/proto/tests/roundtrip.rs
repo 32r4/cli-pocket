@@ -112,32 +112,13 @@ fn arb_hello() -> impl Strategy<Value = Hello> {
     (
         any::<u32>(),
         any::<u32>(),
-        any::<u32>(),
-        any::<u8>(),
         prop::collection::vec((arb_uuid(), any::<u64>()), 0..=3),
         any::<u8>(),
     )
         .prop_map(
-            |(
+            |(protocol_min, protocol_max, attachments, resume_flag)| Hello {
                 protocol_min,
                 protocol_max,
-                capability_bits,
-                client_kind_idx,
-                attachments,
-                resume_flag,
-            )| Hello {
-                protocol_min,
-                protocol_max,
-                capabilities: Capabilities {
-                    bits: capability_bits,
-                },
-                client_kind: match client_kind_idx % 5 {
-                    0 => ClientKind::Daemon,
-                    1 => ClientKind::DesktopTauri,
-                    2 => ClientKind::MobileTauri,
-                    3 => ClientKind::Web,
-                    _ => ClientKind::Cli,
-                },
                 resume: if resume_flag % 2 == 0 {
                     None
                 } else {
@@ -167,9 +148,6 @@ fn arb_connection_frame_body() -> impl Strategy<Value = FrameBody> {
             },
             session_id: SessionId(Uuid::nil()),
             resumed: false,
-        })),
-        Just(FrameBody::HelloErr(HelloErr {
-            error: ProtocolError::Other("hello".to_string()),
         })),
         any::<u32>().prop_map(|nonce| FrameBody::Ping { nonce }),
         any::<u32>().prop_map(|nonce| FrameBody::Pong { nonce }),
@@ -220,9 +198,6 @@ fn arb_terminal_frame_body() -> impl Strategy<Value = FrameBody> {
         any::<u32>().prop_map(|request_id| FrameBody::TerminalAttachErr {
             request_id,
             error: ProtocolError::Unauthorized,
-        }),
-        any::<u32>().prop_map(|stream| FrameBody::TerminalDetach {
-            stream: StreamId(stream),
         }),
         (any::<u32>(), arb_uuid()).prop_map(|(request_id, terminal)| FrameBody::TerminalKill {
             request_id,
@@ -311,21 +286,11 @@ proptest! {
             reason: "bad registration".to_string(),
         }),
         Just(RelayCtrl::HostHeartbeat),
-        Just(RelayCtrl::HostUnregister),
-        (arb_uuid(), any::<u32>()).prop_map(|(host_id, attempt_token)| RelayCtrl::ClientPairRequest {
+        arb_uuid().prop_map(|host_id| RelayCtrl::ClientConnect {
             host_id: HostId(host_id),
-            attempt_token,
         }),
-        Just(RelayCtrl::ClientCodeLookup {
-            hint: ByteBuf::from(vec![7u8, 8, 9]),
-        }),
-        Just(RelayCtrl::ClientPairCancel),
-        (arb_uuid(), any::<u32>()).prop_map(|(pair_id, attempt_token)| RelayCtrl::PairInbound {
+        arb_uuid().prop_map(|pair_id| RelayCtrl::PairInbound {
             pair_id: PairId(pair_id),
-            attempt_token,
-        }),
-        Just(RelayCtrl::PairRejected {
-            reason: "no slot".to_string(),
         }),
         arb_uuid().prop_map(|pair_id| RelayCtrl::PairOpen {
             pair_id: PairId(pair_id),
@@ -333,34 +298,6 @@ proptest! {
         arb_uuid().prop_map(|pair_id| RelayCtrl::PairClose {
             pair_id: PairId(pair_id),
             reason: PairCloseReason::Normal,
-        }),
-        (arb_uuid(), arb_bytes(32), prop::collection::vec(prop_oneof![
-            Just(Endpoint::Direct {
-                host: "relay.example".to_string(),
-                port: 443,
-            }),
-            any::<u16>().prop_map(|port| Endpoint::Loopback { port }),
-            arb_uuid().prop_map(|host_id| Endpoint::Relay {
-                relay_url: "wss://relay.example".to_string(),
-                host_id: HostId(host_id),
-            }),
-        ], 0..=3)).prop_map(|(offer_id, host_pubkey, endpoints)| RelayCtrl::OfferAvailable {
-            offer_id: OfferId(offer_id),
-            host_pubkey,
-            endpoints,
-        }),
-        Just(RelayCtrl::OfferConsumed),
-        Just(RelayCtrl::OfferStale),
-        (arb_uuid(), arb_bytes(32), arb_bytes(32), prop::collection::vec(Just(Endpoint::Loopback { port: 1 }), 0..=2), any::<u32>())
-            .prop_map(|(offer_id, spake2_m_share, host_pubkey, endpoints, ttl_secs)| RelayCtrl::OfferPublish {
-                offer_id: OfferId(offer_id),
-                spake2_m_share,
-                host_pubkey,
-                endpoints,
-                ttl_secs,
-            }),
-        arb_uuid().prop_map(|offer_id| RelayCtrl::OfferRetract {
-            offer_id: OfferId(offer_id),
         }),
     ]) {
         let bytes = encode_relay_ctrl(&ctrl).expect("encode_relay_ctrl");
