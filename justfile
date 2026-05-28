@@ -52,7 +52,6 @@ build-mobile-ios:
     cd apps/mobile; cargo tauri ios build
 
 build-web:
-    just build-wasm
     npm --prefix frontend/app run build:web
 
 # ---- dev workflows ----
@@ -74,7 +73,7 @@ dev-mobile-ios:
     cd apps/mobile; cargo tauri ios dev
 
 dev-web:
-    npm --prefix frontend/app run dev -- --mode web
+    npm --prefix frontend/app run dev:web
 
 # ---- maintenance ----
 

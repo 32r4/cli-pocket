@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cli_pocket_crypto::{KeyPair, NoiseInitiator};
+use cli_pocket_crypto::{KeyPair, NoiseAnonymousInitiator};
 use cli_pocket_daemon_core::accept::{run_accepted_transport, AcceptDeps, AcceptedTransport};
 use cli_pocket_daemon_core::client_db::{ClientDb, ClientRecord};
 use cli_pocket_daemon_core::identity_store::load_or_create;
@@ -49,8 +49,8 @@ async fn session_path_accepts_paired_client() {
     let mut transport = TokioWsTransport::connect(&format!("ws://{}/session", fixture.addr))
         .await
         .expect("connect session path");
-    let mut init = NoiseInitiator::new(&client_keypair, &fixture.identity.public, None)
-        .expect("noise initiator");
+    let mut init =
+        NoiseAnonymousInitiator::new(&client_keypair).expect("noise anonymous initiator");
 
     let msg1 = init.write_handshake().expect("write msg1");
     transport.send(msg1).await.expect("send msg1");
@@ -71,9 +71,45 @@ async fn session_path_accepts_paired_client() {
     assert!(matches!(response.body, FrameBody::HelloOk(_)));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_path_auto_pairs_loopback_client() {
+    let fixture = ListenerFixture::start().await;
+    let client_keypair = KeyPair::generate().expect("client keypair");
+
+    let mut transport = TokioWsTransport::connect(&format!("ws://{}/session", fixture.addr))
+        .await
+        .expect("connect session path");
+    let mut init =
+        NoiseAnonymousInitiator::new(&client_keypair).expect("noise anonymous initiator");
+
+    let msg1 = init.write_handshake().expect("write msg1");
+    transport.send(msg1).await.expect("send msg1");
+    let msg2 = recv_transport(&mut transport).await;
+    init.read_handshake(&msg2).expect("read msg2");
+    let msg3 = init.write_handshake().expect("write msg3");
+    transport.send(msg3).await.expect("send msg3");
+    let mut session = init.finish().expect("finish noise");
+
+    let hello = Frame::body(FrameBody::Hello(Hello {
+        protocol_min: PROTOCOL_VERSION,
+        protocol_max: PROTOCOL_VERSION,
+        resume: None,
+    }));
+    send_frame(&mut transport, &mut session, &hello).await;
+
+    let response = recv_frame(&mut transport, &mut session).await;
+    assert!(matches!(response.body, FrameBody::HelloOk(_)));
+
+    let stored = fixture
+        .client_db
+        .lookup_by_public(&client_keypair.public)
+        .await
+        .expect("lookup client");
+    assert!(stored.is_some(), "loopback direct client should auto-pair");
+}
+
 struct ListenerFixture {
     addr: std::net::SocketAddr,
-    identity: Arc<KeyPair>,
     client_db: Arc<ClientDb>,
     _task: tokio::task::JoinHandle<()>,
     _dir: TempDir,
@@ -100,7 +136,7 @@ impl ListenerFixture {
         let addr = listener.local_addr().expect("local addr");
         let accept_deps = AcceptDeps {
             identity: Arc::clone(&identity),
-            psk: None,
+            relay_psk: None,
             session_mgr,
             client_db: Arc::clone(&client_db),
             server_info: ServerInfo {
@@ -125,7 +161,6 @@ impl ListenerFixture {
 
         Self {
             addr,
-            identity,
             client_db,
             _task: task,
             _dir: dir,

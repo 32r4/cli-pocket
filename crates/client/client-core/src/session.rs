@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use cli_pocket_crypto::{NoiseInitiator, NoiseSession};
+use cli_pocket_crypto::{NoiseAnonymousInitiator, NoiseInitiator, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
     ByeReason, Frame, FrameBody, Hello, HostId, ProtocolError, ResumeAttachment, ResumeToken,
@@ -25,7 +25,6 @@ use crate::{ClientError, ClientResult, Clock, KeyValueStore, Rng, Transport};
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
     pub endpoint: SessionEndpoint,
-    pub server_public: [u8; 32],
     pub resume_token: Option<ResumeToken>,
     pub backoff: (u64, u64, u32),
 }
@@ -37,6 +36,7 @@ pub enum SessionEndpoint {
         url: String,
         host_id: HostId,
         psk_hex: String,
+        server_public: [u8; 32],
     },
 }
 
@@ -259,25 +259,39 @@ async fn run_one_connection<T: Transport>(
     pending_session_cmds: &mut VecDeque<SessionCommand>,
     state: ConnectionState<'_>,
 ) -> ClientResult<()> {
-    let psk = match &config.endpoint {
-        SessionEndpoint::Direct(_) => None,
+    let mut session = match &config.endpoint {
+        SessionEndpoint::Direct(_) => {
+            let mut noise = NoiseAnonymousInitiator::new(&identity.keypair)?;
+            let m1 = noise.write_handshake()?;
+            transport.send(m1).await?;
+
+            let m2 = recv_transport(transport).await?;
+            noise.read_handshake(&m2)?;
+
+            let m3 = noise.write_handshake()?;
+            transport.send(m3).await?;
+            noise.finish()?
+        }
         SessionEndpoint::Relay {
-            host_id, psk_hex, ..
+            host_id,
+            psk_hex,
+            server_public,
+            ..
         } => {
             open_client_pair(transport, *host_id).await?;
-            Some(parse_psk_hex(psk_hex)?)
+            let psk = parse_psk_hex(psk_hex)?;
+            let mut noise = NoiseInitiator::new(&identity.keypair, server_public, Some(&psk))?;
+            let m1 = noise.write_handshake()?;
+            transport.send(m1).await?;
+
+            let m2 = recv_transport(transport).await?;
+            noise.read_handshake(&m2)?;
+
+            let m3 = noise.write_handshake()?;
+            transport.send(m3).await?;
+            noise.finish()?
         }
     };
-    let mut noise = NoiseInitiator::new(&identity.keypair, &config.server_public, psk.as_ref())?;
-    let m1 = noise.write_handshake()?;
-    transport.send(m1).await?;
-
-    let m2 = recv_transport(transport).await?;
-    noise.read_handshake(&m2)?;
-
-    let m3 = noise.write_handshake()?;
-    transport.send(m3).await?;
-    let mut session = noise.finish()?;
     let mut next_request_id = 2;
 
     let hello = Frame::body(FrameBody::Hello(Hello {
@@ -288,8 +302,8 @@ async fn run_one_connection<T: Transport>(
     send_encrypted(transport, &mut session, &hello).await?;
 
     let hello_reply = recv_encrypted(transport, &mut session).await?;
-    let (session_id, resumed) = match hello_reply.body {
-        FrameBody::HelloOk(ok) => (ok.session_id, ok.resumed),
+    let (session_id, resumed, host_label) = match hello_reply.body {
+        FrameBody::HelloOk(ok) => (ok.session_id, ok.resumed, ok.server_info.host_label),
         other => {
             return Err(ClientError::Proto(format!(
                 "unexpected hello reply: {other:?}"
@@ -300,7 +314,10 @@ async fn run_one_connection<T: Transport>(
     let _ = state
         .events_tx
         .clone()
-        .send(ClientEvent::Connected { session_id })
+        .send(ClientEvent::Connected {
+            session_id,
+            host_label,
+        })
         .await;
     state.resume.set_session_id(session_id);
     if resumed {

@@ -1,7 +1,6 @@
 interface DaemonRecordBase {
 	id: string;
 	label: string;
-	serverPublicHex: string;
 	resumeTokenHex: string | null;
 	lastConnectedAt: number | null;
 }
@@ -13,6 +12,7 @@ export type DaemonRecord =
 	  })
 	| (DaemonRecordBase & {
 			kind: "relay";
+			serverPublicHex: string;
 			hostId: string;
 			relayUrl: string;
 			relayPskHex: string;

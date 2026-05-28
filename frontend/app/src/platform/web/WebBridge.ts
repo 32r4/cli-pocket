@@ -1,4 +1,14 @@
-import init, { CliPocketClient } from "cli-pocket-client-core-wasm";
+import init, {
+	close_client,
+	connect_client,
+	create_client_terminal,
+	export_client_identity,
+	import_client_identity,
+	kill_client_terminal,
+	next_client_event,
+	resize_client_terminal,
+	send_client_input,
+} from "cli-pocket-client-core-wasm";
 import type {
 	ClientBridge,
 	ConnectConfig,
@@ -8,23 +18,20 @@ import type {
 export class WebBridge implements ClientBridge {
 	static async create() {
 		await init();
-		return new WebBridge(new CliPocketClient());
+		return new WebBridge();
 	}
-
-	constructor(private readonly client: CliPocketClient) {}
 
 	async connect(config: ConnectConfig) {
 		if (config.kind === "direct") {
-			await this.client.connect({
+			await connect_client({
 				kind: "direct",
 				endpoint_url: config.endpointUrl,
-				server_public_hex: config.serverPublicHex,
 				resume_token_hex: config.resumeTokenHex ?? null,
 			});
 			return;
 		}
 
-		await this.client.connect({
+		await connect_client({
 			kind: "relay",
 			relay_url: config.relayUrl,
 			host_id: config.hostId,
@@ -38,7 +45,7 @@ export class WebBridge implements ClientBridge {
 		return {
 			[Symbol.asyncIterator]: () => ({
 				next: async () => {
-					const value = await this.client.next_event();
+					const value = await next_client_event();
 					return value == null
 						? { value: undefined, done: true }
 						: { value, done: false };
@@ -48,7 +55,7 @@ export class WebBridge implements ClientBridge {
 	}
 
 	async createTerminal(params: CreateTerminalParams) {
-		await this.client.create_terminal(
+		await create_client_terminal(
 			JSON.stringify({
 				cols: params.cols,
 				rows: params.rows,
@@ -61,26 +68,26 @@ export class WebBridge implements ClientBridge {
 	}
 
 	async sendInput(_terminalId: string, bytes: Uint8Array) {
-		await this.client.send_input(bytes);
+		await send_client_input(bytes);
 	}
 
 	async resize(_terminalId: string, cols: number, rows: number) {
-		await this.client.resize(cols, rows);
+		await resize_client_terminal(cols, rows);
 	}
 
 	async kill(_terminalId: string, _signal: string) {
-		await this.client.kill();
+		await kill_client_terminal();
 	}
 
 	async exportIdentity(): Promise<Uint8Array> {
-		return new TextEncoder().encode(this.client.export_identity());
+		return new TextEncoder().encode(export_client_identity());
 	}
 
 	async importIdentity(blob: Uint8Array) {
-		await this.client.import_identity(new TextDecoder().decode(blob));
+		await import_client_identity(new TextDecoder().decode(blob));
 	}
 
 	async close() {
-		this.client.close();
+		await close_client();
 	}
 }

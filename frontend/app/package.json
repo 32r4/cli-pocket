@@ -6,6 +6,11 @@
 	"scripts": {
 		"dev": "vite --mode tauri",
 		"build": "vite build --mode tauri --outDir dist/tauri",
+		"wasm:build": "wasm-pack build ../../crates/client/client-core-wasm --target web --release",
+		"wasm:build:dev": "wasm-pack build ../../crates/client/client-core-wasm --target web --dev",
+		"predev:web": "npm run wasm:build:dev",
+		"dev:web": "vite --mode web",
+		"prebuild:web": "npm run wasm:build",
 		"build:web": "npm run typecheck && vite build --mode web --outDir dist/web",
 		"typecheck": "tsc --noEmit",
 		"lint": "npm run lint:web",

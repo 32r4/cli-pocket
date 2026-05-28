@@ -14,77 +14,10 @@ use cli_pocket_proto::{
 };
 use futures_channel::mpsc;
 use futures_util::future::LocalBoxFuture;
-use futures_util::task::{waker, ArcWake};
 use futures_util::{FutureExt, StreamExt};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::task::Context;
-
-#[test]
-fn next_delay_caps_and_grows() {
-    assert_eq!(
-        cli_pocket_client_core::reconnect::next_delay(1000, 5000, 30),
-        3000
-    );
-    assert_eq!(
-        cli_pocket_client_core::reconnect::next_delay(3000, 5000, 30),
-        5000
-    );
-    assert_eq!(
-        cli_pocket_client_core::reconnect::next_delay(10_000, 5000, 30),
-        5000
-    );
-}
-
-#[test]
-fn jitter_stays_in_band() {
-    let low = cli_pocket_client_core::reconnect::jitter(1000, 0);
-    assert!((749..=1001).contains(&low));
-    let high = cli_pocket_client_core::reconnect::jitter(1000, 255);
-    assert!((999..=1251).contains(&high));
-}
-
-#[derive(Default, Clone)]
-struct TestSpawner {
-    tasks: Rc<RefCell<Vec<LocalBoxFuture<'static, ()>>>>,
-}
-
-impl SessionSpawner for TestSpawner {
-    fn spawn(&self, fut: LocalBoxFuture<'static, ()>) {
-        self.tasks.borrow_mut().push(Box::pin(fut));
-    }
-}
-
-impl TestSpawner {
-    fn poll_all(&self) -> usize {
-        let mut tasks = self.tasks.borrow_mut();
-        let waker = waker(Arc::new(NoopWake));
-        let mut cx = Context::from_waker(&waker);
-        let mut finished = 0;
-        let mut idx = 0;
-        while idx < tasks.len() {
-            if tasks[idx].as_mut().poll(&mut cx).is_ready() {
-                drop(tasks.swap_remove(idx));
-                finished += 1;
-            } else {
-                idx += 1;
-            }
-        }
-        finished
-    }
-
-    fn task_count(&self) -> usize {
-        self.tasks.borrow().len()
-    }
-}
-
-struct NoopWake;
-
-impl ArcWake for NoopWake {
-    fn wake_by_ref(_arc_self: &Arc<Self>) {}
-}
 
 #[derive(Clone, Default)]
 struct DummyClock;
@@ -127,128 +60,6 @@ impl KeyValueStore for DummyKv {
     }
 }
 
-#[derive(Clone, Default)]
-struct DummyTransport;
-
-#[async_trait(?Send)]
-impl Transport for DummyTransport {
-    async fn send(&mut self, _bytes: Vec<u8>) -> ClientResult<()> {
-        Ok(())
-    }
-
-    async fn recv(&mut self) -> ClientResult<Option<Vec<u8>>> {
-        Ok(None)
-    }
-
-    async fn close(&mut self) -> ClientResult<()> {
-        Ok(())
-    }
-}
-
-#[test]
-fn session_builder_accepts_host_spawner() {
-    let spawner = TestSpawner::default();
-    let identity = ClientIdentity {
-        client_id: ClientId(
-            cli_pocket_crypto::Identity::from_keypair(&KeyPair::generate().unwrap()).host_id,
-        ),
-        keypair: KeyPair::generate().unwrap(),
-    };
-    let transport_factory = || async { Ok(DummyTransport) }.boxed_local();
-    let builder = SessionBuilder::<DummyTransport, _, _, _, _>::new(
-        identity,
-        SessionConfig {
-            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: [0; 32],
-            resume_token: None,
-            backoff: (50, 100, 20),
-        },
-        DummyClock,
-        DummyRng,
-        DummyKv,
-        transport_factory,
-        spawner.clone(),
-    );
-
-    let (_session, _events) = builder.start();
-    let _ = spawner.poll_all();
-    assert_eq!(spawner.task_count(), 1);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn reconnect_replays_resume_token_reattaches_and_delivers_output() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            reconnect_replays_resume_token_reattaches_and_delivers_output_inner().await;
-        })
-        .await;
-}
-
-async fn reconnect_replays_resume_token_reattaches_and_delivers_output_inner() {
-    let server_keypair = KeyPair::generate().unwrap();
-    let client_keypair = KeyPair::generate().unwrap();
-    let terminal = TerminalId::new();
-    let first_stream = StreamId(11);
-    let resumed_stream = StreamId(22);
-    let session_id = SessionId::new();
-    let info = terminal_info(terminal);
-    let daemon = MockDaemon {
-        keypair: server_keypair.clone(),
-        first_stream,
-        resumed_stream,
-        session_id,
-        info: info.clone(),
-        seen_resume: Rc::new(RefCell::new(None)),
-        seen_attach: Rc::new(RefCell::new(None)),
-    };
-
-    let client_transport = daemon.transport_factory();
-    let spawner = AsyncSpawner;
-    let builder = SessionBuilder::new(
-        ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
-            keypair: client_keypair,
-        },
-        SessionConfig {
-            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
-            resume_token: None,
-            backoff: (50, 100, 20),
-        },
-        DummyClock,
-        DummyRng,
-        DummyKv,
-        client_transport,
-        spawner,
-    );
-
-    let (session, mut events) = builder.start();
-
-    assert_connecting(&mut events).await;
-    assert_connected(&mut events, session_id).await;
-    assert_terminal_created(&mut events, &info).await;
-    let handle = session.terminal().await.unwrap();
-    assert_eq!(handle.stream_id(), first_stream);
-    assert_terminal_output(&mut events, terminal, StreamSeq(7), b"before-drop").await;
-    assert_disconnected_retry(&mut events).await;
-
-    assert_connecting(&mut events).await;
-    assert_connected(&mut events, session_id).await;
-    assert_terminal_output(&mut events, terminal, StreamSeq(8), b"after-resume").await;
-    let handle = session.terminal().await.unwrap();
-    assert_eq!(handle.stream_id(), resumed_stream);
-
-    assert_eq!(
-        daemon.seen_resume.borrow().clone(),
-        Some((session_id, vec![(terminal, StreamSeq(7))]))
-    );
-    assert_eq!(
-        daemon.seen_attach.borrow().clone(),
-        Some((terminal, Some(StreamSeq(7))))
-    );
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn startup_resume_token_attaches_without_existing_terminal_handle() {
     let local = tokio::task::LocalSet::new();
@@ -279,7 +90,6 @@ async fn startup_resume_token_attaches_without_existing_terminal_handle_inner() 
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: Some(cli_pocket_proto::ResumeToken {
                 session_id,
                 attachments: vec![cli_pocket_proto::ResumeAttachment {
@@ -347,7 +157,6 @@ async fn attach_ok_head_seq_seeds_resume_token_before_any_output_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -413,7 +222,6 @@ async fn original_terminal_handle_uses_reattached_stream_after_reconnect_inner()
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -493,7 +301,6 @@ async fn input_queued_before_reattach_ok_uses_new_stream_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -576,7 +383,6 @@ async fn input_queued_during_failed_reattach_survives_next_connection_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -676,7 +482,6 @@ async fn terminal_created_waits_for_attach_ok_before_input_can_use_stream_inner(
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -764,7 +569,6 @@ async fn terminal_attach_ok_with_wrong_request_id_is_ignored_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -843,7 +647,6 @@ async fn stale_attach_ok_with_existing_handle_does_not_rebind_stream_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -938,7 +741,6 @@ async fn create_terminal_sends_create_and_waits_for_attach_ok_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -1043,7 +845,6 @@ async fn create_terminal_replaces_existing_handle_after_matching_attach_ok_inner
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -1106,7 +907,6 @@ async fn pending_create_is_discarded_when_connection_drops_before_response_inner
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -1173,7 +973,6 @@ async fn terminal_create_err_removes_pending_create_and_surfaces_error_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -1233,7 +1032,6 @@ async fn terminal_create_ok_after_err_for_known_terminal_is_ignored_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -1314,7 +1112,6 @@ async fn hello_resume_stale_falls_back_to_attach_original_terminal_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -1377,7 +1174,6 @@ async fn bye_resume_stale_clears_resume_token_before_retry_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (50, 100, 20),
         },
@@ -1418,17 +1214,6 @@ impl SessionSpawner for AsyncSpawner {
     fn spawn(&self, fut: LocalBoxFuture<'static, ()>) {
         tokio::task::spawn_local(fut);
     }
-}
-
-#[derive(Clone)]
-struct MockDaemon {
-    keypair: KeyPair,
-    first_stream: StreamId,
-    resumed_stream: StreamId,
-    session_id: SessionId,
-    info: TerminalInfo,
-    seen_resume: SeenResume,
-    seen_attach: SeenAttach,
 }
 
 type SeenResume = Rc<RefCell<Option<(SessionId, Vec<(TerminalId, StreamSeq)>)>>>;
@@ -1610,139 +1395,6 @@ impl AttachOnlyDisconnectDaemon {
         let m3 = transport.recv().await?.unwrap();
         responder.read_handshake(&m3)?;
         Ok(responder.finish()?)
-    }
-}
-
-impl MockDaemon {
-    fn transport_factory(
-        &self,
-    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<MemoryTransport>> + 'static {
-        let state = self.clone();
-        let attempts = Rc::new(RefCell::new(0_u8));
-        move || {
-            let state = state.clone();
-            let attempts = Rc::clone(&attempts);
-            async move {
-                let attempt = {
-                    let mut attempts = attempts.borrow_mut();
-                    *attempts += 1;
-                    *attempts
-                };
-                let (client, server) = memory_pair();
-                tokio::task::spawn_local(async move {
-                    state.run_connection(server, attempt).await.unwrap();
-                });
-                Ok(client)
-            }
-            .boxed_local()
-        }
-    }
-
-    async fn run_connection(self, mut transport: MemoryTransport, attempt: u8) -> ClientResult<()> {
-        let mut session = self.handshake(&mut transport).await?;
-
-        let hello = recv_encrypted(&mut transport, &mut session).await?;
-        let resume = match hello.body {
-            FrameBody::Hello(hello) => hello.resume,
-            other => panic!("expected Hello, got {other:?}"),
-        };
-
-        if attempt == 1 {
-            assert_eq!(resume, None);
-            self.run_first_connection(&mut transport, &mut session)
-                .await?;
-        } else {
-            self.run_resumed_connection(&mut transport, &mut session, resume)
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    async fn handshake(&self, transport: &mut MemoryTransport) -> ClientResult<NoiseSession> {
-        let mut responder = NoiseResponder::new(&self.keypair, None)?;
-        let m1 = transport.recv().await?.unwrap();
-        responder.read_handshake(&m1)?;
-        transport.send(responder.write_handshake()?).await?;
-        let m3 = transport.recv().await?.unwrap();
-        responder.read_handshake(&m3)?;
-        Ok(responder.finish()?)
-    }
-
-    async fn run_first_connection(
-        &self,
-        transport: &mut MemoryTransport,
-        session: &mut NoiseSession,
-    ) -> ClientResult<()> {
-        send_hello_ok(transport, session, self.session_id, false).await?;
-        let list = recv_encrypted(transport, session).await?;
-        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
-        send_encrypted(
-            transport,
-            session,
-            Frame::body(FrameBody::TerminalListOk {
-                request_id: 0,
-                terminals: vec![self.info.clone()],
-            }),
-        )
-        .await?;
-        let attach = recv_encrypted(transport, session).await?;
-        assert!(matches!(attach.body, FrameBody::TerminalAttach { .. }));
-        send_attach_ok(transport, session, self.first_stream, StreamSeq(6)).await?;
-        send_output(
-            transport,
-            session,
-            self.first_stream,
-            StreamSeq(7),
-            b"before-drop",
-        )
-        .await?;
-        send_encrypted(
-            transport,
-            session,
-            Frame::body(FrameBody::Bye {
-                reason: ByeReason::ProtocolError(ProtocolError::BackpressureExceeded),
-            }),
-        )
-        .await
-    }
-
-    async fn run_resumed_connection(
-        &self,
-        transport: &mut MemoryTransport,
-        session: &mut NoiseSession,
-        resume: Option<cli_pocket_proto::ResumeToken>,
-    ) -> ClientResult<()> {
-        let resume = resume.expect("second connection must send resume token");
-        *self.seen_resume.borrow_mut() = Some((
-            resume.session_id,
-            resume
-                .attachments
-                .iter()
-                .map(|attachment| (attachment.terminal, attachment.last_seq))
-                .collect(),
-        ));
-        send_hello_ok(transport, session, self.session_id, true).await?;
-
-        let attach = recv_encrypted(transport, session).await?;
-        match attach.body {
-            FrameBody::TerminalAttach {
-                terminal, since, ..
-            } => {
-                *self.seen_attach.borrow_mut() = Some((terminal, since));
-            }
-            other => panic!("expected TerminalAttach, got {other:?}"),
-        }
-
-        send_attach_ok(transport, session, self.resumed_stream, StreamSeq(7)).await?;
-        send_output(
-            transport,
-            session,
-            self.resumed_stream,
-            StreamSeq(8),
-            b"after-resume",
-        )
-        .await
     }
 }
 
@@ -3502,7 +3154,7 @@ async fn assert_connecting(events: &mut mpsc::Receiver<ClientEvent>) {
 
 async fn assert_connected(events: &mut mpsc::Receiver<ClientEvent>, expected: SessionId) {
     match events.next().await.unwrap() {
-        ClientEvent::Connected { session_id } => assert_eq!(session_id, expected),
+        ClientEvent::Connected { session_id, .. } => assert_eq!(session_id, expected),
         other => panic!("expected Connected, got {other:?}"),
     }
 }

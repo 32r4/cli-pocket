@@ -19,13 +19,13 @@ describe("SessionController", () => {
 		const workspace = createWorkspaceStore();
 		const controller = new SessionController(bridge, workspace);
 
-		await controller.connectAndCreate({
+		await controller.connectAndCreate("host-1", {
 			kind: "direct",
 			endpointUrl: "ws://127.0.0.1:7842",
-			serverPublicHex: "abcd",
 		});
 
 		expect(bridge.connect).toHaveBeenCalledTimes(1);
 		expect(bridge.createTerminal).toHaveBeenCalledTimes(1);
+		expect(workspace.getState().connectionState).toBe("connected");
 	});
 });

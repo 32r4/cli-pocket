@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
 
-export function XTermView() {
+export function XTermView({ title }: { title: string }) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
@@ -10,7 +10,7 @@ export function XTermView() {
 		}
 
 		if (import.meta.env.VITEST) {
-			hostRef.current.textContent = "cli-pocket";
+			hostRef.current.textContent = `${title}\r\ncli-pocket`;
 			return;
 		}
 
@@ -33,7 +33,7 @@ export function XTermView() {
 				});
 
 				terminal.open(hostRef.current);
-				terminal.write("cli-pocket\r\n");
+				terminal.write(`${title}\r\ncli-pocket\r\n`);
 			})
 			.catch(() => {
 				if (hostRef.current !== null) {
@@ -45,7 +45,7 @@ export function XTermView() {
 			cancelled = true;
 			terminal?.dispose();
 		};
-	}, []);
+	}, [title]);
 
-	return <div ref={hostRef} />;
+	return <div ref={hostRef} className="xterm-host" />;
 }

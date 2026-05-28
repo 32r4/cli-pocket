@@ -13,8 +13,6 @@ enum ConnectArgs {
     Direct {
         #[serde(alias = "endpointUrl")]
         endpoint_url: String,
-        #[serde(alias = "serverPublicHex")]
-        server_public_hex: String,
         #[serde(default, alias = "resumeTokenHex")]
         resume_token_hex: Option<String>,
     },
@@ -35,7 +33,6 @@ enum ConnectArgs {
 struct ParsedConnectArgs {
     endpoint: SessionEndpoint,
     transport_url: String,
-    server_public_hex: String,
     resume_token_hex: Option<String>,
 }
 
@@ -62,10 +59,6 @@ pub async fn cli_pocket_connect(
 ) -> Result<(), String> {
     let config: ConnectArgs = serde_json::from_value(config).map_err(|error| error.to_string())?;
     let config = parse_connect_args(config)?;
-    let server_public: [u8; 32] = hex::decode(&config.server_public_hex)
-        .map_err(|error| format!("server_public_hex: {error}"))?
-        .try_into()
-        .map_err(|_| "server_public_hex must be 32 bytes".to_owned())?;
     let resume_token = parse_resume_token(config.resume_token_hex.as_deref())?;
     let session = state.session.clone();
     let kv = state.kv.clone();
@@ -80,7 +73,6 @@ pub async fn cli_pocket_connect(
                 identity,
                 SessionConfig {
                     endpoint,
-                    server_public,
                     resume_token,
                     backoff: (50, 1_000, 20),
                 },
@@ -192,12 +184,10 @@ fn parse_connect_args(config: ConnectArgs) -> Result<ParsedConnectArgs, String> 
     match config {
         ConnectArgs::Direct {
             endpoint_url,
-            server_public_hex,
             resume_token_hex,
         } => Ok(ParsedConnectArgs {
             endpoint: SessionEndpoint::Direct(endpoint_url.clone()),
             transport_url: endpoint_url,
-            server_public_hex,
             resume_token_hex,
         }),
         ConnectArgs::Relay {
@@ -213,9 +203,12 @@ fn parse_connect_args(config: ConnectArgs) -> Result<ParsedConnectArgs, String> 
                     uuid::Uuid::parse_str(&host_id).map_err(|error| format!("host_id: {error}"))?,
                 ),
                 psk_hex,
+                server_public: hex::decode(&server_public_hex)
+                    .map_err(|error| format!("server_public_hex: {error}"))?
+                    .try_into()
+                    .map_err(|_| "server_public_hex must be 32 bytes".to_owned())?,
             },
             transport_url: relay_url,
-            server_public_hex,
             resume_token_hex,
         }),
     }
@@ -306,10 +299,12 @@ mod tests {
                 url,
                 host_id: parsed_host_id,
                 psk_hex,
+                server_public,
             } => {
                 assert_eq!(url, "wss://relay.example/ws/client");
                 assert_eq!(parsed_host_id.0, host_id);
                 assert_eq!(psk_hex, "aa".repeat(32));
+                assert_eq!(server_public, [0xbb; 32]);
             }
             other @ SessionEndpoint::Direct(_) => {
                 panic!("expected relay endpoint, got {other:?}")

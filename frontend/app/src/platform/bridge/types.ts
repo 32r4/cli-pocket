@@ -2,7 +2,6 @@ export type ConnectConfig =
 	| {
 			kind: "direct";
 			endpointUrl: string;
-			serverPublicHex: string;
 			resumeTokenHex?: string;
 	  }
 	| {

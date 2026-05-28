@@ -14,7 +14,14 @@ const PairingOfferPayload = z.object({
 
 function decodeBase64Url(value: string) {
 	try {
-		return Buffer.from(value, "base64url").toString("utf8");
+		const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+		const padding = normalized.length % 4;
+		const padded =
+			padding === 0 ? normalized : normalized + "=".repeat(4 - padding);
+		const binary = atob(padded);
+		const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+
+		return new TextDecoder().decode(bytes);
 	} catch {
 		throw new Error("invalid #pair= payload");
 	}

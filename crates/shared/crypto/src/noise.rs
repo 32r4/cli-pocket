@@ -1,7 +1,8 @@
 use crate::identity::KeyPair;
 
-const NOISE_PARAMS: &str = "Noise_XK_25519_ChaChaPoly_BLAKE2s";
+const NOISE_XK_PARAMS: &str = "Noise_XK_25519_ChaChaPoly_BLAKE2s";
 const NOISE_PSK2_PARAMS: &str = "Noise_XKpsk2_25519_ChaChaPoly_BLAKE2s";
+const NOISE_XX_PARAMS: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 const NOISE_MAX_MSG_LEN: usize = 65_535;
 const NOISE_TAG_LEN: usize = 16;
 const NOISE_HANDSHAKE_MSG_BUF: usize = 1_024;
@@ -30,7 +31,7 @@ impl NoiseInitiator {
         remote_static_public: &[u8; 32],
         psk: Option<&[u8; 32]>,
     ) -> Result<Self, NoiseError> {
-        let mut builder = snow::Builder::new(noise_params(psk.is_some())?)
+        let mut builder = snow::Builder::new(xk_noise_params(psk.is_some())?)
             .local_private_key(local.secret.expose())
             .remote_public_key(remote_static_public);
         if let Some(psk) = psk {
@@ -78,6 +79,69 @@ impl NoiseInitiator {
     }
 }
 
+/// Client side of Noise XX. The initiator does not know the responder's static
+/// public key before the handshake.
+pub struct NoiseAnonymousInitiator {
+    state: Option<snow::HandshakeState>,
+}
+
+impl NoiseAnonymousInitiator {
+    pub fn new(local: &KeyPair) -> Result<Self, NoiseError> {
+        let builder =
+            snow::Builder::new(xx_noise_params()?).local_private_key(local.secret.expose());
+        Ok(Self {
+            state: Some(builder.build_initiator()?),
+        })
+    }
+
+    pub fn write_handshake(&mut self) -> Result<Vec<u8>, NoiseError> {
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(NoiseError::HandshakeNotFinished)?;
+        let mut buf = vec![0_u8; NOISE_HANDSHAKE_MSG_BUF];
+        let n = state.write_message(&[], &mut buf)?;
+        buf.truncate(n);
+        Ok(buf)
+    }
+
+    pub fn read_handshake(&mut self, msg: &[u8]) -> Result<(), NoiseError> {
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(NoiseError::HandshakeNotFinished)?;
+        let mut scratch = vec![0_u8; NOISE_HANDSHAKE_MSG_BUF];
+        state.read_message(msg, &mut scratch)?;
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn remote_static_public(&self) -> Option<[u8; 32]> {
+        let rs = self.state.as_ref()?.get_remote_static()?;
+        let mut out = [0_u8; 32];
+        if rs.len() != out.len() {
+            return None;
+        }
+        out.copy_from_slice(rs);
+        Some(out)
+    }
+
+    pub fn finish(mut self) -> Result<NoiseSession, NoiseError> {
+        let state = self
+            .state
+            .take()
+            .ok_or(NoiseError::HandshakeNotFinished)?
+            .into_transport_mode()?;
+        Ok(NoiseSession { transport: state })
+    }
+
+    pub fn is_handshake_finished(&self) -> bool {
+        self.state
+            .as_ref()
+            .is_some_and(snow::HandshakeState::is_handshake_finished)
+    }
+}
+
 /// Server side of Noise XK.
 pub struct NoiseResponder {
     state: Option<snow::HandshakeState>,
@@ -85,7 +149,7 @@ pub struct NoiseResponder {
 
 impl NoiseResponder {
     pub fn new(local: &KeyPair, psk: Option<&[u8; 32]>) -> Result<Self, NoiseError> {
-        let mut builder = snow::Builder::new(noise_params(psk.is_some())?)
+        let mut builder = snow::Builder::new(xk_noise_params(psk.is_some())?)
             .local_private_key(local.secret.expose());
         if let Some(psk) = psk {
             builder = builder.psk(2, psk);
@@ -118,6 +182,68 @@ impl NoiseResponder {
 
     /// After handshake completes, the responder learns the initiator's static
     /// public key, which the daemon checks against `clients.json`.
+    #[must_use]
+    pub fn remote_static_public(&self) -> Option<[u8; 32]> {
+        let rs = self.state.as_ref()?.get_remote_static()?;
+        let mut out = [0_u8; 32];
+        if rs.len() != out.len() {
+            return None;
+        }
+        out.copy_from_slice(rs);
+        Some(out)
+    }
+
+    pub fn finish(mut self) -> Result<NoiseSession, NoiseError> {
+        let state = self
+            .state
+            .take()
+            .ok_or(NoiseError::HandshakeNotFinished)?
+            .into_transport_mode()?;
+        Ok(NoiseSession { transport: state })
+    }
+
+    pub fn is_handshake_finished(&self) -> bool {
+        self.state
+            .as_ref()
+            .is_some_and(snow::HandshakeState::is_handshake_finished)
+    }
+}
+
+/// Server side of Noise XX.
+pub struct NoiseAnonymousResponder {
+    state: Option<snow::HandshakeState>,
+}
+
+impl NoiseAnonymousResponder {
+    pub fn new(local: &KeyPair) -> Result<Self, NoiseError> {
+        let builder =
+            snow::Builder::new(xx_noise_params()?).local_private_key(local.secret.expose());
+        Ok(Self {
+            state: Some(builder.build_responder()?),
+        })
+    }
+
+    pub fn read_handshake(&mut self, msg: &[u8]) -> Result<(), NoiseError> {
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(NoiseError::HandshakeNotFinished)?;
+        let mut scratch = vec![0_u8; NOISE_HANDSHAKE_MSG_BUF];
+        state.read_message(msg, &mut scratch)?;
+        Ok(())
+    }
+
+    pub fn write_handshake(&mut self) -> Result<Vec<u8>, NoiseError> {
+        let state = self
+            .state
+            .as_mut()
+            .ok_or(NoiseError::HandshakeNotFinished)?;
+        let mut buf = vec![0_u8; NOISE_HANDSHAKE_MSG_BUF];
+        let n = state.write_message(&[], &mut buf)?;
+        buf.truncate(n);
+        Ok(buf)
+    }
+
     #[must_use]
     pub fn remote_static_public(&self) -> Option<[u8; 32]> {
         let rs = self.state.as_ref()?.get_remote_static()?;
@@ -183,13 +309,19 @@ impl std::fmt::Debug for NoiseSession {
     }
 }
 
-fn noise_params(with_psk: bool) -> Result<snow::params::NoiseParams, NoiseError> {
+fn xk_noise_params(with_psk: bool) -> Result<snow::params::NoiseParams, NoiseError> {
     let params = if with_psk {
         NOISE_PSK2_PARAMS
     } else {
-        NOISE_PARAMS
+        NOISE_XK_PARAMS
     };
     params
+        .parse()
+        .map_err(|err: snow::Error| NoiseError::NoiseParams(err.to_string()))
+}
+
+fn xx_noise_params() -> Result<snow::params::NoiseParams, NoiseError> {
+    NOISE_XX_PARAMS
         .parse()
         .map_err(|err: snow::Error| NoiseError::NoiseParams(err.to_string()))
 }
@@ -197,7 +329,10 @@ fn noise_params(with_psk: bool) -> Result<snow::params::NoiseParams, NoiseError>
 #[cfg(test)]
 mod tests {
     use crate::identity::KeyPair;
-    use crate::{NoiseError, NoiseInitiator, NoiseResponder};
+    use crate::{
+        NoiseAnonymousInitiator, NoiseAnonymousResponder, NoiseError, NoiseInitiator,
+        NoiseResponder,
+    };
 
     #[test]
     fn noise_xk_full_handshake_and_bidirectional_transport() {
@@ -222,6 +357,50 @@ mod tests {
             Some(client.public),
             "responder learns initiator static key"
         );
+
+        let mut client_session = initiator.finish().expect("finish initiator");
+        let mut server_session = responder.finish().expect("finish responder");
+
+        let client_plaintext = b"hello daemon";
+        let ciphertext = client_session
+            .encrypt(client_plaintext)
+            .expect("encrypt client payload");
+        let plaintext = server_session
+            .decrypt(&ciphertext)
+            .expect("decrypt client payload");
+        assert_eq!(plaintext, client_plaintext);
+
+        let server_plaintext = b"hello client";
+        let ciphertext = server_session
+            .encrypt(server_plaintext)
+            .expect("encrypt server payload");
+        let plaintext = client_session
+            .decrypt(&ciphertext)
+            .expect("decrypt server payload");
+        assert_eq!(plaintext, server_plaintext);
+    }
+
+    #[test]
+    fn noise_xx_full_handshake_and_bidirectional_transport() {
+        let server = KeyPair::generate().expect("generate server keypair");
+        let client = KeyPair::generate().expect("generate client keypair");
+
+        let mut initiator =
+            NoiseAnonymousInitiator::new(&client).expect("create anonymous initiator");
+        let mut responder =
+            NoiseAnonymousResponder::new(&server).expect("create anonymous responder");
+
+        let m1 = initiator.write_handshake().expect("write message 1");
+        responder.read_handshake(&m1).expect("read message 1");
+        let m2 = responder.write_handshake().expect("write message 2");
+        initiator.read_handshake(&m2).expect("read message 2");
+        let m3 = initiator.write_handshake().expect("write message 3");
+        responder.read_handshake(&m3).expect("read message 3");
+
+        assert!(initiator.is_handshake_finished());
+        assert!(responder.is_handshake_finished());
+        assert_eq!(initiator.remote_static_public(), Some(server.public));
+        assert_eq!(responder.remote_static_public(), Some(client.public));
 
         let mut client_session = initiator.finish().expect("finish initiator");
         let mut server_session = responder.finish().expect("finish responder");

@@ -1,14 +1,29 @@
 import { createStore } from "zustand/vanilla";
-import type { AppRoute } from "@/app/router/routes";
+
+export type OverlaySection = "host" | "settings" | "diagnostics" | "about";
 
 interface UiState {
-	route: AppRoute;
-	setRoute: (route: AppRoute) => void;
+	isOverlayOpen: boolean;
+	overlaySection: OverlaySection;
+	selectedHostId: string | null;
+	openOverlay: (section?: OverlaySection) => void;
+	closeOverlay: () => void;
+	setOverlaySection: (section: OverlaySection) => void;
+	setSelectedHostId: (hostId: string | null) => void;
 }
 
-export function createUiStateStore(initialRoute: AppRoute) {
+export function createUiStateStore() {
 	return createStore<UiState>((set) => ({
-		route: initialRoute,
-		setRoute: (route) => set({ route }),
+		isOverlayOpen: false,
+		overlaySection: "host",
+		selectedHostId: null,
+		openOverlay: (section = "host") =>
+			set({
+				isOverlayOpen: true,
+				overlaySection: section,
+			}),
+		closeOverlay: () => set({ isOverlayOpen: false }),
+		setOverlaySection: (section) => set({ overlaySection: section }),
+		setSelectedHostId: (hostId) => set({ selectedHostId: hostId }),
 	}));
 }

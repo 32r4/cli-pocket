@@ -21,4 +21,20 @@ describe("daemon registry", () => {
 		expect(store.getState().selectedDaemonId).toBe("host-1");
 		expect(store.getState().daemons).toHaveLength(1);
 	});
+
+	it("updates a daemon label", () => {
+		const store = createDaemonRegistryStore();
+		store.getState().upsertDaemon({
+			id: "host-1",
+			label: "old",
+			resumeTokenHex: null,
+			lastConnectedAt: null,
+			kind: "direct",
+			endpointUrl: "ws://127.0.0.1:7842/session",
+		});
+
+		store.getState().updateDaemonLabel("host-1", "new-name");
+
+		expect(store.getState().daemons[0]?.label).toBe("new-name");
+	});
 });

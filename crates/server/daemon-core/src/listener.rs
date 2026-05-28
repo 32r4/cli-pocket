@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{
 use tokio_tungstenite::MaybeTlsStream;
 use tracing::{error, info};
 
-use crate::accept::AcceptedTransport;
+use crate::accept::{AcceptedTransport, AcceptedTransportKind};
 
 /// Bind to the given address and accept inbound WebSocket `/session` transports.
 ///
@@ -77,6 +77,9 @@ pub async fn serve(
             if let Err(error) = accepted_tx
                 .send(AcceptedTransport {
                     label: peer.to_string(),
+                    kind: AcceptedTransportKind::Direct {
+                        auto_pair: peer.ip().is_loopback(),
+                    },
                     transport,
                 })
                 .await

@@ -1,5 +1,6 @@
 //! Daemon facade: boot, start, shutdown — wires all dependencies.
 
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -50,7 +51,7 @@ impl Daemon {
 
         let server_info = ServerInfo {
             server_version: env!("CARGO_PKG_VERSION").to_string(),
-            host_label: None,
+            host_label: detect_host_label(),
         };
 
         Ok(Self {
@@ -75,14 +76,14 @@ impl Daemon {
         let listener = TcpListener::bind(addr).await?;
 
         let identity = Arc::new(self.identity.keypair.clone());
-        let psk = self.config.relay.as_ref().and_then(|r| {
+        let relay_psk = self.config.relay.as_ref().and_then(|r| {
             let bytes = hex::decode(&r.psk_hex).ok()?;
             let arr: [u8; 32] = bytes.try_into().ok()?;
             Some(Arc::new(arr))
         });
         let accept_deps = AcceptDeps {
             identity,
-            psk: psk.clone(),
+            relay_psk: relay_psk.clone(),
             session_mgr: Arc::clone(&self.session_mgr),
             client_db: Arc::clone(&self.client_db),
             server_info: self.server_info.clone(),
@@ -158,4 +159,16 @@ impl Daemon {
     pub fn public_key_hex(&self) -> String {
         hex::encode(self.identity.keypair.public)
     }
+}
+
+fn detect_host_label() -> Option<String> {
+    for key in ["COMPUTERNAME", "HOSTNAME"] {
+        let value = env::var(key).ok()?;
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+
+    None
 }

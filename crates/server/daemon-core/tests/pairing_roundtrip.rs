@@ -12,9 +12,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cli_pocket_crypto::{KeyPair, NoiseInitiator, NoiseSession};
+use cli_pocket_crypto::{KeyPair, NoiseAnonymousInitiator, NoiseSession};
 use cli_pocket_daemon_core::client_db::{ClientDb, ClientRecord};
-use cli_pocket_daemon_core::connection::{run_connection_with_handshake, ConnectionDeps};
+use cli_pocket_daemon_core::connection::{
+    run_connection_with_handshake, ConnectionDeps, HandshakeKind,
+};
 use cli_pocket_daemon_core::identity_store::load_or_create;
 use cli_pocket_daemon_core::session::SessionManager;
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
@@ -35,7 +37,6 @@ async fn paired_client_creates_terminal_end_to_end() {
     let revoked_path = dir.path().join("revoked.json");
 
     let daemon_id = load_or_create(&id_path).expect("load_or_create daemon identity");
-    let daemon_pub = daemon_id.keypair.public;
 
     let client_keypair = KeyPair::generate().expect("client keypair");
     let client_pub = client_keypair.public;
@@ -79,12 +80,18 @@ async fn paired_client_creates_terminal_end_to_end() {
     // ---- Spawn daemon-side `run_connection_with_handshake`. ----
     let daemon_keypair = daemon_id.keypair.clone();
     let daemon_task = tokio::spawn(async move {
-        run_connection_with_handshake(daemon_transport, &daemon_keypair, None, deps).await
+        run_connection_with_handshake(
+            daemon_transport,
+            &daemon_keypair,
+            HandshakeKind::Direct { auto_pair: false },
+            deps,
+        )
+        .await
     });
 
     // ---- Client side: drive Noise XK initiator manually. ----
     let mut client_transport = client_transport;
-    let mut init = NoiseInitiator::new(&client_keypair, &daemon_pub, None).expect("initiator");
+    let mut init = NoiseAnonymousInitiator::new(&client_keypair).expect("initiator");
 
     // XK msg1: client -> daemon (`e`)
     let msg1 = init.write_handshake().expect("write msg1");
@@ -200,7 +207,6 @@ async fn paired_client_receives_live_output_after_input() {
     let revoked_path = dir.path().join("revoked.json");
 
     let daemon_id = load_or_create(&id_path).expect("load_or_create daemon identity");
-    let daemon_pub = daemon_id.keypair.public;
     let client_keypair = KeyPair::generate().expect("client keypair");
     let client_pub = client_keypair.public;
 
@@ -232,11 +238,17 @@ async fn paired_client_receives_live_output_after_input() {
     } = InMemoryTransportPair::new(16);
     let daemon_keypair = daemon_id.keypair.clone();
     let daemon_task = tokio::spawn(async move {
-        run_connection_with_handshake(daemon_transport, &daemon_keypair, None, deps).await
+        run_connection_with_handshake(
+            daemon_transport,
+            &daemon_keypair,
+            HandshakeKind::Direct { auto_pair: false },
+            deps,
+        )
+        .await
     });
 
     let mut client_transport = client_transport;
-    let mut session = connect_paired_client(&mut client_transport, &client_keypair, &daemon_pub)
+    let mut session = connect_paired_client(&mut client_transport, &client_keypair)
         .await
         .expect("connect paired client");
 
@@ -284,10 +296,9 @@ async fn recv_with_timeout(t: &mut InMemoryTransport) -> Option<Vec<u8>> {
 async fn connect_paired_client(
     client_transport: &mut InMemoryTransport,
     client_keypair: &KeyPair,
-    daemon_pub: &[u8; 32],
 ) -> Result<NoiseSession, String> {
-    let mut init = NoiseInitiator::new(client_keypair, daemon_pub, None)
-        .map_err(|e| format!("initiator: {e}"))?;
+    let mut init =
+        NoiseAnonymousInitiator::new(client_keypair).map_err(|e| format!("initiator: {e}"))?;
 
     let msg1 = init
         .write_handshake()

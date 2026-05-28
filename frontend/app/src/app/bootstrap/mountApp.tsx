@@ -17,7 +17,7 @@ export function mountApp({ clientKind, mobile }: MountOptions) {
 
 	createRoot(container).render(
 		<StrictMode>
-			<AppRoot clientKind={clientKind} />
+			<AppRoot clientKind={clientKind} mobile={mobile} />
 		</StrictMode>,
 	);
 }

@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::info;
 
-use crate::accept::AcceptedTransport;
+use crate::accept::{AcceptedTransport, AcceptedTransportKind};
 use crate::config::RelayConfig;
 
 const PAIR_QUEUE_CAPACITY: usize = 32;
@@ -190,6 +190,7 @@ where
                     accepted_tx
                         .send(AcceptedTransport {
                             label: format!("relay:{pair_id:?}"),
+                            kind: AcceptedTransportKind::Relay,
                             transport: PairTransport {
                                 to_daemon_rx,
                                 from_daemon_tx,

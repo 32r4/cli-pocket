@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
 				"@": path.resolve(__dirname, "src"),
 				"cli-pocket-client-core-wasm": path.resolve(
 					__dirname,
-					"../../crates/client/client-core-wasm/pkg/cli_pocket_client_core_wasm.js",
+					"../../crates/client/client-core-wasm/pkg",
 				),
 			},
 		},

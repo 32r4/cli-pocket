@@ -6,6 +6,7 @@ pub enum ClientEvent {
     Connecting,
     Connected {
         session_id: SessionId,
+        host_label: Option<String>,
     },
     Disconnected {
         will_retry: bool,

@@ -6,10 +6,20 @@ import type {
 } from "@/platform/bridge/types";
 
 interface WorkspaceState {
+	connectionState: "idle" | "connecting" | "connected" | "failed";
+	activeConnectionHostId: string | null;
 	terminals: TerminalSummary[];
-	activeTerminalId: string | null;
+	activeSessionId: string | null;
+	lastError: string | null;
+	startConnecting: (hostId: string) => void;
+	markConnected: () => void;
+	markDisconnected: () => void;
+	markConnectionFailed: (message: string) => void;
 	openTerminal: (terminal: TerminalSummary) => void;
 	markTerminalReady: (terminalId: string) => void;
+	markTerminalClosed: (terminalId: string) => void;
+	setActiveSessionId: (terminalId: string | null) => void;
+	clearError: () => void;
 }
 
 type WorkspaceStore = StoreApi<WorkspaceState>;
@@ -20,8 +30,10 @@ export class SessionController {
 		private readonly workspace: WorkspaceStore,
 	) {}
 
-	async connectAndCreate(config: ConnectConfig) {
+	async connectAndCreate(hostId: string, config: ConnectConfig) {
+		this.workspace.getState().startConnecting(hostId);
 		await this.bridge.connect(config);
+		this.workspace.getState().markConnected();
 		this.workspace.getState().openTerminal({
 			id: "pending-terminal",
 			title: "shell",

@@ -19,9 +19,14 @@ pub fn start(app: AppHandle, mut event_rx: mpsc::Receiver<ClientEvent>) {
 fn serialize_event(event: &ClientEvent) -> serde_json::Value {
     match event {
         ClientEvent::Connecting => json!({ "kind": "Connecting" }),
-        ClientEvent::Connected { session_id } => {
-            json!({ "kind": "Connected", "session_id": session_id.0.to_string() })
-        }
+        ClientEvent::Connected {
+            session_id,
+            host_label,
+        } => json!({
+            "kind": "Connected",
+            "session_id": session_id.0.to_string(),
+            "host_label": host_label,
+        }),
         ClientEvent::Disconnected { will_retry, reason } => json!({
             "kind": "Disconnected",
             "will_retry": will_retry,

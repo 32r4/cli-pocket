@@ -14,7 +14,10 @@
 		"esModuleInterop": true,
 		"baseUrl": ".",
 		"paths": {
-			"@/*": ["src/*"]
+			"@/*": ["src/*"],
+			"cli-pocket-client-core-wasm": [
+				"../../crates/client/client-core-wasm/pkg"
+			]
 		},
 		"types": ["vite/client", "vitest/globals"]
 	},

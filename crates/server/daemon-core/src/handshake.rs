@@ -1,5 +1,7 @@
-use cli_pocket_crypto::{KeyPair, NoiseResponder, NoiseSession};
+use cli_pocket_crypto::{KeyPair, NoiseAnonymousResponder, NoiseResponder, NoiseSession};
+use cli_pocket_proto::ClientId;
 use cli_pocket_transport::Transport;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::client_db::{ClientDb, ClientRecord};
 
@@ -88,4 +90,82 @@ pub async fn responder_handshake<T: Transport + ?Sized>(
         session,
         client: record,
     })
+}
+
+/// Run the Noise XX responder handshake over the given transport.
+pub async fn anonymous_responder_handshake<T: Transport + ?Sized>(
+    transport: &mut T,
+    identity: &KeyPair,
+    db: &ClientDb,
+    auto_pair: bool,
+) -> crate::DaemonResult<AcceptedHandshake> {
+    let mut responder =
+        NoiseAnonymousResponder::new(identity).map_err(crate::DaemonError::Crypto)?;
+
+    let msg1 = transport
+        .recv()
+        .await
+        .map_err(crate::DaemonError::Transport)?
+        .ok_or_else(|| {
+            crate::DaemonError::Internal("transport closed during handshake msg1".into())
+        })?;
+    responder
+        .read_handshake(&msg1)
+        .map_err(crate::DaemonError::Crypto)?;
+
+    let msg2 = responder
+        .write_handshake()
+        .map_err(crate::DaemonError::Crypto)?;
+    transport
+        .send(msg2)
+        .await
+        .map_err(crate::DaemonError::Transport)?;
+
+    let msg3 = transport
+        .recv()
+        .await
+        .map_err(crate::DaemonError::Transport)?
+        .ok_or_else(|| {
+            crate::DaemonError::Internal("transport closed during handshake msg3".into())
+        })?;
+    responder
+        .read_handshake(&msg3)
+        .map_err(crate::DaemonError::Crypto)?;
+
+    let client_pk = responder.remote_static_public().ok_or_else(|| {
+        crate::DaemonError::Internal("XX handshake finished without remote static key".into())
+    })?;
+
+    let session = responder.finish().map_err(crate::DaemonError::Crypto)?;
+
+    let record = match db.lookup_by_public(&client_pk).await? {
+        Some(record) => record,
+        None if auto_pair => {
+            db.add_or_lookup_by_public(ClientRecord {
+                client_id: ClientId(uuid::Uuid::now_v7()),
+                public_key: client_pk,
+                paired_at: now_unix_secs(),
+            })
+            .await?
+        }
+        None => return Err(crate::DaemonError::NotPaired(hex::encode(client_pk))),
+    };
+
+    if db.is_revoked(&record.client_id).await {
+        return Err(crate::DaemonError::Revoked(format!(
+            "{:?}",
+            record.client_id
+        )));
+    }
+
+    Ok(AcceptedHandshake {
+        session,
+        client: record,
+    })
+}
+
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
 }

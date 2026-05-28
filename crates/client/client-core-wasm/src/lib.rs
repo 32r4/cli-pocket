@@ -22,16 +22,21 @@ use cli_pocket_client_core::{
 use cli_pocket_proto::{ResumeToken, TerminalCreateParams};
 use futures_channel::mpsc;
 use futures_util::{future::LocalBoxFuture, StreamExt};
+use js_sys::Promise;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
+use wasm_bindgen_futures::{future_to_promise, spawn_local};
 
 use crate::clock_perf::PerfClock;
 use crate::kv_idb::IdbStore;
 use crate::rng_crypto::CryptoRng;
 use crate::ws_transport::WsTransport;
+
+thread_local! {
+    static GLOBAL_CLIENT: RefCell<Option<CliPocketClient>> = const { RefCell::new(None) };
+}
 
 #[cfg(test)]
 mod tests {
@@ -46,10 +51,9 @@ mod tests {
         let client = CliPocketClient::new().expect("construct client");
 
         client
-            .connect(
+            .connect_inner(
                 serde_json::json!({
                     "endpoint_url": "ws://127.0.0.1:9/ws/client",
-                    "server_public_hex": "00".repeat(32),
                 })
                 .to_string()
                 .into(),
@@ -57,8 +61,8 @@ mod tests {
             .await
             .expect("connect should start session");
 
-        let _connecting = client.next_event().await.expect("connecting event");
-        let event = client.next_event().await.expect("disconnect event");
+        let _connecting = client.next_event_inner().await.expect("connecting event");
+        let event = client.next_event_inner().await.expect("disconnect event");
         let kind = js_sys::Reflect::get(&event, &JsValue::from_str("kind"))
             .expect("kind property")
             .as_string()
@@ -166,16 +170,17 @@ mod tests {
                 url,
                 host_id,
                 psk_hex,
+                server_public,
             } => {
                 assert_eq!(url, "wss://relay.example/ws/client");
                 assert_eq!(host_id.0, expected_host_id);
                 assert_eq!(psk_hex, "aa".repeat(32));
+                assert_eq!(server_public, [0xbb; 32]);
             }
             other @ SessionEndpoint::Direct(_) => {
                 panic!("expected relay endpoint, got {other:?}")
             }
         }
-        assert_eq!(config.server_public_hex, "bb".repeat(32));
         assert!(config.resume_token_hex.is_none());
     }
 
@@ -212,12 +217,102 @@ pub fn _start() {
     let _ = tracing_wasm::try_set_as_global_default();
 }
 
+#[wasm_bindgen]
+pub fn connect_client(config: JsValue) -> Promise {
+    match global_client() {
+        Ok(client) => future_to_promise(async move {
+            client.connect_inner(config).await?;
+            Ok(JsValue::UNDEFINED)
+        }),
+        Err(error) => Promise::reject(&error),
+    }
+}
+
+#[wasm_bindgen]
+pub fn next_client_event() -> Promise {
+    match global_client() {
+        Ok(client) => future_to_promise(async move { client.next_event_inner().await }),
+        Err(error) => Promise::reject(&error),
+    }
+}
+
+#[wasm_bindgen]
+pub fn create_client_terminal(params_json: String) -> Promise {
+    match global_client() {
+        Ok(client) => future_to_promise(async move {
+            client.create_terminal_inner(params_json).await?;
+            Ok(JsValue::UNDEFINED)
+        }),
+        Err(error) => Promise::reject(&error),
+    }
+}
+
+#[wasm_bindgen]
+pub fn send_client_input(data: Vec<u8>) -> Promise {
+    match global_client() {
+        Ok(client) => future_to_promise(async move {
+            client.send_input_inner(data).await?;
+            Ok(JsValue::UNDEFINED)
+        }),
+        Err(error) => Promise::reject(&error),
+    }
+}
+
+#[wasm_bindgen]
+pub fn resize_client_terminal(cols: u16, rows: u16) -> Promise {
+    match global_client() {
+        Ok(client) => future_to_promise(async move {
+            client.resize_inner(cols, rows).await?;
+            Ok(JsValue::UNDEFINED)
+        }),
+        Err(error) => Promise::reject(&error),
+    }
+}
+
+#[wasm_bindgen]
+pub fn kill_client_terminal() -> Promise {
+    match global_client() {
+        Ok(client) => future_to_promise(async move {
+            client.kill_inner().await?;
+            Ok(JsValue::UNDEFINED)
+        }),
+        Err(error) => Promise::reject(&error),
+    }
+}
+
+#[wasm_bindgen]
+pub fn export_client_identity() -> Result<String, JsValue> {
+    global_client()?.export_identity()
+}
+
+#[wasm_bindgen]
+pub fn import_client_identity(blob: String) -> Promise {
+    match global_client() {
+        Ok(client) => future_to_promise(async move {
+            client.import_identity_inner(blob).await?;
+            Ok(JsValue::UNDEFINED)
+        }),
+        Err(error) => Promise::reject(&error),
+    }
+}
+
+#[wasm_bindgen]
+pub fn close_client() -> Result<(), JsValue> {
+    GLOBAL_CLIENT.with(|slot| {
+        if let Some(client) = slot.borrow().as_ref() {
+            client.close()?;
+        }
+        Ok(())
+    })
+}
+
 /// JS-facing client.
 ///
 /// Owns the optional [`ClientSession`] and its event receiver behind
 /// `Rc<RefCell<_>>` so wasm-bindgen `async fn(&self, ...)` methods can
 /// borrow without lifetime grief.
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct CliPocketClient {
     inner: Rc<RefCell<Option<Rc<ClientSession>>>>,
     events: Rc<RefCell<Option<mpsc::Receiver<ClientEvent>>>>,
@@ -256,8 +351,6 @@ enum JsConfig {
     Direct {
         #[serde(alias = "endpointUrl")]
         endpoint_url: String,
-        #[serde(alias = "serverPublicHex")]
-        server_public_hex: String,
         #[serde(default, alias = "resumeTokenHex")]
         resume_token_hex: Option<String>,
     },
@@ -277,7 +370,6 @@ enum JsConfig {
 
 struct ParsedConnectConfig {
     endpoint: SessionEndpoint,
-    server_public_hex: String,
     resume_token_hex: Option<String>,
 }
 
@@ -296,16 +388,129 @@ impl CliPocketClient {
         })
     }
 
-    /// Open a session against `endpoint_url` using `server_public_hex`
-    /// as the Noise-XK responder static key.
+    /// Open a session against `endpoint_url`.
     ///
     #[wasm_bindgen]
-    pub async fn connect(&self, config: JsValue) -> Result<(), JsValue> {
+    pub fn connect(&self, config: JsValue) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            client.connect_inner(config).await?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// Spawn a new terminal in the current session.
+    ///
+    /// `params_json` is a JSON object with fields:
+    ///   `cols`, `rows`, `cwd?`, `cmd?` (string[]), `env?` ([[k,v],...]),
+    ///   `scrollback_bytes?`.
+    #[wasm_bindgen]
+    pub fn create_terminal(&self, params_json: String) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            client.create_terminal_inner(params_json).await?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// Send raw keystroke bytes to the active terminal.
+    ///
+    /// `data` is a `Uint8Array` on the JS side; wasm-bindgen copies it into a
+    /// `Vec<u8>` before the await point so the caller does not need to keep
+    /// the original buffer alive.
+    ///
+    /// Note: the `terminal_id` parameter is accepted for future multi-terminal
+    /// support but currently ignored — only the single active terminal is
+    /// addressed (the protocol only supports one at a time).
+    #[wasm_bindgen]
+    pub fn send_input(&self, data: Vec<u8>) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            client.send_input_inner(data).await?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// Resize the active terminal.
+    ///
+    /// Note: the active terminal is always targeted (single-terminal protocol
+    /// v1); a `terminal_id` parameter will be added when multi-terminal is
+    /// supported.
+    #[wasm_bindgen]
+    pub fn resize(&self, cols: u16, rows: u16) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            client.resize_inner(cols, rows).await?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// Kill the active terminal.
+    ///
+    /// Note: the active terminal is always targeted (single-terminal protocol
+    /// v1); a `terminal_id` parameter will be added when multi-terminal is
+    /// supported.
+    #[wasm_bindgen]
+    pub fn kill(&self) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            client.kill_inner().await?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// Await the next [`ClientEvent`].
+    ///
+    /// JS callers `await client.next_event()` in a loop; resolving with
+    /// `null` signals the event stream is closed (the session ended).
+    /// Plan I will swap this for a `ReadableStream`-style iterator once
+    /// it has the consumer code to validate the contract.
+    #[wasm_bindgen]
+    pub fn next_event(&self) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move { client.next_event_inner().await })
+    }
+
+    /// Import a base64-encoded identity blob and persist it to the KV store.
+    ///
+    /// After a successful import the in-memory identity cache is updated so
+    /// subsequent calls to [`connect`](Self::connect) use the imported
+    /// identity without reloading from storage.
+    #[wasm_bindgen]
+    pub fn import_identity(&self, blob: String) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            client.import_identity_inner(blob).await?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
+    /// Export the loaded identity as a base64-encoded string.
+    ///
+    /// The returned value can be stored externally and re-imported with
+    /// [`import_identity`](Self::import_identity).  Requires that an identity
+    /// has already been loaded (e.g. via [`connect`](Self::connect)).
+    #[wasm_bindgen]
+    pub fn export_identity(&self) -> Result<String, JsValue> {
+        let identity_ref = self.identity.borrow();
+        let id = identity_ref
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("no identity loaded"))?;
+        let bytes = id.export_serialized().map_err(js_error)?;
+        Ok(BASE64.encode(&bytes))
+    }
+
+    #[wasm_bindgen]
+    pub fn close(&self) -> Result<(), JsValue> {
+        self.inner.borrow_mut().take();
+        self.events.borrow_mut().take();
+        Ok(())
+    }
+}
+
+impl CliPocketClient {
+    async fn connect_inner(&self, config: JsValue) -> Result<(), JsValue> {
         let cfg = parse_connect_config(config)?;
-        let server_public: [u8; 32] = hex::decode(&cfg.server_public_hex)
-            .map_err(|e| JsValue::from_str(&format!("server_public_hex: {e}")))?
-            .try_into()
-            .map_err(|_| JsValue::from_str("server_public_hex must be 32 bytes"))?;
         let resume_token = parse_resume_token(cfg.resume_token_hex.as_deref())?;
         let kv = self.kv().await?;
         let identity = self.identity(&kv).await?;
@@ -318,7 +523,6 @@ impl CliPocketClient {
             identity,
             SessionConfig {
                 endpoint,
-                server_public,
                 resume_token,
                 backoff: (50, 1_000, 20),
             },
@@ -338,13 +542,7 @@ impl CliPocketClient {
         Ok(())
     }
 
-    /// Spawn a new terminal in the current session.
-    ///
-    /// `params_json` is a JSON object with fields:
-    ///   `cols`, `rows`, `cwd?`, `cmd?` (string[]), `env?` ([[k,v],...]),
-    ///   `scrollback_bytes?`.
-    #[wasm_bindgen]
-    pub async fn create_terminal(&self, params_json: String) -> Result<(), JsValue> {
+    async fn create_terminal_inner(&self, params_json: String) -> Result<(), JsValue> {
         let session = self
             .inner
             .borrow()
@@ -367,17 +565,7 @@ impl CliPocketClient {
         session.create_terminal(params).await.map_err(js_error)
     }
 
-    /// Send raw keystroke bytes to the active terminal.
-    ///
-    /// `data` is a `Uint8Array` on the JS side; wasm-bindgen copies it into a
-    /// `Vec<u8>` before the await point so the caller does not need to keep
-    /// the original buffer alive.
-    ///
-    /// Note: the `terminal_id` parameter is accepted for future multi-terminal
-    /// support but currently ignored — only the single active terminal is
-    /// addressed (the protocol only supports one at a time).
-    #[wasm_bindgen]
-    pub async fn send_input(&self, data: Vec<u8>) -> Result<(), JsValue> {
+    async fn send_input_inner(&self, data: Vec<u8>) -> Result<(), JsValue> {
         let session = self
             .inner
             .borrow()
@@ -396,13 +584,7 @@ impl CliPocketClient {
             .map_err(js_error)
     }
 
-    /// Resize the active terminal.
-    ///
-    /// Note: the active terminal is always targeted (single-terminal protocol
-    /// v1); a `terminal_id` parameter will be added when multi-terminal is
-    /// supported.
-    #[wasm_bindgen]
-    pub async fn resize(&self, cols: u16, rows: u16) -> Result<(), JsValue> {
+    async fn resize_inner(&self, cols: u16, rows: u16) -> Result<(), JsValue> {
         let session = self
             .inner
             .borrow()
@@ -418,13 +600,7 @@ impl CliPocketClient {
         handle.resize(cols, rows).await.map_err(js_error)
     }
 
-    /// Kill the active terminal.
-    ///
-    /// Note: the active terminal is always targeted (single-terminal protocol
-    /// v1); a `terminal_id` parameter will be added when multi-terminal is
-    /// supported.
-    #[wasm_bindgen]
-    pub async fn kill(&self) -> Result<(), JsValue> {
+    async fn kill_inner(&self) -> Result<(), JsValue> {
         let session = self
             .inner
             .borrow()
@@ -440,14 +616,7 @@ impl CliPocketClient {
         handle.kill().await.map_err(js_error)
     }
 
-    /// Await the next [`ClientEvent`].
-    ///
-    /// JS callers `await client.next_event()` in a loop; resolving with
-    /// `null` signals the event stream is closed (the session ended).
-    /// Plan I will swap this for a `ReadableStream`-style iterator once
-    /// it has the consumer code to validate the contract.
-    #[wasm_bindgen]
-    pub async fn next_event(&self) -> Result<JsValue, JsValue> {
+    async fn next_event_inner(&self) -> Result<JsValue, JsValue> {
         let mut events = self
             .events
             .borrow_mut()
@@ -459,28 +628,7 @@ impl CliPocketClient {
         event.map_or(Ok(JsValue::NULL), |event| event_to_js(&event))
     }
 
-    /// Export the loaded identity as a base64-encoded string.
-    ///
-    /// The returned value can be stored externally and re-imported with
-    /// [`import_identity`](Self::import_identity).  Requires that an identity
-    /// has already been loaded (e.g. via [`connect`](Self::connect)).
-    #[wasm_bindgen]
-    pub fn export_identity(&self) -> Result<String, JsValue> {
-        let identity_ref = self.identity.borrow();
-        let id = identity_ref
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("no identity loaded"))?;
-        let bytes = id.export_serialized().map_err(js_error)?;
-        Ok(BASE64.encode(&bytes))
-    }
-
-    /// Import a base64-encoded identity blob and persist it to the KV store.
-    ///
-    /// After a successful import the in-memory identity cache is updated so
-    /// subsequent calls to [`connect`](Self::connect) use the imported
-    /// identity without reloading from storage.
-    #[wasm_bindgen]
-    pub async fn import_identity(&self, blob: String) -> Result<(), JsValue> {
+    async fn import_identity_inner(&self, blob: String) -> Result<(), JsValue> {
         let raw = BASE64
             .decode(blob.as_bytes())
             .map_err(|e| JsValue::from_str(&format!("base64 decode: {e}")))?;
@@ -495,20 +643,6 @@ impl CliPocketClient {
         *self.identity.borrow_mut() = Some(identity);
         Ok(())
     }
-
-    /// Close the active session and drop all session state.
-    ///
-    /// Safe to call when not connected; subsequent [`connect`](Self::connect)
-    /// calls will start a fresh session.
-    #[wasm_bindgen]
-    pub fn close(&self) -> Result<(), JsValue> {
-        self.inner.borrow_mut().take();
-        self.events.borrow_mut().take();
-        Ok(())
-    }
-}
-
-impl CliPocketClient {
     async fn kv(&self) -> Result<Rc<IdbStore>, JsValue> {
         if let Some(kv) = self.kv.borrow().as_ref() {
             return Ok(Rc::clone(kv));
@@ -586,11 +720,9 @@ fn parse_connect_config_inner(cfg: JsConfig) -> Result<ParsedConnectConfig, Stri
     match cfg {
         JsConfig::Direct {
             endpoint_url,
-            server_public_hex,
             resume_token_hex,
         } => Ok(ParsedConnectConfig {
             endpoint: SessionEndpoint::Direct(endpoint_url),
-            server_public_hex,
             resume_token_hex,
         }),
         JsConfig::Relay {
@@ -606,8 +738,11 @@ fn parse_connect_config_inner(cfg: JsConfig) -> Result<ParsedConnectConfig, Stri
                     uuid::Uuid::parse_str(&host_id).map_err(|e| format!("host_id: {e}"))?,
                 ),
                 psk_hex,
+                server_public: hex::decode(&server_public_hex)
+                    .map_err(|e| format!("server_public_hex: {e}"))?
+                    .try_into()
+                    .map_err(|_| "server_public_hex must be 32 bytes".to_owned())?,
             },
-            server_public_hex,
             resume_token_hex,
         }),
     }
@@ -635,9 +770,14 @@ fn event_to_js(event: &ClientEvent) -> Result<JsValue, JsValue> {
 fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
     match event {
         ClientEvent::Connecting => serde_json::json!({ "kind": "Connecting" }),
-        ClientEvent::Connected { session_id } => {
-            serde_json::json!({ "kind": "Connected", "session_id": session_id.0.to_string() })
-        }
+        ClientEvent::Connected {
+            session_id,
+            host_label,
+        } => serde_json::json!({
+            "kind": "Connected",
+            "session_id": session_id.0.to_string(),
+            "host_label": host_label,
+        }),
         ClientEvent::Disconnected { will_retry, reason } => {
             serde_json::json!({
                 "kind": "Disconnected",
@@ -683,4 +823,17 @@ fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
+}
+
+fn global_client() -> Result<CliPocketClient, JsValue> {
+    GLOBAL_CLIENT.with(|slot| {
+        if slot.borrow().is_none() {
+            *slot.borrow_mut() = Some(CliPocketClient::new()?);
+        }
+
+        slot.borrow()
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| JsValue::from_str("failed to initialize client"))
+    })
 }

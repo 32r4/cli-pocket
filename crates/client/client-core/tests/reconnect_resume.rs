@@ -50,7 +50,6 @@ async fn reconnect_with_resume_inner() {
         },
         SessionConfig {
             endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
-            server_public: server_keypair.public,
             resume_token: None,
             backoff: (10, 100, 20),
         },
@@ -377,7 +376,7 @@ async fn assert_connecting(events: &mut mpsc::Receiver<ClientEvent>) {
 
 async fn assert_connected(events: &mut mpsc::Receiver<ClientEvent>, expected: SessionId) {
     match events.next().await.unwrap() {
-        ClientEvent::Connected { session_id } => assert_eq!(session_id, expected),
+        ClientEvent::Connected { session_id, .. } => assert_eq!(session_id, expected),
         other => panic!("expected Connected, got {other:?}"),
     }
 }

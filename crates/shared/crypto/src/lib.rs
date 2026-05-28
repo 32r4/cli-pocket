@@ -6,6 +6,9 @@ pub mod redact;
 pub mod spake2;
 
 pub use identity::{Identity, IdentityError, KeyBytes32, KeyPair};
-pub use noise::{NoiseError, NoiseInitiator, NoiseResponder, NoiseSession};
+pub use noise::{
+    NoiseAnonymousInitiator, NoiseAnonymousResponder, NoiseError, NoiseInitiator, NoiseResponder,
+    NoiseSession,
+};
 pub use redact::Secret;
 pub use spake2::{Spake2Error, Spake2Outcome, Spake2Side};

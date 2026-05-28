@@ -3,8 +3,15 @@ import { describe, expect, it } from "vitest";
 import { AppRoot } from "./AppRoot";
 
 describe("AppRoot", () => {
-	it("labels web and tauri entries through the mounted app", () => {
+	it("renders the disconnected connection entry point", () => {
 		render(<AppRoot clientKind="tauri" />);
-		expect(screen.getByText("client kind: tauri")).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "cli-pocket" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Connect to a host" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Menu" })).toBeInTheDocument();
+		expect(screen.getByText("No saved hosts")).toBeInTheDocument();
 	});
 });

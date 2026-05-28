@@ -28,7 +28,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::client_db::{ClientDb, ClientRecord};
-use crate::handshake::{responder_handshake, AcceptedHandshake};
+use crate::handshake::{anonymous_responder_handshake, responder_handshake, AcceptedHandshake};
 use crate::session::SessionManager;
 
 // ---------------------------------------------------------------------------
@@ -40,6 +40,12 @@ pub struct ConnectionDeps {
     pub session_mgr: Arc<SessionManager>,
     pub client_db: Arc<ClientDb>,
     pub server_info: cli_pocket_proto::ServerInfo,
+}
+
+#[derive(Clone, Copy)]
+pub enum HandshakeKind<'a> {
+    Direct { auto_pair: bool },
+    Relay { psk: Option<&'a [u8; 32]> },
 }
 
 /// Run the full per-connection state machine on an already-accepted transport.
@@ -63,13 +69,20 @@ pub async fn run_connection<T: Transport>(
 pub async fn run_connection_with_handshake<T: Transport>(
     mut transport: T,
     identity: &cli_pocket_crypto::KeyPair,
-    psk: Option<&[u8; 32]>,
+    handshake: HandshakeKind<'_>,
     deps: ConnectionDeps,
 ) -> crate::DaemonResult<()> {
-    let AcceptedHandshake { session, client } =
-        responder_handshake(&mut transport, identity, psk, &deps.client_db).await?;
+    let AcceptedHandshake { session, client } = match handshake {
+        HandshakeKind::Direct { auto_pair } => {
+            anonymous_responder_handshake(&mut transport, identity, &deps.client_db, auto_pair)
+                .await?
+        }
+        HandshakeKind::Relay { psk } => {
+            responder_handshake(&mut transport, identity, psk, &deps.client_db).await?
+        }
+    };
 
-    info!(client_id = ?client.client_id, "client authenticated via Noise XK");
+    info!(client_id = ?client.client_id, "client authenticated via Noise");
 
     run_connection_post_handshake(transport, deps, AcceptedSession { session, client }).await
 }
