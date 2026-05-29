@@ -8,10 +8,13 @@ default:
 # ---- workspace-wide gates ----
 
 check:
-    cargo fmt --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo deny check --disable-fetch
-    just frontend-check
+    @cargo fmt --check
+    @cargo clippy --quiet --workspace --all-targets -- -D warnings
+    @cargo deny check --disable-fetch --hide-inclusion-graph -A duplicate
+    @just frontend-check
+
+check-deps:
+    @cargo deny check --disable-fetch --hide-inclusion-graph
 
 test:
     cargo test --workspace
@@ -119,7 +122,7 @@ mobile-android-init:
     cd apps/mobile; cargo tauri android init --ci
 
 frontend-check:
-    npm --prefix frontend/app run check
+    @npm --prefix frontend/app run --silent check
 
 # ---- guardrails ----
 
