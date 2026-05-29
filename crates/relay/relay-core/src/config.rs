@@ -31,7 +31,7 @@ impl Default for ListenConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapsConfig {
-    pub max_hosts: usize,
+    pub max_servers: usize,
     pub max_pairs: usize,
     pub max_bytes_per_sec: u64,
     pub max_queued_bytes: usize,
@@ -40,7 +40,7 @@ pub struct CapsConfig {
 impl Default for CapsConfig {
     fn default() -> Self {
         Self {
-            max_hosts: 256,
+            max_servers: 256,
             max_pairs: 2048,
             max_bytes_per_sec: 4 * 1024 * 1024,
             max_queued_bytes: 8 * 1024 * 1024,
@@ -61,10 +61,8 @@ impl Default for GuillotineConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuthConfig {
-    /// If set, hosts must present this bearer token.
-    pub host_token: Option<String>,
-    /// If set, clients must present this bearer token.
-    pub client_token: Option<String>,
+    /// If set, servers must present this bearer token.
+    pub server_auth_token: Option<String>,
 }
 
 impl RelayConfig {

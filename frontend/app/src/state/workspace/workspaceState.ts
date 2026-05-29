@@ -5,11 +5,11 @@ export type ConnectionState = "idle" | "connecting" | "connected" | "failed";
 
 interface WorkspaceState {
 	connectionState: ConnectionState;
-	activeConnectionHostId: string | null;
+	activeConnectionServerId: string | null;
 	terminals: TerminalSummary[];
 	activeSessionId: string | null;
 	lastError: string | null;
-	startConnecting: (hostId: string) => void;
+	startConnecting: (serverId: string) => void;
 	markConnected: () => void;
 	markDisconnected: () => void;
 	markConnectionFailed: (message: string) => void;
@@ -23,14 +23,14 @@ interface WorkspaceState {
 export function createWorkspaceStore() {
 	return createStore<WorkspaceState>((set) => ({
 		connectionState: "idle",
-		activeConnectionHostId: null,
+		activeConnectionServerId: null,
 		terminals: [],
 		activeSessionId: null,
 		lastError: null,
-		startConnecting: (hostId) =>
+		startConnecting: (serverId) =>
 			set({
 				connectionState: "connecting",
-				activeConnectionHostId: hostId,
+				activeConnectionServerId: serverId,
 				activeSessionId: null,
 				terminals: [],
 				lastError: null,
@@ -39,14 +39,14 @@ export function createWorkspaceStore() {
 		markDisconnected: () =>
 			set({
 				connectionState: "idle",
-				activeConnectionHostId: null,
+				activeConnectionServerId: null,
 				activeSessionId: null,
 				terminals: [],
 			}),
 		markConnectionFailed: (message) =>
 			set({
 				connectionState: "failed",
-				activeConnectionHostId: null,
+				activeConnectionServerId: null,
 				activeSessionId: null,
 				terminals: [],
 				lastError: message,

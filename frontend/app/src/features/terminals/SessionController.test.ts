@@ -19,7 +19,7 @@ describe("SessionController", () => {
 		const workspace = createWorkspaceStore();
 		const controller = new SessionController(bridge, workspace);
 
-		await controller.connectAndCreate("host-1", {
+		await controller.connectAndCreate("server-1", {
 			kind: "direct",
 			endpointUrl: "ws://127.0.0.1:7842",
 		});

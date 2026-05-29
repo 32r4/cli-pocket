@@ -3,90 +3,90 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use cli_pocket_proto::HostId;
+use cli_pocket_proto::ServerId;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-/// Message sent from the relay router to a host's websocket writer task.
+/// Message sent from the relay router to a server's websocket writer task.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HostMsg {
+pub enum ServerMsg {
     Ctrl(Bytes),
     Data(Bytes),
     Close,
 }
 
 #[derive(Debug)]
-pub struct HostSlot {
-    pub host_id: HostId,
-    pub tx: mpsc::Sender<HostMsg>,
+pub struct ServerSlot {
+    pub server_id: ServerId,
+    pub tx: mpsc::Sender<ServerMsg>,
 }
 
-impl HostSlot {
+impl ServerSlot {
     #[must_use]
-    pub fn new(host_id: HostId, tx: mpsc::Sender<HostMsg>) -> Self {
-        Self { host_id, tx }
+    pub fn new(server_id: ServerId, tx: mpsc::Sender<ServerMsg>) -> Self {
+        Self { server_id, tx }
     }
 }
 
 #[derive(Default, Clone)]
-pub struct HostRegistry {
+pub struct ServerRegistry {
     inner: Arc<RegistryInner>,
 }
 
 #[derive(Default)]
 struct RegistryInner {
-    hosts: Mutex<HashMap<HostId, StoredHostSlot>>,
+    servers: Mutex<HashMap<ServerId, StoredServerSlot>>,
     next_generation: AtomicU64,
 }
 
-struct StoredHostSlot {
-    slot: HostSlot,
+struct StoredServerSlot {
+    slot: ServerSlot,
     generation: u64,
 }
 
-pub struct HostRegistration {
-    host_id: HostId,
+pub struct ServerRegistration {
+    server_id: ServerId,
     generation: u64,
     inner: Arc<RegistryInner>,
 }
 
-impl HostRegistry {
+impl ServerRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn register(&self, slot: HostSlot) -> crate::RelayResult<HostRegistration> {
-        let host_id = slot.host_id;
-        let mut hosts = self.inner.hosts.lock();
-        if hosts.contains_key(&host_id) {
-            return Err(crate::RelayError::Protocol("duplicate host registration"));
+    pub fn register(&self, slot: ServerSlot) -> crate::RelayResult<ServerRegistration> {
+        let server_id = slot.server_id;
+        let mut servers = self.inner.servers.lock();
+        if servers.contains_key(&server_id) {
+            return Err(crate::RelayError::Protocol("duplicate server registration"));
         }
         let generation = self.inner.next_generation.fetch_add(1, Ordering::Relaxed);
-        hosts.insert(host_id, StoredHostSlot { slot, generation });
-        Ok(HostRegistration {
-            host_id,
+        servers.insert(server_id, StoredServerSlot { slot, generation });
+        Ok(ServerRegistration {
+            server_id,
             generation,
             inner: Arc::clone(&self.inner),
         })
     }
 
     #[must_use]
-    pub fn get(&self, host_id: &HostId) -> Option<mpsc::Sender<HostMsg>> {
+    pub fn get(&self, server_id: &ServerId) -> Option<mpsc::Sender<ServerMsg>> {
         self.inner
-            .hosts
+            .servers
             .lock()
-            .get(host_id)
+            .get(server_id)
             .map(|stored| stored.slot.tx.clone())
     }
 
     #[must_use]
-    pub fn list_ids(&self) -> Vec<HostId> {
-        self.inner.hosts.lock().keys().copied().collect()
+    pub fn list_ids(&self) -> Vec<ServerId> {
+        self.inner.servers.lock().keys().copied().collect()
     }
 
     #[must_use]
-    pub fn unregister(&self, registration: &HostRegistration) -> bool {
+    pub fn unregister(&self, registration: &ServerRegistration) -> bool {
         registration.unregister()
     }
 
@@ -98,20 +98,20 @@ impl HostRegistry {
     }
 }
 
-impl HostRegistration {
+impl ServerRegistration {
     fn unregister(&self) -> bool {
-        let mut hosts = self.inner.hosts.lock();
-        let should_remove = hosts
-            .get(&self.host_id)
+        let mut servers = self.inner.servers.lock();
+        let should_remove = servers
+            .get(&self.server_id)
             .is_some_and(|stored| stored.generation == self.generation);
         if should_remove {
-            hosts.remove(&self.host_id);
+            servers.remove(&self.server_id);
         }
         should_remove
     }
 }
 
-impl Drop for HostRegistration {
+impl Drop for ServerRegistration {
     fn drop(&mut self) {
         self.unregister();
     }

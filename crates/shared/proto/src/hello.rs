@@ -19,7 +19,7 @@ pub struct HelloOk {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerInfo {
     pub server_version: String,
-    pub host_label: Option<String>,
+    pub server_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

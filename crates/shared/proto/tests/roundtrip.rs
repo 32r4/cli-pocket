@@ -144,7 +144,7 @@ fn arb_connection_frame_body() -> impl Strategy<Value = FrameBody> {
             protocol: hello.protocol_max,
             server_info: ServerInfo {
                 server_version: "cli-pocket-daemon 0.1.0".to_string(),
-                host_label: None,
+                server_label: None,
             },
             session_id: SessionId(Uuid::nil()),
             resumed: false,
@@ -276,18 +276,18 @@ proptest! {
 
     #[test]
     fn relay_ctrl_roundtrips(ctrl in prop_oneof![
-        Just(RelayCtrl::HostRegister {
-            host_id: HostId(Uuid::nil()),
-            host_pubkey: ByteBuf::from(vec![0u8; 32]),
+        Just(RelayCtrl::ServerRegister {
+            server_id: ServerId(Uuid::nil()),
+            server_pubkey: ByteBuf::from(vec![0u8; 32]),
             signature: ByteBuf::from(vec![1u8; 64]),
         }),
-        Just(RelayCtrl::HostRegisterOk),
-        Just(RelayCtrl::HostRegisterErr {
+        Just(RelayCtrl::ServerRegisterOk),
+        Just(RelayCtrl::ServerRegisterErr {
             reason: "bad registration".to_string(),
         }),
-        Just(RelayCtrl::HostHeartbeat),
-        arb_uuid().prop_map(|host_id| RelayCtrl::ClientConnect {
-            host_id: HostId(host_id),
+        Just(RelayCtrl::ServerHeartbeat),
+        arb_uuid().prop_map(|server_id| RelayCtrl::ClientConnect {
+            server_id: ServerId(server_id),
         }),
         arb_uuid().prop_map(|pair_id| RelayCtrl::PairInbound {
             pair_id: PairId(pair_id),

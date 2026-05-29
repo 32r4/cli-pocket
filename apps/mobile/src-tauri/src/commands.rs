@@ -19,8 +19,8 @@ enum ConnectArgs {
     Relay {
         #[serde(alias = "relayUrl")]
         relay_url: String,
-        #[serde(alias = "hostId")]
-        host_id: String,
+        #[serde(alias = "serverId")]
+        server_id: String,
         #[serde(alias = "pskHex")]
         psk_hex: String,
         #[serde(alias = "serverPublicHex")]
@@ -82,7 +82,7 @@ pub async fn cli_pocket_connect(
                 move || {
                     let url = transport_url.clone();
                     Box::pin(async move {
-                        TokioWsTransport::connect(&url, Some("cli-pocket-host/v1")).await
+                        TokioWsTransport::connect(&url, Some("cli-pocket-server/v1")).await
                     })
                 },
                 spawner.clone(),
@@ -194,15 +194,16 @@ fn parse_connect_args(config: ConnectArgs) -> Result<ParsedConnectArgs, String> 
         }),
         ConnectArgs::Relay {
             relay_url,
-            host_id,
+            server_id,
             psk_hex,
             server_public_hex,
             resume_token_hex,
         } => Ok(ParsedConnectArgs {
             endpoint: SessionEndpoint::Relay {
                 url: relay_url.clone(),
-                host_id: cli_pocket_proto::HostId(
-                    uuid::Uuid::parse_str(&host_id).map_err(|error| format!("host_id: {error}"))?,
+                server_id: cli_pocket_proto::ServerId(
+                    uuid::Uuid::parse_str(&server_id)
+                        .map_err(|error| format!("server_id: {error}"))?,
                 ),
                 psk_hex,
                 server_public: hex::decode(&server_public_hex)
@@ -285,11 +286,11 @@ mod tests {
 
     #[test]
     fn parse_connect_args_accepts_relay_union() {
-        let host_id = uuid::Uuid::now_v7();
+        let server_id = uuid::Uuid::now_v7();
 
         let parsed = parse_connect_args(ConnectArgs::Relay {
             relay_url: "wss://relay.example/ws/client".to_owned(),
-            host_id: host_id.to_string(),
+            server_id: server_id.to_string(),
             psk_hex: "aa".repeat(32),
             server_public_hex: "bb".repeat(32),
             resume_token_hex: None,
@@ -299,12 +300,12 @@ mod tests {
         match parsed.endpoint {
             SessionEndpoint::Relay {
                 url,
-                host_id: parsed_host_id,
+                server_id: parsed_server_id,
                 psk_hex,
                 server_public,
             } => {
                 assert_eq!(url, "wss://relay.example/ws/client");
-                assert_eq!(parsed_host_id.0, host_id);
+                assert_eq!(parsed_server_id.0, server_id);
                 assert_eq!(psk_hex, "aa".repeat(32));
                 assert_eq!(server_public, [0xbb; 32]);
             }

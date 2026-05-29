@@ -41,7 +41,9 @@ async fn session_emits_happy_path_terminal_output_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -119,7 +121,7 @@ impl HappyPathDaemon {
                 protocol: PROTOCOL_VERSION,
                 server_info: ServerInfo {
                     server_version: "happy-path-daemon".to_owned(),
-                    host_label: Some("test-host".to_owned()),
+                    server_label: Some("test-server".to_owned()),
                 },
                 session_id: self.session_id,
                 resumed: false,
@@ -306,10 +308,10 @@ async fn assert_connected(events: &mut mpsc::Receiver<ClientEvent>, expected: Se
     match events.next().await.unwrap() {
         ClientEvent::Connected {
             session_id,
-            host_label,
+            server_label,
         } => {
             assert_eq!(session_id, expected);
-            assert_eq!(host_label.as_deref(), Some("test-host"));
+            assert_eq!(server_label.as_deref(), Some("test-server"));
         }
         other => panic!("expected Connected, got {other:?}"),
     }

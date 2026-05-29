@@ -1,48 +1,48 @@
 use cli_pocket_relay_core::caps::{Caps, CapsSnapshot};
 
 #[test]
-fn host_increment_decrement() {
+fn server_increment_decrement() {
     let c = Caps::new(2, 4, 1024, 1024);
 
-    let h1 = c.try_add_host().unwrap();
-    let _h2 = c.try_add_host().unwrap();
-    assert!(c.try_add_host().is_err());
+    let s1 = c.try_add_server().unwrap();
+    let _s2 = c.try_add_server().unwrap();
+    assert!(c.try_add_server().is_err());
 
-    drop(h1);
+    drop(s1);
 
-    assert!(c.try_add_host().is_ok());
+    assert!(c.try_add_server().is_ok());
 }
 
 #[test]
-fn host_ticket_releases_capacity_on_drop() {
+fn server_ticket_releases_capacity_on_drop() {
     let c = Caps::new(1, 4, 1024, 1024);
-    let ticket = c.try_add_host().unwrap();
+    let ticket = c.try_add_server().unwrap();
 
-    assert!(c.try_add_host().is_err());
+    assert!(c.try_add_server().is_err());
 
     drop(ticket);
 
-    assert!(c.try_add_host().is_ok());
+    assert!(c.try_add_server().is_ok());
 }
 
 #[test]
-fn live_host_ticket_blocks_admission_through_cloned_handle() {
+fn live_server_ticket_blocks_admission_through_cloned_handle() {
     let c = Caps::new(1, 4, 1024, 1024);
     let cloned = c.clone_handle();
-    let ticket = c.try_add_host().unwrap();
+    let ticket = c.try_add_server().unwrap();
 
-    assert!(cloned.try_add_host().is_err());
-    assert_eq!(c.snapshot().hosts, 1);
+    assert!(cloned.try_add_server().is_err());
+    assert_eq!(c.snapshot().servers, 1);
 
     drop(ticket);
 
-    assert!(cloned.try_add_host().is_ok());
+    assert!(cloned.try_add_server().is_ok());
 }
 
 #[test]
-fn pair_independent_of_hosts() {
+fn pair_independent_of_servers() {
     let c = Caps::new(1, 3, 1024, 1024);
-    let _host = c.try_add_host().unwrap();
+    let _server = c.try_add_server().unwrap();
 
     let _p1 = c.try_add_pair().unwrap();
     let _p2 = c.try_add_pair().unwrap();
@@ -175,7 +175,7 @@ fn queued_bytes_are_independent_per_pair() {
 #[test]
 fn snapshot_captures_state() {
     let c = Caps::new(2, 4, 1024, 1024);
-    let _host = c.try_add_host().unwrap();
+    let _server = c.try_add_server().unwrap();
     let pair = c.try_add_pair().unwrap();
     pair.try_consume_rate(24).unwrap();
     pair.try_add_queued_bytes(64).unwrap();
@@ -183,7 +183,7 @@ fn snapshot_captures_state() {
     let s: CapsSnapshot = c.snapshot();
     let pair_s = pair.snapshot();
 
-    assert_eq!(s.hosts, 1);
+    assert_eq!(s.servers, 1);
     assert_eq!(s.pairs, 1);
     assert_eq!(pair_s.rate_remaining, 1000);
     assert_eq!(pair_s.queued_bytes, 64);

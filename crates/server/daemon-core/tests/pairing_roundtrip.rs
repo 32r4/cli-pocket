@@ -62,7 +62,7 @@ async fn paired_client_creates_terminal_end_to_end() {
     let session_mgr = Arc::new(SessionManager::new(4));
     let server_info = ServerInfo {
         server_version: "test".to_string(),
-        host_label: None,
+        server_label: None,
     };
 
     let deps = ConnectionDeps {
@@ -229,7 +229,7 @@ async fn paired_client_receives_live_output_after_input() {
         client_db: db,
         server_info: ServerInfo {
             server_version: "test".to_string(),
-            host_label: None,
+            server_label: None,
         },
     };
     let InMemoryTransportPair {

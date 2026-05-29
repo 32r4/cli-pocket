@@ -40,7 +40,7 @@ impl Default for SessionId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct HostId(pub Uuid);
+pub struct ServerId(pub Uuid);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ClientId(pub Uuid);

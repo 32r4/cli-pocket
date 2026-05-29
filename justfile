@@ -33,7 +33,8 @@ build-daemon:
     cargo build --release -p cli-pocket-daemon
 
 build-relay:
-    cargo build --release -p cli-pocket-relay
+    npm --prefix workers/relay-cloudflare install
+    npm --prefix workers/relay-cloudflare run build
 
 build-wasm:
     wasm-pack build crates/client/client-core-wasm --target web --release
@@ -57,10 +58,10 @@ build-web:
 # ---- dev workflows ----
 
 dev-daemon:
-    cargo run -p cli-pocket-daemon -- start
+    cargo run -p cli-pocket-daemon -- --config crates/server/daemon-bin/daemon.dev.toml start
 
 dev-relay:
-    cargo run -p cli-pocket-relay
+    cargo run -p cli-pocket-relay -- --config crates/relay/relay-bin/relay.dev.toml
 
 dev-desktop:
     cd apps/desktop; cargo tauri dev
@@ -74,6 +75,12 @@ dev-mobile-ios:
 
 dev-web:
     npm --prefix frontend/app run dev:web
+
+# ---- deploy ----
+
+deploy-relay-cloudflare:
+    npm --prefix workers/relay-cloudflare install
+    npm --prefix workers/relay-cloudflare run deploy
 
 # ---- maintenance ----
 
@@ -118,4 +125,4 @@ frontend-check:
 
 verify-justfile:
     @rg -n '^dev-daemon:\r?$' justfile
-    @rg -n '^    cargo run -p cli-pocket-daemon -- start\r?$' justfile
+    @rg -n '^    cargo run -p cli-pocket-daemon -- --config crates/server/daemon-bin/daemon.dev.toml start\r?$' justfile

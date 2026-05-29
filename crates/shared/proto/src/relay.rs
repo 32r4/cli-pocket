@@ -1,4 +1,4 @@
-use crate::terminal::HostId;
+use crate::terminal::ServerId;
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use uuid::Uuid;
@@ -9,7 +9,7 @@ pub struct PairId(pub Uuid);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PairCloseReason {
     Normal,
-    HostGone,
+    ServerGone,
     ClientGone,
     Stuck,
     RelayShutdown,
@@ -18,18 +18,18 @@ pub enum PairCloseReason {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RelayCtrl {
-    HostRegister {
-        host_id: HostId,
-        host_pubkey: ByteBuf,
+    ServerRegister {
+        server_id: ServerId,
+        server_pubkey: ByteBuf,
         signature: ByteBuf,
     },
-    HostRegisterOk,
-    HostRegisterErr {
+    ServerRegisterOk,
+    ServerRegisterErr {
         reason: String,
     },
-    HostHeartbeat,
+    ServerHeartbeat,
     ClientConnect {
-        host_id: HostId,
+        server_id: ServerId,
     },
     PairInbound {
         pair_id: PairId,

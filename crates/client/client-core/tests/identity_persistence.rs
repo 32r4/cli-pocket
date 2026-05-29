@@ -114,7 +114,9 @@ async fn export_contains_only_client_identity_fields() {
     assert!(object.contains_key("client_id"));
     assert!(object.contains_key("keypair"));
     assert!(!object.contains_key("identity"));
-    assert!(!exported.windows(b"host_id".len()).any(|w| w == b"host_id"));
+    assert!(!exported
+        .windows(b"server_id".len())
+        .any(|w| w == b"server_id"));
     assert!(!exported
         .windows(b"created_at".len())
         .any(|w| w == b"created_at"));

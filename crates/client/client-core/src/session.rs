@@ -2,7 +2,7 @@ use bytes::Bytes;
 use cli_pocket_crypto::{NoiseAnonymousInitiator, NoiseInitiator, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
-    ByeReason, Frame, FrameBody, Hello, HostId, ProtocolError, ResumeAttachment, ResumeToken,
+    ByeReason, Frame, FrameBody, Hello, ProtocolError, ResumeAttachment, ResumeToken, ServerId,
     SessionId, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
     PROTOCOL_VERSION,
 };
@@ -34,7 +34,7 @@ pub enum SessionEndpoint {
     Direct(String),
     Relay {
         url: String,
-        host_id: HostId,
+        server_id: ServerId,
         psk_hex: String,
         server_public: [u8; 32],
     },
@@ -273,12 +273,12 @@ async fn run_one_connection<T: Transport>(
             noise.finish()?
         }
         SessionEndpoint::Relay {
-            host_id,
+            server_id,
             psk_hex,
             server_public,
             ..
         } => {
-            open_client_pair(transport, *host_id).await?;
+            open_client_pair(transport, *server_id).await?;
             let psk = parse_psk_hex(psk_hex)?;
             let mut noise = NoiseInitiator::new(&identity.keypair, server_public, Some(&psk))?;
             let m1 = noise.write_handshake()?;
@@ -302,8 +302,8 @@ async fn run_one_connection<T: Transport>(
     send_encrypted(transport, &mut session, &hello).await?;
 
     let hello_reply = recv_encrypted(transport, &mut session).await?;
-    let (session_id, resumed, host_label) = match hello_reply.body {
-        FrameBody::HelloOk(ok) => (ok.session_id, ok.resumed, ok.server_info.host_label),
+    let (session_id, resumed, server_label) = match hello_reply.body {
+        FrameBody::HelloOk(ok) => (ok.session_id, ok.resumed, ok.server_info.server_label),
         other => {
             return Err(ClientError::Proto(format!(
                 "unexpected hello reply: {other:?}"
@@ -316,7 +316,7 @@ async fn run_one_connection<T: Transport>(
         .clone()
         .send(ClientEvent::Connected {
             session_id,
-            host_label,
+            server_label,
         })
         .await;
     state.resume.set_session_id(session_id);

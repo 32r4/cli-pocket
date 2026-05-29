@@ -1,0 +1,14 @@
+[listen]
+addr = "127.0.0.1"
+port = 8080
+
+[caps]
+max_servers = 256
+max_pairs = 2048
+max_bytes_per_sec = 4194304
+max_queued_bytes = 8388608
+
+[guillotine]
+idle_seconds = 120
+
+[auth]

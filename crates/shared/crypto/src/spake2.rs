@@ -32,13 +32,13 @@ pub struct Spake2Side {
 }
 
 impl Spake2Side {
-    pub fn start_host(
+    pub fn start_server(
         code: impl AsRef<[u8]>,
-        host_id_bytes: impl AsRef<[u8]>,
+        server_id_bytes: impl AsRef<[u8]>,
         client_hint: impl AsRef<[u8]>,
     ) -> Self {
         let password = Password::new(code.as_ref());
-        let id_a = Identity::new(host_id_bytes.as_ref());
+        let id_a = Identity::new(server_id_bytes.as_ref());
         let id_b = Identity::new(client_hint.as_ref());
         let (inner, outbound) =
             InnerSpake2::<Ed25519Group>::start_a_with_rng(&password, &id_a, &id_b, OsRng);
@@ -47,11 +47,11 @@ impl Spake2Side {
 
     pub fn start_client(
         code: impl AsRef<[u8]>,
-        host_id_bytes: impl AsRef<[u8]>,
+        server_id_bytes: impl AsRef<[u8]>,
         client_hint: impl AsRef<[u8]>,
     ) -> Self {
         let password = Password::new(code.as_ref());
-        let id_a = Identity::new(host_id_bytes.as_ref());
+        let id_a = Identity::new(server_id_bytes.as_ref());
         let id_b = Identity::new(client_hint.as_ref());
         let (inner, outbound) =
             InnerSpake2::<Ed25519Group>::start_b_with_rng(&password, &id_a, &id_b, OsRng);
@@ -80,32 +80,32 @@ mod tests {
 
     #[test]
     fn matching_codes_produce_noise_psks() {
-        let host = Spake2Side::start_host("493152", b"host", b"client-hint");
-        let client = Spake2Side::start_client("493152", b"host", b"client-hint");
-        let host_msg = host.outbound().to_vec();
+        let server = Spake2Side::start_server("493152", b"server", b"client-hint");
+        let client = Spake2Side::start_client("493152", b"server", b"client-hint");
+        let server_msg = server.outbound().to_vec();
         let client_msg = client.outbound().to_vec();
-        let host_out = host.finish(&client_msg).expect("host finish");
-        let client_out = client.finish(&host_msg).expect("client finish");
-        assert_eq!(host_out.shared, client_out.shared);
-        assert_eq!(host_out.psk, client_out.psk);
+        let server_out = server.finish(&client_msg).expect("server finish");
+        let client_out = client.finish(&server_msg).expect("client finish");
+        assert_eq!(server_out.shared, client_out.shared);
+        assert_eq!(server_out.psk, client_out.psk);
 
         let server = KeyPair::generate().expect("generate server keypair");
         let client_keypair = KeyPair::generate().expect("generate client keypair");
         NoiseInitiator::new(&client_keypair, &server.public, Some(&client_out.psk))
             .expect("SPAKE2 PSK should be accepted by Noise initiator");
-        NoiseResponder::new(&server, Some(&host_out.psk))
+        NoiseResponder::new(&server, Some(&server_out.psk))
             .expect("SPAKE2 PSK should be accepted by Noise responder");
     }
 
     #[test]
     fn mismatched_codes_yield_disagreeing_keys() {
-        let host = Spake2Side::start_host("493152", b"host", b"client-hint");
-        let client = Spake2Side::start_client("000000", b"host", b"client-hint");
-        let host_msg = host.outbound().to_vec();
+        let server = Spake2Side::start_server("493152", b"server", b"client-hint");
+        let client = Spake2Side::start_client("000000", b"server", b"client-hint");
+        let server_msg = server.outbound().to_vec();
         let client_msg = client.outbound().to_vec();
-        let host_out = host.finish(&client_msg).expect("host finish");
-        let client_out = client.finish(&host_msg).expect("client finish");
-        assert_ne!(host_out.shared, client_out.shared);
+        let server_out = server.finish(&client_msg).expect("server finish");
+        let client_out = client.finish(&server_msg).expect("client finish");
+        assert_ne!(server_out.shared, client_out.shared);
     }
 
     #[test]

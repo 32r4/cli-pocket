@@ -275,7 +275,7 @@ fn build_command(params: &TerminalCreateParams) -> Result<CommandBuilder, Termin
 }
 
 #[derive(Default)]
-struct HostOutputProcessor {
+struct ServerOutputProcessor {
     pending: Vec<u8>,
     pending_response: Vec<u8>,
 }
@@ -285,7 +285,7 @@ enum SequenceMatch {
     Incomplete,
 }
 
-impl HostOutputProcessor {
+impl ServerOutputProcessor {
     fn process(&mut self, bytes: &[u8], cursor: (u16, u16)) -> Vec<u8> {
         let mut input = Vec::with_capacity(self.pending.len() + bytes.len());
         input.extend_from_slice(&self.pending);
@@ -420,7 +420,7 @@ fn spawn_reader(
         .name("cli-pocket-pty-reader".to_string())
         .spawn(move || {
             let mut buffer = [0_u8; 8192];
-            let mut host_output = HostOutputProcessor::default();
+            let mut server_output = ServerOutputProcessor::default();
 
             loop {
                 let read = match reader.read(&mut buffer) {
@@ -438,10 +438,10 @@ fn spawn_reader(
                         let ring = lock_or_recover(&inner.ring, "ring");
                         ring.cursor()
                     };
-                    host_output.process(&buffer[..read], cursor)
+                    server_output.process(&buffer[..read], cursor)
                 };
 
-                let response = host_output.take_pending_response();
+                let response = server_output.take_pending_response();
                 if !response.is_empty() {
                     let mut writer = lock_or_recover(&inner.writer, "writer");
                     if let Err(error) = writer.write_all(&response) {
@@ -672,8 +672,8 @@ mod tests {
     }
 
     #[test]
-    fn host_output_processor_replies_to_cursor_position_query() {
-        let mut processor = HostOutputProcessor::default();
+    fn server_output_processor_replies_to_cursor_position_query() {
+        let mut processor = ServerOutputProcessor::default();
 
         let filtered = processor.process(b"\x1b[6nhello", (0, 0));
 
@@ -682,8 +682,8 @@ mod tests {
     }
 
     #[test]
-    fn host_output_processor_handles_split_cursor_position_query() {
-        let mut processor = HostOutputProcessor::default();
+    fn server_output_processor_handles_split_cursor_position_query() {
+        let mut processor = ServerOutputProcessor::default();
 
         let first = processor.process(b"\x1b[", (4, 2));
         let second = processor.process(b"6nok", (4, 2));
@@ -694,8 +694,8 @@ mod tests {
     }
 
     #[test]
-    fn host_output_processor_strips_conpty_management_sequences() {
-        let mut processor = HostOutputProcessor::default();
+    fn server_output_processor_strips_conpty_management_sequences() {
+        let mut processor = ServerOutputProcessor::default();
 
         let filtered = processor.process(b"\x1b[?9001h\x1b[?1004l\x1b]0;title\x07hello", (0, 0));
 

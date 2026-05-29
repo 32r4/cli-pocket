@@ -12,7 +12,7 @@ use crate::caps::Caps;
 use crate::config::RelayConfig;
 use crate::http::{router, AppState};
 use crate::pairs::PairManager;
-use crate::registry::HostRegistry;
+use crate::registry::ServerRegistry;
 
 /// Top-level relay server. Construct with [`RelayServer::new`] and run with
 /// [`RelayServer::serve`].
@@ -26,10 +26,10 @@ impl RelayServer {
     /// [`crate::metrics::init`] (so this must run exactly once per process).
     #[must_use]
     pub fn new(config: RelayConfig) -> Self {
-        let registry = HostRegistry::new();
+        let registry = ServerRegistry::new();
         let pairs = PairManager::new();
         let caps = Caps::new(
-            config.caps.max_hosts,
+            config.caps.max_servers,
             config.caps.max_pairs,
             config.caps.max_bytes_per_sec,
             config.caps.max_queued_bytes,

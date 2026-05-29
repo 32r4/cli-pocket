@@ -1,0 +1,16 @@
+[listen]
+addr = "127.0.0.1"
+port = 17842
+
+[relay]
+base_url = "ws://127.0.0.1:8080"
+psk_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+[app]
+base_url = "http://127.0.0.1:5173"
+
+[limits]
+max_terminals = 64
+scrollback_bytes = 2097152
+scrollback_anchor_interval = 65536
+broadcast_capacity = 1024

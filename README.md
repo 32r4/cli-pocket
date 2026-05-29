@@ -33,6 +33,7 @@ Requires Rust (pinned in `rust-toolchain.toml`), Node (pinned in `.nvmrc`),
 | `crates/server/{pty,daemon-core,daemon-bin}` | The host-side daemon |
 | `crates/relay/{relay-core,relay-bin}` | Optional self-hosted relay |
 | `crates/client/{client-core,client-core-wasm}` | Shared client runtime |
+| `workers/relay-cloudflare` | Cloudflare Workers + Durable Objects relay deployment scaffold |
 
 ## Security
 

@@ -28,7 +28,7 @@ use futures_util::future::BoxFuture;
 /// The trait is intentionally minimal: enough to decide whether the pair is
 /// stuck and to close it asynchronously. The real implementation in
 /// `pairs.rs` (Plan E task E5) will send `PairClose { reason: Stuck }` on
-/// both the host and client write channels.
+/// both the server and client write channels.
 pub trait PairHandle: Send + Sync + 'static {
     /// Stable identifier for this pair.
     fn pair_id(&self) -> PairId;
@@ -59,7 +59,7 @@ pub trait PairSweep: Clone + Send + Sync + 'static {
     fn list_for_sweep(&self) -> Vec<Arc<Self::Pair>>;
 
     /// Drop the pair from the live set. Called after `close_stuck` has been
-    /// dispatched so the host/client tasks can drain their writer queues.
+    /// dispatched so the server/client tasks can drain their writer queues.
     fn remove(&self, pair_id: &PairId);
 }
 

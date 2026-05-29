@@ -1,0 +1,16 @@
+[listen]
+addr = "127.0.0.1"
+port = 7842
+
+[relay]
+base_url = "wss://relay.cli-pocket.32r4.asia"
+psk_hex = ""
+
+[app]
+base_url = "https://cli-pocket.32r4.asia"
+
+[limits]
+max_terminals = 64
+scrollback_bytes = 2097152
+scrollback_anchor_interval = 65536
+broadcast_capacity = 1024

@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use cli_pocket_proto::codec::{decode_relay, encode_relay_ctrl, encode_relay_data, RelayWire};
-use cli_pocket_proto::{HostId, PairId, RelayCtrl, RelayData};
+use cli_pocket_proto::{PairId, RelayCtrl, RelayData, ServerId};
 use cli_pocket_relay_core::http::router;
 use cli_pocket_relay_core::{RelayConfig, RelayServer};
 use futures_util::{SinkExt, StreamExt};
@@ -13,42 +13,43 @@ use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
 
 #[tokio::test(flavor = "current_thread")]
-async fn host_and_client_can_open_one_pair_and_forward_bytes() {
+async fn server_and_client_can_open_one_pair_and_forward_bytes() {
     let (addr, _handle) = start_relay().await;
-    let host_id = HostId(Uuid::now_v7());
+    let server_id = ServerId(Uuid::now_v7());
 
-    let (mut host_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws/host"))
+    let (mut server_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws/server"))
         .await
-        .expect("connect host websocket");
-    host_ws
+        .expect("connect server websocket");
+    server_ws
         .send(Message::Binary(
-            encode_relay_ctrl(&RelayCtrl::HostRegister {
-                host_id,
-                host_pubkey: vec![1, 2, 3].into(),
+            encode_relay_ctrl(&RelayCtrl::ServerRegister {
+                server_id,
+                server_pubkey: vec![1, 2, 3].into(),
                 signature: vec![4, 5, 6].into(),
             })
-            .expect("encode host register"),
+            .expect("encode server register"),
         ))
         .await
-        .expect("send host register");
+        .expect("send server register");
 
     assert!(matches!(
-        recv_relay(&mut host_ws).await,
-        RelayWire::Ctrl(RelayCtrl::HostRegisterOk)
+        recv_relay(&mut server_ws).await,
+        RelayWire::Ctrl(RelayCtrl::ServerRegisterOk)
     ));
 
     let (mut client_ws, _) =
-        tokio_tungstenite::connect_async(format!("ws://{addr}/ws/client?host={}", host_id.0))
+        tokio_tungstenite::connect_async(format!("ws://{addr}/ws/client?server={}", server_id.0))
             .await
             .expect("connect client websocket");
     client_ws
         .send(Message::Binary(
-            encode_relay_ctrl(&RelayCtrl::ClientConnect { host_id }).expect("encode pair request"),
+            encode_relay_ctrl(&RelayCtrl::ClientConnect { server_id })
+                .expect("encode pair request"),
         ))
         .await
         .expect("send pair request");
 
-    let pair_id = match recv_relay(&mut host_ws).await {
+    let pair_id = match recv_relay(&mut server_ws).await {
         RelayWire::Ctrl(RelayCtrl::PairInbound { pair_id }) => pair_id,
         other => panic!("expected PairInbound, got {other:?}"),
     };
@@ -60,29 +61,29 @@ async fn host_and_client_can_open_one_pair_and_forward_bytes() {
         other => panic!("expected PairOpen, got {other:?}"),
     }
 
-    let client_bytes = b"client->host".to_vec();
+    let client_bytes = b"client->server".to_vec();
     client_ws
         .send(Message::Binary(client_bytes.clone()))
         .await
         .expect("send client forward");
 
-    let forwarded_host_bytes = recv_host_data(&mut host_ws, pair_id).await;
-    assert_eq!(forwarded_host_bytes.as_slice(), client_bytes.as_slice());
+    let forwarded_server_bytes = recv_server_data(&mut server_ws, pair_id).await;
+    assert_eq!(forwarded_server_bytes.as_slice(), client_bytes.as_slice());
 
-    let host_bytes = b"host->client".to_vec();
-    host_ws
+    let server_bytes = b"server->client".to_vec();
+    server_ws
         .send(Message::Binary(
             encode_relay_data(&RelayData::Forward {
                 pair_id,
-                bytes: host_bytes.clone().into(),
+                bytes: server_bytes.clone().into(),
             })
-            .expect("encode host forward"),
+            .expect("encode server forward"),
         ))
         .await
-        .expect("send host forward");
+        .expect("send server forward");
 
     let forwarded_client_bytes = recv_client_bytes(&mut client_ws).await;
-    assert_eq!(forwarded_client_bytes.as_slice(), host_bytes.as_slice());
+    assert_eq!(forwarded_client_bytes.as_slice(), server_bytes.as_slice());
 }
 
 async fn start_relay() -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -117,7 +118,7 @@ where
     decode_relay(&bytes).expect("decode relay frame")
 }
 
-async fn recv_host_data<S>(ws: &mut WebSocketStream<S>, pair_id: PairId) -> Vec<u8>
+async fn recv_server_data<S>(ws: &mut WebSocketStream<S>, pair_id: PairId) -> Vec<u8>
 where
     WebSocketStream<S>:
         StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -130,7 +131,7 @@ where
             assert_eq!(forwarded_pair, pair_id);
             bytes.to_vec()
         }
-        other => panic!("expected forwarded host data, got {other:?}"),
+        other => panic!("expected forwarded server data, got {other:?}"),
     }
 }
 

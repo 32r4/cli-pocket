@@ -13,6 +13,8 @@ fn default_then_serialize_then_deserialize() {
     assert_eq!(parsed.listen.addr, cfg.listen.addr);
     assert_eq!(parsed.listen.port, cfg.listen.port);
     assert_eq!(parsed.security.identity_path, cfg.security.identity_path);
+    assert_eq!(parsed.relay.base_url, cfg.relay.base_url);
+    assert_eq!(parsed.relay.psk_hex, cfg.relay.psk_hex);
     assert_eq!(parsed.app.base_url, cfg.app.base_url);
 }
 
@@ -23,13 +25,8 @@ fn parses_minimal_user_config() {
 addr = "0.0.0.0"
 port = 8443
 
-[security]
-identity_path = "/var/lib/cli-pocket/identity.json"
-clients_path = "/var/lib/cli-pocket/clients.json"
-revoked_path = "/var/lib/cli-pocket/revoked.json"
-
 [relay]
-url = "wss://relay.example.com"
+base_url = "wss://relay.example.com"
 psk_hex = "deadbeef"
 
 [app]
@@ -40,18 +37,17 @@ base_url = "https://cli-pocket.example"
 
     assert_eq!(cfg.listen.port, 8443);
     assert_eq!(cfg.app.base_url, "https://cli-pocket.example");
-    let relay = cfg.relay.unwrap();
-    assert_eq!(relay.url, "wss://relay.example.com");
+    let relay = cfg.relay;
+    assert_eq!(relay.base_url, "wss://relay.example.com");
     assert_eq!(relay.psk_hex, "deadbeef");
 }
 
 #[test]
 fn app_base_url_roundtrips() {
     let toml_text = r#"
-[security]
-identity_path = "id.json"
-clients_path = "clients.json"
-revoked_path = "revoked.json"
+[relay]
+base_url = "wss://relay.example.com"
+psk_hex = "deadbeef"
 
 [app]
 base_url = "https://cli-pocket.32r4.asia/"
@@ -67,21 +63,16 @@ base_url = "https://cli-pocket.32r4.asia/"
 }
 
 #[test]
-fn missing_relay_is_optional() {
+fn missing_relay_is_rejected() {
     let toml_text = r#"
 [listen]
 addr = "127.0.0.1"
 port = 7777
-
-[security]
-identity_path = "id.json"
-clients_path = "clients.json"
-revoked_path = "revoked.json"
 "#;
 
-    let cfg: DaemonConfig = toml::from_str(toml_text).unwrap();
+    let err = toml::from_str::<DaemonConfig>(toml_text).expect_err("missing relay should fail");
 
-    assert!(cfg.relay.is_none());
+    assert!(err.to_string().contains("relay"));
 }
 
 #[test]

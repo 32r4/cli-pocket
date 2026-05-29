@@ -1,60 +1,62 @@
-use cli_pocket_proto::HostId;
-use cli_pocket_relay_core::registry::{HostRegistry, HostSlot};
+use cli_pocket_proto::ServerId;
+use cli_pocket_relay_core::registry::{ServerRegistry, ServerSlot};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[tokio::test(flavor = "current_thread")]
 async fn register_lookup_drop() {
-    let registry = HostRegistry::new();
-    let host_id = HostId(Uuid::now_v7());
+    let registry = ServerRegistry::new();
+    let server_id = ServerId(Uuid::now_v7());
     let (tx, _rx) = mpsc::channel(8);
-    let slot = HostSlot::new(host_id, tx);
+    let slot = ServerSlot::new(server_id, tx);
 
     let handle = registry.register(slot).unwrap();
 
-    assert!(registry.get(&host_id).is_some());
+    assert!(registry.get(&server_id).is_some());
 
     drop(handle);
 
-    assert!(registry.get(&host_id).is_none());
+    assert!(registry.get(&server_id).is_none());
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn duplicate_host_rejected() {
-    let registry = HostRegistry::new();
-    let host_id = HostId(Uuid::now_v7());
+async fn duplicate_server_rejected() {
+    let registry = ServerRegistry::new();
+    let server_id = ServerId(Uuid::now_v7());
     let (tx, _rx) = mpsc::channel(8);
     let _first = registry
-        .register(HostSlot::new(host_id, tx.clone()))
+        .register(ServerSlot::new(server_id, tx.clone()))
         .unwrap();
 
-    let result = registry.register(HostSlot::new(host_id, tx));
+    let result = registry.register(ServerSlot::new(server_id, tx));
 
     let Err(cli_pocket_relay_core::RelayError::Protocol(message)) = result else {
-        panic!("expected duplicate host protocol error");
+        panic!("expected duplicate server protocol error");
     };
-    assert_eq!(message, "duplicate host registration");
+    assert_eq!(message, "duplicate server registration");
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn stale_registration_handle_does_not_remove_replacement() {
-    let registry = HostRegistry::new();
-    let host_id = HostId(Uuid::now_v7());
+    let registry = ServerRegistry::new();
+    let server_id = ServerId(Uuid::now_v7());
     let (first_tx, _first_rx) = mpsc::channel(8);
-    let first = registry.register(HostSlot::new(host_id, first_tx)).unwrap();
+    let first = registry
+        .register(ServerSlot::new(server_id, first_tx))
+        .unwrap();
 
     assert!(registry.unregister(&first));
 
     let (second_tx, _second_rx) = mpsc::channel(8);
     let second = registry
-        .register(HostSlot::new(host_id, second_tx))
+        .register(ServerSlot::new(server_id, second_tx))
         .unwrap();
 
     drop(first);
 
-    assert!(registry.get(&host_id).is_some());
+    assert!(registry.get(&server_id).is_some());
 
     drop(second);
 
-    assert!(registry.get(&host_id).is_none());
+    assert!(registry.get(&server_id).is_none());
 }

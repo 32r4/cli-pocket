@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "cli-pocket relay library: host registry, pair manager, ciphertext forwarder."
+description = "cli-pocket relay library: server registry, pair manager, ciphertext forwarder."
 
 [lints]
 workspace = true

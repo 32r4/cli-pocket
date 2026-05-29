@@ -13,7 +13,7 @@ export type DaemonRecord =
 	| (DaemonRecordBase & {
 			kind: "relay";
 			serverPublicHex: string;
-			hostId: string;
+			serverId: string;
 			relayUrl: string;
 			relayPskHex: string;
 	  });

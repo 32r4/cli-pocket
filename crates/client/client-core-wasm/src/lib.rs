@@ -154,11 +154,11 @@ mod tests {
 
     #[test]
     fn relay_config_parses_into_relay_endpoint() {
-        let expected_host_id = uuid::Uuid::now_v7();
+        let expected_server_id = uuid::Uuid::now_v7();
         let config = parse_connect_config_json(&serde_json::json!({
             "kind": "relay",
             "relayUrl": "wss://relay.example/ws/client",
-            "hostId": expected_host_id.to_string(),
+            "serverId": expected_server_id.to_string(),
             "pskHex": "aa".repeat(32),
             "serverPublicHex": "bb".repeat(32),
             "resumeTokenHex": null,
@@ -168,12 +168,12 @@ mod tests {
         match config.endpoint {
             SessionEndpoint::Relay {
                 url,
-                host_id,
+                server_id,
                 psk_hex,
                 server_public,
             } => {
                 assert_eq!(url, "wss://relay.example/ws/client");
-                assert_eq!(host_id.0, expected_host_id);
+                assert_eq!(server_id.0, expected_server_id);
                 assert_eq!(psk_hex, "aa".repeat(32));
                 assert_eq!(server_public, [0xbb; 32]);
             }
@@ -189,7 +189,7 @@ mod tests {
         for value in [
             serde_json::json!({
                 "kind": "relay",
-                "hostId": uuid::Uuid::now_v7().to_string(),
+                "serverId": uuid::Uuid::now_v7().to_string(),
                 "pskHex": "aa".repeat(32),
                 "serverPublicHex": "bb".repeat(32),
             }),
@@ -202,7 +202,7 @@ mod tests {
             serde_json::json!({
                 "kind": "relay",
                 "relayUrl": "wss://relay.example/ws/client",
-                "hostId": uuid::Uuid::now_v7().to_string(),
+                "serverId": uuid::Uuid::now_v7().to_string(),
                 "serverPublicHex": "bb".repeat(32),
             }),
         ] {
@@ -357,8 +357,8 @@ enum JsConfig {
     Relay {
         #[serde(alias = "relayUrl")]
         relay_url: String,
-        #[serde(alias = "hostId")]
-        host_id: String,
+        #[serde(alias = "serverId")]
+        server_id: String,
         #[serde(alias = "pskHex")]
         psk_hex: String,
         #[serde(alias = "serverPublicHex")]
@@ -727,15 +727,15 @@ fn parse_connect_config_inner(cfg: JsConfig) -> Result<ParsedConnectConfig, Stri
         }),
         JsConfig::Relay {
             relay_url,
-            host_id,
+            server_id,
             psk_hex,
             server_public_hex,
             resume_token_hex,
         } => Ok(ParsedConnectConfig {
             endpoint: SessionEndpoint::Relay {
                 url: relay_url,
-                host_id: cli_pocket_proto::HostId(
-                    uuid::Uuid::parse_str(&host_id).map_err(|e| format!("host_id: {e}"))?,
+                server_id: cli_pocket_proto::ServerId(
+                    uuid::Uuid::parse_str(&server_id).map_err(|e| format!("server_id: {e}"))?,
                 ),
                 psk_hex,
                 server_public: hex::decode(&server_public_hex)
@@ -772,11 +772,11 @@ fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
         ClientEvent::Connecting => serde_json::json!({ "kind": "Connecting" }),
         ClientEvent::Connected {
             session_id,
-            host_label,
+            server_label,
         } => serde_json::json!({
             "kind": "Connected",
             "session_id": session_id.0.to_string(),
-            "host_label": host_label,
+            "server_label": server_label,
         }),
         ClientEvent::Disconnected { will_retry, reason } => {
             serde_json::json!({

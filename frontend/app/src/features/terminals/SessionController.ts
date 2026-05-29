@@ -7,11 +7,11 @@ import type {
 
 interface WorkspaceState {
 	connectionState: "idle" | "connecting" | "connected" | "failed";
-	activeConnectionHostId: string | null;
+	activeConnectionServerId: string | null;
 	terminals: TerminalSummary[];
 	activeSessionId: string | null;
 	lastError: string | null;
-	startConnecting: (hostId: string) => void;
+	startConnecting: (serverId: string) => void;
 	markConnected: () => void;
 	markDisconnected: () => void;
 	markConnectionFailed: (message: string) => void;
@@ -30,8 +30,8 @@ export class SessionController {
 		private readonly workspace: WorkspaceStore,
 	) {}
 
-	async connectAndCreate(hostId: string, config: ConnectConfig) {
-		this.workspace.getState().startConnecting(hostId);
+	async connectAndCreate(serverId: string, config: ConnectConfig) {
+		this.workspace.getState().startConnecting(serverId);
 		await this.bridge.connect(config);
 		this.workspace.getState().markConnected();
 		this.workspace.getState().openTerminal({

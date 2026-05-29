@@ -1,13 +1,13 @@
 use cli_pocket_relay_core::caps::Caps;
 
 #[test]
-fn host_limit_enforced() {
+fn server_limit_enforced() {
     let c = Caps::new(2, 4, 1024, 1024);
-    let h1 = c.try_add_host().unwrap();
-    let _h2 = c.try_add_host().unwrap();
-    assert!(c.try_add_host().is_err());
-    drop(h1);
-    assert!(c.try_add_host().is_ok());
+    let s1 = c.try_add_server().unwrap();
+    let _s2 = c.try_add_server().unwrap();
+    assert!(c.try_add_server().is_err());
+    drop(s1);
+    assert!(c.try_add_server().is_ok());
 }
 
 #[test]

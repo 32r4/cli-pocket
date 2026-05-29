@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { AppRoot } from "./AppRoot";
 
 describe("AppRoot", () => {
-	it("renders the disconnected host entry point", () => {
+	it("renders the disconnected server entry point", () => {
 		render(<AppRoot clientKind="tauri" />);
-		expect(screen.getByText("No host")).toBeInTheDocument();
+		expect(screen.getByText("No server")).toBeInTheDocument();
 		expect(screen.getByLabelText("Status red")).toBeInTheDocument();
 		expect(
 			screen.getByRole("button", { name: "Direct connection" }),

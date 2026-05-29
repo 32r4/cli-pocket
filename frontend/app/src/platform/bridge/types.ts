@@ -7,7 +7,7 @@ export type ConnectConfig =
 	| {
 			kind: "relay";
 			relayUrl: string;
-			hostId: string;
+			serverId: string;
 			pskHex: string;
 			serverPublicHex: string;
 			resumeTokenHex?: string;

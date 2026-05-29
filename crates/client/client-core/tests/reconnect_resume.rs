@@ -45,7 +45,9 @@ async fn reconnect_with_resume_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -156,7 +158,7 @@ impl ReconnectDaemon {
                         protocol: PROTOCOL_VERSION,
                         server_info: ServerInfo {
                             server_version: "reconnect-daemon".to_owned(),
-                            host_label: Some("test-host".to_owned()),
+                            server_label: Some("test-server".to_owned()),
                         },
                         session_id: self.session_id,
                         resumed,

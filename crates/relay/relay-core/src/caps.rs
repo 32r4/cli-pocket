@@ -8,17 +8,17 @@ pub struct Caps {
 }
 
 struct CapsInner {
-    max_hosts: usize,
+    max_servers: usize,
     max_pairs: usize,
     max_bytes_per_sec: u64,
     max_queued_bytes: usize,
-    hosts: AtomicUsize,
+    servers: AtomicUsize,
     pairs: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapsSnapshot {
-    pub hosts: usize,
+    pub servers: usize,
     pub pairs: usize,
 }
 
@@ -31,26 +31,26 @@ pub struct PairCapsSnapshot {
 impl Caps {
     #[must_use]
     pub fn new(
-        max_hosts: usize,
+        max_servers: usize,
         max_pairs: usize,
         max_bytes_per_sec: u64,
         max_queued_bytes: usize,
     ) -> Self {
         Self {
             inner: Arc::new(CapsInner {
-                max_hosts,
+                max_servers,
                 max_pairs,
                 max_bytes_per_sec,
                 max_queued_bytes,
-                hosts: AtomicUsize::new(0),
+                servers: AtomicUsize::new(0),
                 pairs: AtomicUsize::new(0),
             }),
         }
     }
 
-    pub fn try_add_host(&self) -> crate::RelayResult<HostTicket> {
-        increment_bounded_usize(&self.inner.hosts, self.inner.max_hosts, "max_hosts")?;
-        Ok(HostTicket {
+    pub fn try_add_server(&self) -> crate::RelayResult<ServerTicket> {
+        increment_bounded_usize(&self.inner.servers, self.inner.max_servers, "max_servers")?;
+        Ok(ServerTicket {
             inner: Arc::clone(&self.inner),
         })
     }
@@ -73,7 +73,7 @@ impl Caps {
     #[must_use]
     pub fn snapshot(&self) -> CapsSnapshot {
         CapsSnapshot {
-            hosts: self.inner.hosts.load(Ordering::Acquire),
+            servers: self.inner.servers.load(Ordering::Acquire),
             pairs: self.inner.pairs.load(Ordering::Acquire),
         }
     }
@@ -86,14 +86,14 @@ impl Caps {
     }
 }
 
-pub struct HostTicket {
+pub struct ServerTicket {
     inner: Arc<CapsInner>,
 }
 
-impl Drop for HostTicket {
+impl Drop for ServerTicket {
     fn drop(&mut self) {
         self.inner
-            .hosts
+            .servers
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current.checked_sub(1)
             })

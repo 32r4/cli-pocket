@@ -4,7 +4,7 @@ import type { DaemonRecord } from "@/state/daemon-registry/types";
 const PairingOfferPayload = z.object({
 	v: z.literal(1),
 	label: z.string().trim().min(1).optional(),
-	hostId: z.string().uuid(),
+	serverId: z.string().uuid(),
 	serverPublicHex: z.string().regex(/^[0-9a-f]{64}$/i),
 	relay: z.object({
 		url: z.string().url(),
@@ -46,10 +46,10 @@ export function importPairingOfferUrl(rawUrl: string): DaemonRecord {
 	const payload = PairingOfferPayload.parse(parsedJson);
 
 	return {
-		id: payload.hostId,
-		label: payload.label ?? payload.hostId,
+		id: payload.serverId,
+		label: payload.label ?? payload.serverId,
 		kind: "relay",
-		hostId: payload.hostId,
+		serverId: payload.serverId,
 		serverPublicHex: payload.serverPublicHex,
 		relayUrl: payload.relay.url,
 		relayPskHex: payload.relay.pskHex,

@@ -1,0 +1,16 @@
+{
+  "name": "@cli-pocket/relay-cloudflare",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260524.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.68.0"
+  }
+}

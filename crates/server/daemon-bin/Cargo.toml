@@ -20,6 +20,7 @@ cli-pocket-proto       = { path = "../../shared/proto" }
 
 anyhow             = "1"
 clap               = { workspace = true }
+getrandom          = { workspace = true }
 hex                = "0.4"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 toml               = { workspace = true }

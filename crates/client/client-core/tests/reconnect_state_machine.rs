@@ -85,7 +85,9 @@ async fn startup_resume_token_attaches_without_existing_terminal_handle_inner() 
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -152,7 +154,9 @@ async fn attach_ok_head_seq_seeds_resume_token_before_any_output_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -217,7 +221,9 @@ async fn original_terminal_handle_uses_reattached_stream_after_reconnect_inner()
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -296,7 +302,9 @@ async fn input_queued_before_reattach_ok_uses_new_stream_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -378,7 +386,9 @@ async fn input_queued_during_failed_reattach_survives_next_connection_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -477,7 +487,9 @@ async fn terminal_created_waits_for_attach_ok_before_input_can_use_stream_inner(
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -564,7 +576,9 @@ async fn terminal_attach_ok_with_wrong_request_id_is_ignored_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -642,7 +656,9 @@ async fn stale_attach_ok_with_existing_handle_does_not_rebind_stream_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -736,7 +752,9 @@ async fn create_terminal_sends_create_and_waits_for_attach_ok_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -840,7 +858,9 @@ async fn create_terminal_replaces_existing_handle_after_matching_attach_ok_inner
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -902,7 +922,9 @@ async fn pending_create_is_discarded_when_connection_drops_before_response_inner
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -968,7 +990,9 @@ async fn terminal_create_err_removes_pending_create_and_surfaces_error_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -1027,7 +1051,9 @@ async fn terminal_create_ok_after_err_for_known_terminal_is_ignored_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -1107,7 +1133,9 @@ async fn hello_resume_stale_falls_back_to_attach_original_terminal_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -1169,7 +1197,9 @@ async fn bye_resume_stale_clears_resume_token_before_retry_inner() {
 
     let builder = SessionBuilder::new(
         ClientIdentity {
-            client_id: ClientId(cli_pocket_crypto::Identity::from_keypair(&client_keypair).host_id),
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
             keypair: client_keypair,
         },
         SessionConfig {
@@ -3259,7 +3289,7 @@ fn terminal_info(terminal: TerminalId) -> TerminalInfo {
 fn server_info() -> ServerInfo {
     ServerInfo {
         server_version: "test-daemon".to_owned(),
-        host_label: Some("lab".to_owned()),
+        server_label: Some("lab".to_owned()),
     }
 }
 

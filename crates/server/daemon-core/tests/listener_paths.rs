@@ -141,7 +141,7 @@ impl ListenerFixture {
             client_db: Arc::clone(&client_db),
             server_info: ServerInfo {
                 server_version: "test".to_string(),
-                host_label: None,
+                server_label: None,
             },
         };
         let (accepted_tx, mut accepted_rx) =

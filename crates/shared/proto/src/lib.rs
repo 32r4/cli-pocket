@@ -20,7 +20,7 @@ pub use snapshot::{
     AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs, Snapshot, TerminalModes,
 };
 pub use terminal::{
-    ClientId, ExitInfo, HostId, KillSignal, SessionId, StreamId, StreamSeq, TerminalCreateParams,
+    ClientId, ExitInfo, KillSignal, ServerId, SessionId, StreamId, StreamSeq, TerminalCreateParams,
     TerminalId, TerminalInfo,
 };
 

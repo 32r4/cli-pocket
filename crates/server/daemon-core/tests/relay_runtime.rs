@@ -12,7 +12,7 @@ use cli_pocket_proto::codec::{
 };
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::Hello;
-use cli_pocket_proto::{ClientId, HostId, RelayCtrl, PROTOCOL_VERSION};
+use cli_pocket_proto::{ClientId, RelayCtrl, ServerId, PROTOCOL_VERSION};
 use cli_pocket_relay_core::http::router;
 use cli_pocket_relay_core::{RelayConfig as RelayServerConfig, RelayServer};
 use futures_util::{SinkExt, StreamExt};
@@ -26,13 +26,13 @@ use uuid::Uuid;
 async fn daemon_registers_with_relay() {
     let relay = RelayFixture::start().await;
     let mut daemon = DaemonFixture::boot(relay.addr).await;
-    let host_id = daemon.host_id();
+    let server_id = daemon.server_id();
 
     daemon.start().await.expect("start daemon");
 
     let registered = timeout(Duration::from_secs(5), async {
         loop {
-            if relay.server.state.registry.get(&host_id).is_some() {
+            if relay.server.state.registry.get(&server_id).is_some() {
                 break;
             }
             sleep(Duration::from_millis(50)).await;
@@ -42,7 +42,7 @@ async fn daemon_registers_with_relay() {
 
     assert!(
         registered.is_ok(),
-        "daemon host id should appear in relay registry"
+        "daemon server id should appear in relay registry"
     );
 
     daemon.shutdown().await;
@@ -52,22 +52,23 @@ async fn daemon_registers_with_relay() {
 async fn relay_transport_reaches_daemon_handshake() {
     let relay = RelayFixture::start().await;
     let mut daemon = DaemonFixture::boot(relay.addr).await;
-    let host_id = daemon.host_id();
+    let server_id = daemon.server_id();
     let client_keypair = KeyPair::generate().expect("client keypair");
 
     daemon.add_paired_client(&client_keypair).await;
     daemon.start().await.expect("start daemon");
-    daemon.wait_until_registered(&relay, host_id).await;
+    daemon.wait_until_registered(&relay, server_id).await;
 
     let (mut client_ws, _) = tokio_tungstenite::connect_async(format!(
-        "ws://{}/ws/client?host={}",
-        relay.addr, host_id.0
+        "ws://{}/ws/client?server={}",
+        relay.addr, server_id.0
     ))
     .await
     .expect("connect client relay socket");
     client_ws
         .send(Message::Binary(
-            encode_relay_ctrl(&RelayCtrl::ClientConnect { host_id }).expect("encode pair request"),
+            encode_relay_ctrl(&RelayCtrl::ClientConnect { server_id })
+                .expect("encode pair request"),
         ))
         .await
         .expect("send pair request");
@@ -161,11 +162,11 @@ impl DaemonFixture {
                 clients_path: dir.path().join("clients.json"),
                 revoked_path: dir.path().join("revoked.json"),
             },
-            relay: Some(RelayConfig {
-                url: format!("ws://{relay_addr}/ws/host"),
+            relay: RelayConfig {
+                base_url: format!("ws://{relay_addr}"),
                 psk_hex: String::new(),
-                host_token: None,
-            }),
+                server_auth_token: None,
+            },
             app: AppConfig::default(),
             limits: LimitsConfig::default(),
         };
@@ -173,8 +174,8 @@ impl DaemonFixture {
         Self { daemon, _dir: dir }
     }
 
-    fn host_id(&self) -> HostId {
-        self.daemon.identity.host_id
+    fn server_id(&self) -> ServerId {
+        self.daemon.identity.server_id
     }
 
     fn public_key(&self) -> [u8; 32] {
@@ -197,10 +198,10 @@ impl DaemonFixture {
         self.daemon.start().await
     }
 
-    async fn wait_until_registered(&self, relay: &RelayFixture, host_id: HostId) {
+    async fn wait_until_registered(&self, relay: &RelayFixture, server_id: ServerId) {
         timeout(Duration::from_secs(5), async {
             loop {
-                if relay.server.state.registry.get(&host_id).is_some() {
+                if relay.server.state.registry.get(&server_id).is_some() {
                     break;
                 }
                 sleep(Duration::from_millis(50)).await;

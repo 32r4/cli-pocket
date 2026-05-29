@@ -21,11 +21,11 @@ async fn echo_roundtrip_with_subprotocol() {
                     req.headers()
                         .get("Sec-WebSocket-Protocol")
                         .and_then(|value| value.to_str().ok()),
-                    Some("cli-pocket-host/v1")
+                    Some("cli-pocket-server/v1")
                 );
                 resp.headers_mut().insert(
                     "Sec-WebSocket-Protocol",
-                    "cli-pocket-host/v1".parse().unwrap(),
+                    "cli-pocket-server/v1".parse().unwrap(),
                 );
                 Ok(resp)
             },
@@ -41,7 +41,7 @@ async fn echo_roundtrip_with_subprotocol() {
     });
 
     let url = format!("ws://{addr}");
-    let mut transport = TokioWsTransport::connect(&url, Some("cli-pocket-host/v1"))
+    let mut transport = TokioWsTransport::connect(&url, Some("cli-pocket-server/v1"))
         .await
         .unwrap();
     transport.send(b"hello".to_vec()).await.unwrap();

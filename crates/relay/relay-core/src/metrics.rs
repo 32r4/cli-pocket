@@ -34,15 +34,15 @@ pub fn init() -> PrometheusHandle {
             );
             describe_counter!(
                 "cli_pocket_relay_pair_close_total",
-                "Total pairs closed, labelled by `reason` (normal, host_gone, client_gone, stuck, ...)."
+                "Total pairs closed, labelled by `reason` (normal, server_gone, client_gone, stuck, ...)."
             );
             describe_counter!(
                 "cli_pocket_relay_bytes_total",
-                "Total ciphertext bytes forwarded, labelled by `direction` (host_to_client, client_to_host)."
+                "Total ciphertext bytes forwarded, labelled by `direction` (server_to_client, client_to_server)."
             );
             describe_gauge!(
-                "cli_pocket_relay_hosts_current",
-                "Currently registered hosts."
+                "cli_pocket_relay_servers_current",
+                "Currently registered servers."
             );
             describe_gauge!("cli_pocket_relay_pairs_current", "Currently live pairs.");
 

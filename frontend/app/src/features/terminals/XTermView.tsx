@@ -2,15 +2,15 @@ import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
 
 export function XTermView({ title }: { title: string }) {
-	const hostRef = useRef<HTMLDivElement | null>(null);
+	const serverRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
-		if (hostRef.current === null) {
+		if (serverRef.current === null) {
 			return;
 		}
 
 		if (import.meta.env.VITEST) {
-			hostRef.current.textContent = `${title}\r\ncli-pocket`;
+			serverRef.current.textContent = `${title}\r\ncli-pocket`;
 			return;
 		}
 
@@ -23,7 +23,7 @@ export function XTermView({ title }: { title: string }) {
 
 		void import("@xterm/xterm")
 			.then(({ Terminal }) => {
-				if (cancelled || hostRef.current === null) {
+				if (cancelled || serverRef.current === null) {
 					return;
 				}
 
@@ -32,12 +32,12 @@ export function XTermView({ title }: { title: string }) {
 					rows: 32,
 				});
 
-				terminal.open(hostRef.current);
+				terminal.open(serverRef.current);
 				terminal.write(`${title}\r\ncli-pocket\r\n`);
 			})
 			.catch(() => {
-				if (hostRef.current !== null) {
-					hostRef.current.textContent = "terminal unavailable";
+				if (serverRef.current !== null) {
+					serverRef.current.textContent = "terminal unavailable";
 				}
 			});
 
@@ -47,5 +47,5 @@ export function XTermView({ title }: { title: string }) {
 		};
 	}, [title]);
 
-	return <div ref={hostRef} className="xterm-host" />;
+	return <div ref={serverRef} className="xterm-server" />;
 }

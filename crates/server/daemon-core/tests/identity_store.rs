@@ -11,7 +11,7 @@ fn first_run_generates_then_persists() {
 
     let id2 = load_or_create(&path).unwrap();
     assert_eq!(
-        id1.host_id, id2.host_id,
+        id1.server_id, id2.server_id,
         "second load returns same identity"
     );
     assert_eq!(id1.keypair.public, id2.keypair.public);

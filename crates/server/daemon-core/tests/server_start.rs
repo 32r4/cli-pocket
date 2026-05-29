@@ -38,5 +38,6 @@ fn test_config(base: &std::path::Path, listen: SocketAddr) -> DaemonConfig {
     cfg.security.identity_path = base.join("identity.json");
     cfg.security.clients_path = base.join("clients.json");
     cfg.security.revoked_path = base.join("revoked.json");
+    "ws://127.0.0.1:1".clone_into(&mut cfg.relay.base_url);
     cfg
 }

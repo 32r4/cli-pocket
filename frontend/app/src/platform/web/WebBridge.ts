@@ -34,7 +34,7 @@ export class WebBridge implements ClientBridge {
 		await connect_client({
 			kind: "relay",
 			relay_url: config.relayUrl,
-			host_id: config.hostId,
+			server_id: config.serverId,
 			psk_hex: config.pskHex,
 			server_public_hex: config.serverPublicHex,
 			resume_token_hex: config.resumeTokenHex ?? null,

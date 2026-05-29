@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 interface ShellProps {
 	children: ReactNode;
-	activeHostLabel: string | null;
+	activeServerLabel: string | null;
 	connectionState: "idle" | "connecting" | "connected" | "failed";
 	isOverlayOpen: boolean;
 	onOpenOverlay: () => void;
@@ -11,7 +11,7 @@ interface ShellProps {
 
 export function Shell({
 	children,
-	activeHostLabel,
+	activeServerLabel,
 	connectionState,
 	isOverlayOpen,
 	onOpenOverlay,
@@ -42,7 +42,7 @@ export function Shell({
 					</span>
 				</button>
 				<div className="app-shell__host">
-					<strong>{activeHostLabel ?? "No host"}</strong>
+					<strong>{activeServerLabel ?? "No server"}</strong>
 					<span className="sr-only">{`Status ${indicatorState}`}</span>
 					<span
 						className="app-shell__status-light"

@@ -1,14 +1,17 @@
 use cli_pocket_proto::codec::{decode_relay, encode_relay_ctrl, RelayWire};
-use cli_pocket_proto::{HostId, PairId, RelayCtrl};
+use cli_pocket_proto::{PairId, RelayCtrl, ServerId};
 
 use crate::{ClientError, ClientResult, Transport};
 
 pub async fn open_client_pair<T: Transport>(
     transport: &mut T,
-    host_id: HostId,
+    server_id: ServerId,
 ) -> ClientResult<PairId> {
     transport
-        .send(encode_relay_ctrl(&RelayCtrl::ClientConnect { host_id }).map_err(ClientError::from)?)
+        .send(
+            encode_relay_ctrl(&RelayCtrl::ClientConnect { server_id })
+                .map_err(ClientError::from)?,
+        )
         .await?;
 
     match recv_ctrl(transport).await? {
@@ -31,7 +34,7 @@ pub async fn maybe_handle_pair_close<T: Transport>(
     match decode_relay(&bytes) {
         Ok(RelayWire::Ctrl(ctrl)) => Ok(Some(ctrl)),
         Ok(RelayWire::Data(_)) => Err(ClientError::Transport(
-            "unexpected relay host data on client leg".to_owned(),
+            "unexpected relay server data on client leg".to_owned(),
         )),
         Err(_) => Err(ClientError::Transport(
             "unexpected relay control frame after pair open".to_owned(),

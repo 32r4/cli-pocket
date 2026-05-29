@@ -64,7 +64,7 @@ async fn revocation_drops_live_session() {
     let session_mgr = Arc::new(SessionManager::new(4));
     let server_info = ServerInfo {
         server_version: "test".to_string(),
-        host_label: None,
+        server_label: None,
     };
 
     let deps = ConnectionDeps {

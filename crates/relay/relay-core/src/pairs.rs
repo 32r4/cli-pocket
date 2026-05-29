@@ -7,20 +7,20 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use cli_pocket_proto::{HostId, PairCloseReason, PairId, RelayCtrl};
+use cli_pocket_proto::{PairCloseReason, PairId, RelayCtrl, ServerId};
 use futures_util::future::{BoxFuture, FutureExt};
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
 use crate::caps::PairTicket;
 use crate::guillotine::{PairHandle, PairSweep};
-use crate::registry::HostMsg;
+use crate::registry::ServerMsg;
 
 /// Convenience bundle returned by the pair-opening path so callers can stash
 /// the two writer-task senders together.
 pub struct PairEnds {
-    pub to_host: mpsc::Sender<HostMsg>,
-    pub to_client: mpsc::Sender<HostMsg>,
+    pub to_server: mpsc::Sender<ServerMsg>,
+    pub to_client: mpsc::Sender<ServerMsg>,
 }
 
 /// A live pair. Identifies the participants and exposes the per-side senders
@@ -28,14 +28,14 @@ pub struct PairEnds {
 /// (Task E6) to evict stuck pairs.
 pub struct Pair {
     pub pair_id: PairId,
-    pub host_id: HostId,
+    pub server_id: ServerId,
     pub created_at: Instant,
     pub last_progress: Mutex<Instant>,
     _ticket: PairTicket,
-    /// Sender into the host-WS writer task (Data direction).
-    pub host_tx: mpsc::Sender<HostMsg>,
+    /// Sender into the server-WS writer task (Data direction).
+    pub server_tx: mpsc::Sender<ServerMsg>,
     /// Sender into the client-WS writer task (Data direction).
-    pub client_tx: mpsc::Sender<HostMsg>,
+    pub client_tx: mpsc::Sender<ServerMsg>,
 }
 
 impl Pair {
@@ -44,19 +44,19 @@ impl Pair {
     #[must_use]
     pub fn new(
         pair_id: PairId,
-        host_id: HostId,
+        server_id: ServerId,
         ticket: PairTicket,
-        host_tx: mpsc::Sender<HostMsg>,
-        client_tx: mpsc::Sender<HostMsg>,
+        server_tx: mpsc::Sender<ServerMsg>,
+        client_tx: mpsc::Sender<ServerMsg>,
     ) -> Self {
         let now = Instant::now();
         Self {
             pair_id,
-            host_id,
+            server_id,
             created_at: now,
             last_progress: Mutex::new(now),
             _ticket: ticket,
-            host_tx,
+            server_tx,
             client_tx,
         }
     }
@@ -145,10 +145,13 @@ impl PairHandle for Pair {
             // Best-effort: a full or closed channel means the peer is already
             // gone, so we just drop the signal silently.
             let _ = self
-                .host_tx
-                .send(HostMsg::Ctrl(Bytes::from(frame.clone())))
+                .server_tx
+                .send(ServerMsg::Ctrl(Bytes::from(frame.clone())))
                 .await;
-            let _ = self.client_tx.send(HostMsg::Ctrl(Bytes::from(frame))).await;
+            let _ = self
+                .client_tx
+                .send(ServerMsg::Ctrl(Bytes::from(frame)))
+                .await;
         }
         .boxed()
     }

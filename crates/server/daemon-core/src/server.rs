@@ -51,7 +51,7 @@ impl Daemon {
 
         let server_info = ServerInfo {
             server_version: env!("CARGO_PKG_VERSION").to_string(),
-            host_label: detect_host_label(),
+            server_label: detect_server_label(),
         };
 
         Ok(Self {
@@ -67,20 +67,20 @@ impl Daemon {
         })
     }
 
-    /// Start the WS listener on the configured address.
-    ///
-    /// If a relay is configured in `config.relay`, also spawn the relay
+    /// Start the WS listener on the configured address and spawn the relay
     /// dialer task.
     pub async fn start(&mut self) -> crate::DaemonResult<()> {
         let addr = SocketAddr::new(self.config.listen.addr, self.config.listen.port);
         let listener = TcpListener::bind(addr).await?;
 
         let identity = Arc::new(self.identity.keypair.clone());
-        let relay_psk = self.config.relay.as_ref().and_then(|r| {
-            let bytes = hex::decode(&r.psk_hex).ok()?;
-            let arr: [u8; 32] = bytes.try_into().ok()?;
-            Some(Arc::new(arr))
-        });
+        let relay_psk = {
+            let bytes = hex::decode(&self.config.relay.psk_hex).ok();
+            bytes.and_then(|bytes| {
+                let arr: [u8; 32] = bytes.try_into().ok()?;
+                Some(Arc::new(arr))
+            })
+        };
         let accept_deps = AcceptDeps {
             identity,
             relay_psk: relay_psk.clone(),
@@ -108,32 +108,30 @@ impl Daemon {
         });
         self.listener_handle = Some(handle);
 
-        if let Some(relay_config) = self.config.relay.clone() {
-            let host_id = self.identity.host_id;
-            let identity_keypair = self.identity.keypair.clone();
-            let (relay_tx, mut relay_rx) =
-                mpsc::channel::<AcceptedTransport<crate::relay_dialer::PairTransport>>(32);
-            let relay_deps = accept_deps.clone();
-            let handle = tokio::spawn(async move {
-                while let Some(accepted) = relay_rx.recv().await {
-                    let deps = relay_deps.clone();
-                    tokio::spawn(async move {
-                        let _ = run_accepted_transport(accepted, deps).await;
-                    });
-                }
-            });
-            self.relay_accept_handle = Some(handle);
+        let relay_config = self.config.relay.clone();
+        let server_id = self.identity.server_id;
+        let identity_keypair = self.identity.keypair.clone();
+        let (relay_tx, mut relay_rx) =
+            mpsc::channel::<AcceptedTransport<crate::relay_dialer::PairTransport>>(32);
+        let relay_deps = accept_deps.clone();
+        let handle = tokio::spawn(async move {
+            while let Some(accepted) = relay_rx.recv().await {
+                let deps = relay_deps.clone();
+                tokio::spawn(async move {
+                    let _ = run_accepted_transport(accepted, deps).await;
+                });
+            }
+        });
+        self.relay_accept_handle = Some(handle);
 
-            let handle = tokio::spawn(async move {
-                if let Err(e) =
-                    crate::relay_dialer::run(relay_config, host_id, identity_keypair, relay_tx)
-                        .await
-                {
-                    error!(error = %e, "relay dialer exited with error");
-                }
-            });
-            self.relay_handle = Some(handle);
-        }
+        let handle = tokio::spawn(async move {
+            if let Err(e) =
+                crate::relay_dialer::run(relay_config, server_id, identity_keypair, relay_tx).await
+            {
+                error!(error = %e, "relay dialer exited with error");
+            }
+        });
+        self.relay_handle = Some(handle);
 
         info!("daemon started");
         Ok(())
@@ -161,7 +159,7 @@ impl Daemon {
     }
 }
 
-fn detect_host_label() -> Option<String> {
+fn detect_server_label() -> Option<String> {
     for key in ["COMPUTERNAME", "HOSTNAME"] {
         let value = env::var(key).ok()?;
         let trimmed = value.trim();

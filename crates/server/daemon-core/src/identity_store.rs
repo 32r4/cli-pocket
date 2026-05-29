@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use cli_pocket_crypto::{Identity, KeyPair};
-use cli_pocket_proto::HostId;
+use cli_pocket_proto::ServerId;
 
 #[derive(Debug, Clone)]
 pub struct DaemonIdentity {
-    pub host_id: HostId,
+    pub server_id: ServerId,
     pub keypair: KeyPair,
 }
 
@@ -23,7 +23,7 @@ pub fn load_or_create(path: &Path) -> crate::DaemonResult<DaemonIdentity> {
     };
 
     Ok(DaemonIdentity {
-        host_id: HostId(identity.host_id),
+        server_id: ServerId(identity.server_id),
         keypair: identity.keypair(),
     })
 }

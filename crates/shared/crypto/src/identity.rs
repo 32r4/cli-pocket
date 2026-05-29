@@ -63,8 +63,8 @@ fn noise_params() -> Result<snow::params::NoiseParams, IdentityError> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
     pub version: u32,
-    #[serde(rename = "host_id")]
-    pub host_id: Uuid,
+    #[serde(rename = "server_id")]
+    pub server_id: Uuid,
     pub created_at: String,
     #[serde(rename = "static_public_key", with = "key32_b64")]
     pub static_public: [u8; 32],
@@ -124,7 +124,7 @@ impl Identity {
     pub fn from_keypair(kp: &KeyPair) -> Self {
         Self {
             version: 1,
-            host_id: Uuid::now_v7(),
+            server_id: Uuid::now_v7(),
             created_at: now_rfc3339(),
             static_public: kp.public,
             static_secret: Secret::new(KeyBytes32(*kp.secret.expose())),
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn identity_roundtrips_through_file() {
         let dir = tempdir().expect("temp dir");
-        let path = dir.path().join("host_identity.json");
+        let path = dir.path().join("server_identity.json");
         let kp = KeyPair::generate().expect("generate keypair");
         let id = Identity::from_keypair(&kp);
 
@@ -311,7 +311,7 @@ mod tests {
 
         assert_eq!(back.static_public, id.static_public);
         assert_eq!(back.static_secret.expose().0, id.static_secret.expose().0);
-        assert_eq!(back.host_id, id.host_id);
+        assert_eq!(back.server_id, id.server_id);
     }
 
     #[cfg(unix)]
@@ -321,7 +321,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempdir().expect("temp dir");
-        let path = dir.path().join("host_identity.json");
+        let path = dir.path().join("server_identity.json");
         let id = Identity::from_keypair(&KeyPair::generate().expect("generate keypair"));
         id.save(&path).expect("save identity");
 
@@ -340,10 +340,10 @@ mod tests {
     }
 
     #[test]
-    fn generate_produces_identity_with_host_id_field() {
+    fn generate_produces_identity_with_server_id_field() {
         let id = Identity::generate().expect("generate identity");
         let json = serde_json::to_value(&id).expect("serialize identity");
-        assert!(json.get("host_id").is_some());
+        assert!(json.get("server_id").is_some());
         assert!(json.get("id").is_none());
     }
 }

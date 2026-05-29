@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use cli_pocket_proto::codec::{decode_relay, RelayWire};
-use cli_pocket_proto::{HostId, PairCloseReason, PairId, RelayCtrl, RelayData};
+use cli_pocket_proto::{PairCloseReason, PairId, RelayCtrl, RelayData, ServerId};
 use futures_util::{SinkExt, StreamExt};
 use metrics::{counter, gauge};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
-use crate::caps::{Caps, HostTicket};
+use crate::caps::{Caps, ServerTicket};
 use crate::pairs::Pair;
-use crate::registry::{HostMsg, HostRegistry, HostSlot};
+use crate::registry::{ServerMsg, ServerRegistry, ServerSlot};
 
 const SOCKET_QUEUE_CAPACITY: usize = 32;
 
@@ -19,9 +19,9 @@ fn usize_gauge_value(value: usize) -> f64 {
     f64::from(u32::try_from(value).unwrap_or(u32::MAX))
 }
 
-pub async fn run_host_side<WS>(
+pub async fn run_server_side<WS>(
     ws: WS,
-    registry: HostRegistry,
+    registry: ServerRegistry,
     pairs: crate::pairs::PairManager,
     caps: Caps,
 ) -> crate::RelayResult<()>
@@ -34,25 +34,25 @@ where
 {
     let (sink, mut stream) = ws.split();
     let first = read_binary_frame(&mut stream).await?;
-    let RelayWire::Ctrl(RelayCtrl::HostRegister {
-        host_id,
-        host_pubkey: _,
+    let RelayWire::Ctrl(RelayCtrl::ServerRegister {
+        server_id,
+        server_pubkey: _,
         signature: _,
     }) = decode_relay(&first).map_err(|err| crate::codec_err_to_protocol(&err))?
     else {
         return Err(crate::RelayError::Protocol(
-            "expected HostRegister as first host frame",
+            "expected ServerRegister as first server frame",
         ));
     };
 
-    let host_ticket = caps.try_add_host()?;
+    let server_ticket = caps.try_add_server()?;
     let (tx, rx) = mpsc::channel(SOCKET_QUEUE_CAPACITY);
     let writer = tokio::spawn(writer_loop(sink, rx));
-    let registration = register_host(&registry, host_id, tx, host_ticket)?;
-    let ok_frame = crate::encode_ctrl_frame(&RelayCtrl::HostRegisterOk);
-    send_host_msg(&registration.tx(), HostMsg::Ctrl(Bytes::from(ok_frame))).await?;
+    let registration = register_server(&registry, server_id, tx, server_ticket)?;
+    let ok_frame = crate::encode_ctrl_frame(&RelayCtrl::ServerRegisterOk);
+    send_server_msg(&registration.tx(), ServerMsg::Ctrl(Bytes::from(ok_frame))).await?;
 
-    let result = host_read_loop(stream, host_id, pairs, registration.tx()).await;
+    let result = server_read_loop(stream, server_id, pairs, registration.tx()).await;
 
     drop(registration);
     let _ = writer.await;
@@ -61,8 +61,8 @@ where
 
 pub async fn run_client_side<WS>(
     ws: WS,
-    target_host: HostId,
-    registry: HostRegistry,
+    target_server: ServerId,
+    registry: ServerRegistry,
     pairs: crate::pairs::PairManager,
     caps: Caps,
 ) -> crate::RelayResult<()>
@@ -74,33 +74,33 @@ where
         + 'static,
 {
     let (sink, mut stream) = ws.split();
+    let (client_tx, client_rx) = mpsc::channel(SOCKET_QUEUE_CAPACITY);
+    let writer = tokio::spawn(client_writer_loop(sink, client_rx));
     let first = read_binary_frame(&mut stream).await?;
-    let RelayWire::Ctrl(RelayCtrl::ClientConnect { host_id }) =
+    let RelayWire::Ctrl(RelayCtrl::ClientConnect { server_id }) =
         decode_relay(&first).map_err(|err| crate::codec_err_to_protocol(&err))?
     else {
         return Err(crate::RelayError::Protocol(
             "expected ClientConnect as first client frame",
         ));
     };
-    if host_id != target_host {
+    if server_id != target_server {
         return Err(crate::RelayError::Protocol(
-            "client pair request host mismatch",
+            "client pair request server mismatch",
         ));
     }
 
-    let host_tx = registry
-        .get(&target_host)
-        .ok_or(crate::RelayError::Protocol("target host not registered"))?;
+    let server_tx = registry
+        .get(&target_server)
+        .ok_or(crate::RelayError::Protocol("target server not registered"))?;
     let pair_ticket = caps.try_add_pair()?;
     let pair_id = PairId(Uuid::now_v7());
-    let (client_tx, client_rx) = mpsc::channel(SOCKET_QUEUE_CAPACITY);
-    let writer = tokio::spawn(writer_loop(sink, client_rx));
 
     let pair = Arc::new(Pair::new(
         pair_id,
-        target_host,
+        target_server,
         pair_ticket,
-        host_tx.clone(),
+        server_tx.clone(),
         client_tx.clone(),
     ));
     pairs.insert(Arc::clone(&pair));
@@ -108,16 +108,16 @@ where
     counter!("cli_pocket_relay_pairs_total").increment(1);
     gauge!("cli_pocket_relay_pairs_current").set(usize_gauge_value(pairs.list_for_sweep().len()));
 
-    send_host_msg(
-        &host_tx,
-        HostMsg::Ctrl(Bytes::from(crate::encode_ctrl_frame(
+    send_server_msg(
+        &server_tx,
+        ServerMsg::Ctrl(Bytes::from(crate::encode_ctrl_frame(
             &RelayCtrl::PairInbound { pair_id },
         ))),
     )
     .await?;
-    send_host_msg(
+    send_server_msg(
         &client_tx,
-        HostMsg::Ctrl(Bytes::from(crate::encode_ctrl_frame(
+        ServerMsg::Ctrl(Bytes::from(crate::encode_ctrl_frame(
             &RelayCtrl::PairOpen { pair_id },
         ))),
     )
@@ -130,11 +130,11 @@ where
     result
 }
 
-async fn host_read_loop<WS>(
+async fn server_read_loop<WS>(
     mut stream: WS,
-    host_id: HostId,
+    server_id: ServerId,
     pairs: crate::pairs::PairManager,
-    host_tx: mpsc::Sender<HostMsg>,
+    server_tx: mpsc::Sender<ServerMsg>,
 ) -> crate::RelayResult<()>
 where
     WS: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
@@ -155,15 +155,15 @@ where
                         let pair = pairs
                             .get(&pair_id)
                             .ok_or(crate::RelayError::Protocol("unknown pair id"))?;
-                        if pair.host_id != host_id {
-                            return Err(crate::RelayError::Protocol("pair routed to wrong host"));
+                        if pair.server_id != server_id {
+                            return Err(crate::RelayError::Protocol("pair routed to wrong server"));
                         }
                         pair.touch();
-                        counter!("cli_pocket_relay_bytes_total", "direction" => "host_to_client")
+                        counter!("cli_pocket_relay_bytes_total", "direction" => "server_to_client")
                             .increment(bytes.len() as u64);
-                        send_host_msg(
+                        send_server_msg(
                             &pair.client_tx,
-                            HostMsg::Data(Bytes::from(crate::encode_data_frame(
+                            ServerMsg::Data(Bytes::from(crate::encode_data_frame(
                                 &RelayData::Forward { pair_id, bytes },
                             ))),
                         )
@@ -181,15 +181,15 @@ where
         }
     }
 
-    let _ = host_tx.send(HostMsg::Close).await;
+    let _ = server_tx.send(ServerMsg::Close).await;
     let affected_pairs: Vec<PairId> = pairs
         .list_for_sweep()
         .into_iter()
-        .filter(|pair| pair.host_id == host_id)
+        .filter(|pair| pair.server_id == server_id)
         .map(|pair| pair.pair_id)
         .collect();
     for pair_id in affected_pairs {
-        close_pair(&pairs, pair_id, PairCloseReason::HostGone).await;
+        close_pair(&pairs, pair_id, PairCloseReason::ServerGone).await;
     }
     Ok(())
 }
@@ -216,11 +216,11 @@ where
                 }
 
                 pair.touch();
-                counter!("cli_pocket_relay_bytes_total", "direction" => "client_to_host")
+                counter!("cli_pocket_relay_bytes_total", "direction" => "client_to_server")
                     .increment(bytes.len() as u64);
-                send_host_msg(
-                    &pair.host_tx,
-                    HostMsg::Data(Bytes::from(crate::encode_data_frame(&RelayData::Forward {
+                send_server_msg(
+                    &pair.server_tx,
+                    ServerMsg::Data(Bytes::from(crate::encode_data_frame(&RelayData::Forward {
                         pair_id: pair.pair_id,
                         bytes: bytes.clone().into(),
                     }))),
@@ -242,18 +242,49 @@ where
 
 async fn writer_loop<WS>(
     mut sink: futures_util::stream::SplitSink<WS, Message>,
-    mut rx: mpsc::Receiver<HostMsg>,
+    mut rx: mpsc::Receiver<ServerMsg>,
 ) where
     WS: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
 {
     while let Some(msg) = rx.recv().await {
         match msg {
-            HostMsg::Ctrl(bytes) | HostMsg::Data(bytes) => {
+            ServerMsg::Ctrl(bytes) | ServerMsg::Data(bytes) => {
                 if sink.send(Message::Binary(bytes.to_vec())).await.is_err() {
                     break;
                 }
             }
-            HostMsg::Close => {
+            ServerMsg::Close => {
+                let _ = sink.send(Message::Close(None)).await;
+                break;
+            }
+        }
+    }
+    let _ = sink.close().await;
+}
+
+async fn client_writer_loop<WS>(
+    mut sink: futures_util::stream::SplitSink<WS, Message>,
+    mut rx: mpsc::Receiver<ServerMsg>,
+) where
+    WS: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+{
+    while let Some(msg) = rx.recv().await {
+        match msg {
+            ServerMsg::Ctrl(bytes) => {
+                if sink.send(Message::Binary(bytes.to_vec())).await.is_err() {
+                    break;
+                }
+            }
+            ServerMsg::Data(bytes) => {
+                let payload = match decode_relay(&bytes) {
+                    Ok(RelayWire::Data(RelayData::Forward { bytes, .. })) => bytes,
+                    _ => break,
+                };
+                if sink.send(Message::Binary(payload.to_vec())).await.is_err() {
+                    break;
+                }
+            }
+            ServerMsg::Close => {
                 let _ = sink.send(Message::Close(None)).await;
                 break;
             }
@@ -294,29 +325,29 @@ async fn close_pair(pairs: &crate::pairs::PairManager, pair_id: PairId, reason: 
         pair_id,
         reason: reason.clone(),
     }));
-    let _ = pair.host_tx.send(HostMsg::Ctrl(frame.clone())).await;
-    let _ = pair.client_tx.send(HostMsg::Ctrl(frame)).await;
+    let _ = pair.server_tx.send(ServerMsg::Ctrl(frame.clone())).await;
+    let _ = pair.client_tx.send(ServerMsg::Ctrl(frame)).await;
     gauge!("cli_pocket_relay_pairs_current").set(usize_gauge_value(pairs.list_for_sweep().len()));
     counter!("cli_pocket_relay_pair_close_total", "reason" => close_reason_label(&reason))
         .increment(1);
 }
 
-fn register_host(
-    registry: &HostRegistry,
-    host_id: HostId,
-    tx: mpsc::Sender<HostMsg>,
-    ticket: HostTicket,
-) -> crate::RelayResult<RegisteredHost> {
-    let registration = registry.register(HostSlot::new(host_id, tx.clone()))?;
-    gauge!("cli_pocket_relay_hosts_current").set(usize_gauge_value(registry.list_ids().len()));
-    Ok(RegisteredHost {
+fn register_server(
+    registry: &ServerRegistry,
+    server_id: ServerId,
+    tx: mpsc::Sender<ServerMsg>,
+    ticket: ServerTicket,
+) -> crate::RelayResult<RegisteredServer> {
+    let registration = registry.register(ServerSlot::new(server_id, tx.clone()))?;
+    gauge!("cli_pocket_relay_servers_current").set(usize_gauge_value(registry.list_ids().len()));
+    Ok(RegisteredServer {
         _registration: registration,
         tx,
         _ticket: ticket,
     })
 }
 
-async fn send_host_msg(tx: &mpsc::Sender<HostMsg>, msg: HostMsg) -> crate::RelayResult<()> {
+async fn send_server_msg(tx: &mpsc::Sender<ServerMsg>, msg: ServerMsg) -> crate::RelayResult<()> {
     tx.send(msg)
         .await
         .map_err(|_| crate::RelayError::Protocol("relay peer writer closed"))
@@ -325,7 +356,7 @@ async fn send_host_msg(tx: &mpsc::Sender<HostMsg>, msg: HostMsg) -> crate::Relay
 fn close_reason_label(reason: &PairCloseReason) -> &'static str {
     match reason {
         PairCloseReason::Normal => "normal",
-        PairCloseReason::HostGone => "host_gone",
+        PairCloseReason::ServerGone => "server_gone",
         PairCloseReason::ClientGone => "client_gone",
         PairCloseReason::Stuck => "stuck",
         PairCloseReason::RelayShutdown => "relay_shutdown",
@@ -337,14 +368,14 @@ fn ws_err(err: &tokio_tungstenite::tungstenite::Error) -> crate::RelayError {
     crate::RelayError::Internal(format!("websocket error: {err}"))
 }
 
-struct RegisteredHost {
-    _registration: crate::registry::HostRegistration,
-    tx: mpsc::Sender<HostMsg>,
-    _ticket: HostTicket,
+struct RegisteredServer {
+    _registration: crate::registry::ServerRegistration,
+    tx: mpsc::Sender<ServerMsg>,
+    _ticket: ServerTicket,
 }
 
-impl RegisteredHost {
-    fn tx(&self) -> mpsc::Sender<HostMsg> {
+impl RegisteredServer {
+    fn tx(&self) -> mpsc::Sender<ServerMsg> {
         self.tx.clone()
     }
 }

@@ -1,4 +1,4 @@
-//! Relay core: bridges daemons (hosts) and clients with bounded capacity.
+//! Relay core: bridges daemons (servers) and clients with bounded capacity.
 
 pub mod caps;
 pub mod config;

@@ -5,12 +5,12 @@ export type OverlaySection = "settings" | "diagnostics" | "about";
 interface UiState {
 	isOverlayOpen: boolean;
 	overlaySection: OverlaySection;
-	selectedHostId: string | null;
+	selectedServerId: string | null;
 	isOverlayMenuRoot: boolean;
 	openOverlay: (section?: OverlaySection) => void;
 	closeOverlay: () => void;
 	setOverlaySection: (section: OverlaySection) => void;
-	setSelectedHostId: (hostId: string | null) => void;
+	setSelectedServerId: (serverId: string | null) => void;
 	showOverlayMenuRoot: () => void;
 }
 
@@ -18,7 +18,7 @@ export function createUiStateStore() {
 	return createStore<UiState>((set) => ({
 		isOverlayOpen: false,
 		overlaySection: "settings",
-		selectedHostId: null,
+		selectedServerId: null,
 		isOverlayMenuRoot: true,
 		openOverlay: (section = "settings") =>
 			set({
@@ -29,7 +29,7 @@ export function createUiStateStore() {
 		closeOverlay: () => set({ isOverlayOpen: false, isOverlayMenuRoot: true }),
 		setOverlaySection: (section) =>
 			set({ overlaySection: section, isOverlayMenuRoot: false }),
-		setSelectedHostId: (hostId) => set({ selectedHostId: hostId }),
+		setSelectedServerId: (serverId) => set({ selectedServerId: serverId }),
 		showOverlayMenuRoot: () => set({ isOverlayMenuRoot: true }),
 	}));
 }

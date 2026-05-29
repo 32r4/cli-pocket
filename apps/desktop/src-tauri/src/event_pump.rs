@@ -21,11 +21,11 @@ fn serialize_event(event: &ClientEvent) -> serde_json::Value {
         ClientEvent::Connecting => json!({ "kind": "Connecting" }),
         ClientEvent::Connected {
             session_id,
-            host_label,
+            server_label,
         } => json!({
             "kind": "Connected",
             "session_id": session_id.0.to_string(),
-            "host_label": host_label,
+            "server_label": server_label,
         }),
         ClientEvent::Disconnected { will_retry, reason } => json!({
             "kind": "Disconnected",

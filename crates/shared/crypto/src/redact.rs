@@ -3,7 +3,7 @@ use std::fmt;
 
 /// Wraps secret bytes (private keys, PSKs, SPAKE2 shares mid-flight).
 /// `Debug`/`Display` redact; `Serialize` writes the raw bytes since we do
-/// need to persist them in `host_identity.json`. The redaction protection is
+/// need to persist them in `server_identity.json`. The redaction protection is
 /// against accidental `tracing` / `eprintln!` leaks, not against serializers.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret<T>(T);

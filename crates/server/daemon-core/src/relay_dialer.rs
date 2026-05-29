@@ -5,15 +5,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use cli_pocket_crypto::KeyPair;
 use cli_pocket_proto::codec::{decode_relay, encode_relay_ctrl, encode_relay_data, RelayWire};
-use cli_pocket_proto::{HostId, PairId, RelayCtrl, RelayData};
+use cli_pocket_proto::{PairId, RelayCtrl, RelayData, ServerId};
 use cli_pocket_transport::{Transport, TransportError};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, Mutex};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{header::AUTHORIZATION, HeaderValue};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::info;
 
 use crate::accept::{AcceptedTransport, AcceptedTransportKind};
-use crate::config::RelayConfig;
+use crate::config::{relay_server_ws_url_for_server, RelayConfig};
 
 const PAIR_QUEUE_CAPACITY: usize = 32;
 
@@ -61,19 +63,30 @@ struct PairBridge {
 
 pub async fn run(
     config: RelayConfig,
-    host_id: HostId,
+    server_id: ServerId,
     identity: KeyPair,
     accepted_tx: mpsc::Sender<AcceptedTransport<PairTransport>>,
 ) -> crate::DaemonResult<()> {
+    let server_ws_url = relay_server_ws_url_for_server(&config.base_url, server_id)?;
     info!(
-        url = %config.url,
-        host_id = ?host_id,
-        host_token = config.host_token.is_some(),
+        url = %server_ws_url,
+        server_id = ?server_id,
+        server_auth_token = config.server_auth_token.is_some(),
         psk_len = config.psk_hex.len(),
         "relay dialer starting"
     );
 
-    let (ws, _) = tokio_tungstenite::connect_async(&config.url)
+    let mut request = server_ws_url
+        .into_client_request()
+        .map_err(|e| crate::DaemonError::Internal(format!("relay request build failed: {e}")))?;
+    if let Some(token) = config.server_auth_token.as_deref() {
+        let bearer = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
+            crate::DaemonError::Internal(format!("relay server_auth_token header invalid: {e}"))
+        })?;
+        request.headers_mut().insert(AUTHORIZATION, bearer);
+    }
+
+    let (ws, _) = tokio_tungstenite::connect_async(request)
         .await
         .map_err(|e| crate::DaemonError::Internal(format!("relay connect failed: {e}")))?;
     let (sink, mut stream) = ws.split();
@@ -82,9 +95,9 @@ pub async fn run(
     sink.lock()
         .await
         .send(Message::Binary(
-            encode_relay_ctrl(&RelayCtrl::HostRegister {
-                host_id,
-                host_pubkey: identity.public.to_vec().into(),
+            encode_relay_ctrl(&RelayCtrl::ServerRegister {
+                server_id,
+                server_pubkey: identity.public.to_vec().into(),
                 signature: Vec::new().into(),
             })
             .map_err(|e| crate::DaemonError::Internal(format!("encode register failed: {e}")))?,
@@ -94,10 +107,10 @@ pub async fn run(
 
     let first = next_binary(&mut stream).await?;
     match decode_relay(&first).map_err(|err| codec_err(&err))? {
-        RelayWire::Ctrl(RelayCtrl::HostRegisterOk) => {}
-        RelayWire::Ctrl(RelayCtrl::HostRegisterErr { reason }) => {
+        RelayWire::Ctrl(RelayCtrl::ServerRegisterOk) => {}
+        RelayWire::Ctrl(RelayCtrl::ServerRegisterErr { reason }) => {
             return Err(crate::DaemonError::Internal(format!(
-                "relay rejected host registration: {reason}"
+                "relay rejected server registration: {reason}"
             )));
         }
         other => {
@@ -112,7 +125,7 @@ pub async fn run(
         let mut interval = tokio::time::interval(Duration::from_secs(20));
         loop {
             interval.tick().await;
-            let frame = match encode_relay_ctrl(&RelayCtrl::HostHeartbeat) {
+            let frame = match encode_relay_ctrl(&RelayCtrl::ServerHeartbeat) {
                 Ok(frame) => frame,
                 Err(_) => break,
             };

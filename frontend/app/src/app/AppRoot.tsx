@@ -23,66 +23,66 @@ interface AppRootProps {
 	mobile?: boolean;
 }
 
-type HostModalMode = "closed" | "chooser" | "direct" | "pairing";
+type ServerModalMode = "closed" | "chooser" | "direct" | "pairing";
 
-interface HostFormState {
+interface ServerFormState {
 	kind: "direct" | "relay";
 	endpointUrl: string;
 	relayUrl: string;
-	hostId: string;
+	serverId: string;
 	relayPskHex: string;
 	serverPublicHex: string;
 }
 
-function toConnectConfig(host: DaemonRecord): ConnectConfig {
-	if (host.kind === "direct") {
+function toConnectConfig(server: DaemonRecord): ConnectConfig {
+	if (server.kind === "direct") {
 		return {
 			kind: "direct",
-			endpointUrl: host.endpointUrl,
-			resumeTokenHex: host.resumeTokenHex ?? undefined,
+			endpointUrl: server.endpointUrl,
+			resumeTokenHex: server.resumeTokenHex ?? undefined,
 		};
 	}
 
 	return {
 		kind: "relay",
-		relayUrl: host.relayUrl,
-		hostId: host.hostId,
-		pskHex: host.relayPskHex,
-		serverPublicHex: host.serverPublicHex,
-		resumeTokenHex: host.resumeTokenHex ?? undefined,
+		relayUrl: server.relayUrl,
+		serverId: server.serverId,
+		pskHex: server.relayPskHex,
+		serverPublicHex: server.serverPublicHex,
+		resumeTokenHex: server.resumeTokenHex ?? undefined,
 	};
 }
 
-function hostBadge(host: DaemonRecord) {
-	return host.kind === "direct" ? "Local" : "Remote";
+function serverBadge(server: DaemonRecord) {
+	return server.kind === "direct" ? "Local" : "Remote";
 }
 
-function endpointLabel(host: DaemonRecord) {
-	return host.kind === "direct" ? host.endpointUrl : host.relayUrl;
+function endpointLabel(server: DaemonRecord) {
+	return server.kind === "direct" ? server.endpointUrl : server.relayUrl;
 }
 
 function BackIcon() {
 	return <span className="back-button__icon" aria-hidden="true" />;
 }
 
-function initialFormState(host?: DaemonRecord): HostFormState {
-	if (host == null) {
+function initialFormState(server?: DaemonRecord): ServerFormState {
+	if (server == null) {
 		return {
 			kind: "direct",
 			endpointUrl: "ws://127.0.0.1:7842/session",
-			relayUrl: "wss://relay.example/ws/client?host=",
-			hostId: "",
+			relayUrl: "wss://relay.example/ws/client?server=",
+			serverId: "",
 			relayPskHex: "",
 			serverPublicHex: "",
 		};
 	}
 
-	if (host.kind === "direct") {
+	if (server.kind === "direct") {
 		return {
 			kind: "direct",
-			endpointUrl: host.endpointUrl,
+			endpointUrl: server.endpointUrl,
 			relayUrl: "",
-			hostId: host.id,
+			serverId: server.id,
 			relayPskHex: "",
 			serverPublicHex: "",
 		};
@@ -91,22 +91,22 @@ function initialFormState(host?: DaemonRecord): HostFormState {
 	return {
 		kind: "relay",
 		endpointUrl: "",
-		relayUrl: host.relayUrl,
-		hostId: host.hostId,
-		relayPskHex: host.relayPskHex,
-		serverPublicHex: host.serverPublicHex,
+		relayUrl: server.relayUrl,
+		serverId: server.serverId,
+		relayPskHex: server.relayPskHex,
+		serverPublicHex: server.serverPublicHex,
 	};
 }
 
-function makeHostRecord(
-	form: HostFormState,
-	currentHostId: string | null,
+function makeServerRecord(
+	form: ServerFormState,
+	currentServerId: string | null,
 ): DaemonRecord {
 	if (form.kind === "direct") {
-		const id = currentHostId ?? crypto.randomUUID();
+		const id = currentServerId ?? crypto.randomUUID();
 		return {
 			id,
-			label: currentHostId ?? id,
+			label: currentServerId ?? id,
 			kind: "direct",
 			endpointUrl: form.endpointUrl.trim(),
 			resumeTokenHex: null,
@@ -114,13 +114,13 @@ function makeHostRecord(
 		};
 	}
 
-	const hostId = form.hostId.trim() || crypto.randomUUID();
+	const serverId = form.serverId.trim() || crypto.randomUUID();
 	const serverPublicHex = form.serverPublicHex.trim() || "00".repeat(32);
 	return {
-		id: currentHostId ?? hostId,
-		label: currentHostId ?? hostId,
+		id: currentServerId ?? serverId,
+		label: currentServerId ?? serverId,
 		kind: "relay",
-		hostId,
+		serverId,
 		relayUrl: form.relayUrl.trim(),
 		relayPskHex: form.relayPskHex.trim() || "00".repeat(32),
 		serverPublicHex,
@@ -145,8 +145,9 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	const [bridge, setBridge] = useState<ClientBridge | null>(null);
 	const [bridgeError, setBridgeError] = useState<string | null>(null);
 	const [controller, setController] = useState<SessionController | null>(null);
-	const [hostModalMode, setHostModalMode] = useState<HostModalMode>("closed");
-	const [hostForm, setHostForm] = useState<HostFormState>(() =>
+	const [serverModalMode, setServerModalMode] =
+		useState<ServerModalMode>("closed");
+	const [serverForm, setServerForm] = useState<ServerFormState>(() =>
 		initialFormState(),
 	);
 	const [pairingUrl, setPairingUrl] = useState("");
@@ -154,15 +155,17 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
-	const autoConnectHostIdRef = useRef<string | null>(null);
+	const autoConnectServerIdRef = useRef<string | null>(null);
 
-	const selectedHost =
-		registry.daemons.find((daemon) => daemon.id === ui.selectedHostId) ?? null;
-	const activeHost =
+	const selectedServer =
+		registry.daemons.find((daemon) => daemon.id === ui.selectedServerId) ??
+		null;
+	const activeServer =
 		registry.daemons.find(
-			(daemon) => daemon.id === workspace.activeConnectionHostId,
+			(daemon) => daemon.id === workspace.activeConnectionServerId,
 		) ?? null;
-	const mainHost = selectedHost ?? activeHost ?? registry.daemons[0] ?? null;
+	const mainServer =
+		selectedServer ?? activeServer ?? registry.daemons[0] ?? null;
 	const activeSession =
 		workspace.terminals.find(
 			(terminal) => terminal.id === workspace.activeSessionId,
@@ -216,28 +219,32 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	}, []);
 
 	useEffect(() => {
-		const fallbackHostId = registry.daemons[0]?.id ?? null;
-		const selectedHostStillExists = registry.daemons.some(
-			(daemon) => daemon.id === ui.selectedHostId,
+		const fallbackServerId =
+			registry.selectedDaemonId ?? registry.daemons[0]?.id ?? null;
+		const selectedServerStillExists = registry.daemons.some(
+			(daemon) => daemon.id === ui.selectedServerId,
 		);
 
-		if (!selectedHostStillExists && ui.selectedHostId !== fallbackHostId) {
-			uiState.getState().setSelectedHostId(fallbackHostId);
+		if (
+			!selectedServerStillExists &&
+			ui.selectedServerId !== fallbackServerId
+		) {
+			uiState.getState().setSelectedServerId(fallbackServerId);
 		}
 
-		if (registry.selectedDaemonId == null && fallbackHostId != null) {
-			registry.selectDaemon(fallbackHostId);
+		if (registry.selectedDaemonId == null && fallbackServerId != null) {
+			registry.selectDaemon(fallbackServerId);
 		}
 	}, [
 		registry.daemons,
 		registry.selectedDaemonId,
-		ui.selectedHostId,
+		ui.selectedServerId,
 		registry,
 	]);
 
 	useEffect(() => {
-		if (mainHost == null) {
-			autoConnectHostIdRef.current = null;
+		if (mainServer == null) {
+			autoConnectServerIdRef.current = null;
 			return;
 		}
 		if (controller == null) {
@@ -249,27 +256,27 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		) {
 			return;
 		}
-		if (autoConnectHostIdRef.current === mainHost.id) {
+		if (autoConnectServerIdRef.current === mainServer.id) {
 			return;
 		}
 
-		autoConnectHostIdRef.current = mainHost.id;
+		autoConnectServerIdRef.current = mainServer.id;
 		setInlineError(null);
 
 		void controller
-			.connectAndCreate(mainHost.id, toConnectConfig(mainHost))
+			.connectAndCreate(mainServer.id, toConnectConfig(mainServer))
 			.catch((error: unknown) => {
 				const message =
 					error instanceof Error ? error.message : "connection failed";
 				workspaceState.getState().markConnectionFailed(message);
 				setInlineError(message);
 			});
-	}, [controller, mainHost, workspace.connectionState]);
+	}, [controller, mainServer, workspace.connectionState]);
 
 	useEffect(() => {
 		if (
 			bridge == null ||
-			workspace.activeConnectionHostId == null ||
+			workspace.activeConnectionServerId == null ||
 			workspace.connectionState !== "connected"
 		) {
 			return;
@@ -295,19 +302,19 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 						continue;
 					}
 					if (kind === "Connected") {
-						const hostLabel =
-							"host_label" in event && typeof event.host_label === "string"
-								? event.host_label.trim()
+						const serverLabel =
+							"server_label" in event && typeof event.server_label === "string"
+								? event.server_label.trim()
 								: "";
 						if (
-							hostLabel.length > 0 &&
-							workspaceState.getState().activeConnectionHostId != null
+							serverLabel.length > 0 &&
+							workspaceState.getState().activeConnectionServerId != null
 						) {
 							daemonRegistry
 								.getState()
 								.updateDaemonLabel(
-									workspaceState.getState().activeConnectionHostId as string,
-									hostLabel,
+									workspaceState.getState().activeConnectionServerId as string,
+									serverLabel,
 								);
 						}
 						workspaceState.getState().markConnected();
@@ -375,22 +382,22 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		return () => {
 			cancelled = true;
 		};
-	}, [bridge, workspace.activeConnectionHostId, workspace.connectionState]);
+	}, [bridge, workspace.activeConnectionServerId, workspace.connectionState]);
 
-	const connectHost = async (
-		host: DaemonRecord,
+	const connectServer = async (
+		server: DaemonRecord,
 		options?: { closeOverlay?: boolean },
 	) => {
 		setInlineError(null);
-		autoConnectHostIdRef.current = host.id;
-		registry.selectDaemon(host.id);
-		uiState.getState().setSelectedHostId(host.id);
+		autoConnectServerIdRef.current = server.id;
+		registry.selectDaemon(server.id);
+		uiState.getState().setSelectedServerId(server.id);
 		if (options?.closeOverlay === true) {
 			uiState.getState().closeOverlay();
 		}
 		if (
 			workspaceState.getState().connectionState === "connected" &&
-			workspaceState.getState().activeConnectionHostId === host.id
+			workspaceState.getState().activeConnectionServerId === server.id
 		) {
 			return;
 		}
@@ -399,7 +406,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		}
 
 		try {
-			await controller.connectAndCreate(host.id, toConnectConfig(host));
+			await controller.connectAndCreate(server.id, toConnectConfig(server));
 		} catch (error: unknown) {
 			const message =
 				error instanceof Error ? error.message : "connection failed";
@@ -432,46 +439,46 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		}
 	};
 
-	const openAddHostChooser = () => {
+	const openAddServerChooser = () => {
 		setInlineError(null);
 		setPairingUrl("");
-		setHostModalMode("chooser");
+		setServerModalMode("chooser");
 	};
 
-	const openDirectHostModal = () => {
+	const openDirectServerModal = () => {
 		setInlineError(null);
-		setHostForm(initialFormState());
+		setServerForm(initialFormState());
 		setPairingUrl("");
-		setHostModalMode("direct");
+		setServerModalMode("direct");
 	};
 
-	const openPairingHostModal = () => {
+	const openPairingServerModal = () => {
 		setInlineError(null);
 		setPairingUrl("");
-		setHostModalMode("pairing");
+		setServerModalMode("pairing");
 	};
 
-	const closeHostModal = () => {
-		setHostModalMode("closed");
+	const closeServerModal = () => {
+		setServerModalMode("closed");
 		setInlineError(null);
 	};
 
-	const saveHost = () => {
-		const nextHost = makeHostRecord(hostForm, null);
-		registry.upsertDaemon(nextHost);
-		registry.selectDaemon(nextHost.id);
-		uiState.getState().setSelectedHostId(nextHost.id);
-		closeHostModal();
+	const saveServer = () => {
+		const nextServer = makeServerRecord(serverForm, null);
+		registry.upsertDaemon(nextServer);
+		registry.selectDaemon(nextServer.id);
+		uiState.getState().setSelectedServerId(nextServer.id);
+		closeServerModal();
 	};
 
 	const importPairingLink = async () => {
 		try {
-			const importedHost = importPairingOfferUrl(pairingUrl);
+			const importedServer = importPairingOfferUrl(pairingUrl);
 			await pairAndStoreDaemon(pairingUrl, registry.upsertDaemon);
-			registry.selectDaemon(importedHost.id);
-			uiState.getState().setSelectedHostId(importedHost.id);
+			registry.selectDaemon(importedServer.id);
+			uiState.getState().setSelectedServerId(importedServer.id);
 			setPairingUrl("");
-			closeHostModal();
+			closeServerModal();
 		} catch (error: unknown) {
 			setInlineError(
 				error instanceof Error
@@ -482,7 +489,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	};
 
 	const errorMessage = inlineError ?? workspace.lastError ?? bridgeError;
-	const hasSavedHosts = registry.daemons.length > 0;
+	const hasSavedServers = registry.daemons.length > 0;
 	const isMobileUi = mobile || isNarrowViewport;
 	const mobileOverlayShowsDetail = isMobileUi && !ui.isOverlayMenuRoot;
 	const overlayDetailSection =
@@ -517,12 +524,14 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 						<strong>{workspace.connectionState}</strong>
 					</div>
 					<div>
-						<span>Active host</span>
-						<strong>{activeHost?.label ?? "none"}</strong>
+						<span>Active server</span>
+						<strong>{activeServer?.label ?? "none"}</strong>
 					</div>
 					<div>
 						<span>Endpoint</span>
-						<strong>{activeHost ? endpointLabel(activeHost) : "none"}</strong>
+						<strong>
+							{activeServer ? endpointLabel(activeServer) : "none"}
+						</strong>
 					</div>
 					<div>
 						<span>Last error</span>
@@ -579,7 +588,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 
 	return (
 		<Shell
-			activeHostLabel={activeHost?.label ?? null}
+			activeServerLabel={activeServer?.label ?? null}
 			connectionState={workspace.connectionState}
 			isOverlayOpen={ui.isOverlayOpen}
 			onOpenOverlay={() => ui.openOverlay("settings")}
@@ -619,7 +628,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							<span>{activeSession?.status ?? workspace.connectionState}</span>
 						</footer>
 					</section>
-				) : hasSavedHosts ? (
+				) : hasSavedServers ? (
 					<section
 						className="connection-status-panel"
 						aria-label="Connection status"
@@ -629,14 +638,17 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 								? "Connection failed"
 								: "Connecting"}
 						</h2>
-						<p>{mainHost?.label ?? "No host"}</p>
+						<p>{mainServer?.label ?? "No server"}</p>
 					</section>
 				) : (
-					<section className="empty-hosts-panel" aria-label="Add host options">
-						<button type="button" onClick={openDirectHostModal}>
+					<section
+						className="empty-hosts-panel"
+						aria-label="Add server options"
+					>
+						<button type="button" onClick={openDirectServerModal}>
 							Direct connection
 						</button>
-						<button type="button" onClick={openPairingHostModal}>
+						<button type="button" onClick={openPairingServerModal}>
 							Pairing link
 						</button>
 						<button type="button" disabled>
@@ -691,27 +703,27 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 								)}
 							</nav>
 							<div className="overlay-divider" aria-hidden="true" />
-							<div className="host-list">
-								<p className="host-list__heading">Saved hosts</p>
-								{registry.daemons.map((host) => (
+							<div className="server-list">
+								<p className="server-list__heading">Saved servers</p>
+								{registry.daemons.map((server) => (
 									<button
 										type="button"
-										key={host.id}
-										className="host-list__item"
+										key={server.id}
+										className="server-list__item"
 										onClick={() =>
-											void connectHost(host, { closeOverlay: true })
+											void connectServer(server, { closeOverlay: true })
 										}
 									>
-										<span>{host.label}</span>
-										<small>{hostBadge(host)}</small>
+										<span>{server.label}</span>
+										<small>{serverBadge(server)}</small>
 									</button>
 								))}
 								<button
 									type="button"
-									className="host-list__add"
-									onClick={openAddHostChooser}
+									className="server-list__add"
+									onClick={openAddServerChooser}
 								>
-									+ Add host
+									+ Add server
 								</button>
 							</div>
 						</div>
@@ -747,26 +759,28 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							)}
 						</nav>
 						<div className="overlay-divider" aria-hidden="true" />
-						<div className="host-list">
-							<p className="host-list__heading">Saved hosts</p>
-							{registry.daemons.map((host) => (
+						<div className="server-list">
+							<p className="server-list__heading">Saved servers</p>
+							{registry.daemons.map((server) => (
 								<button
 									type="button"
-									key={host.id}
-									className="host-list__item"
-									data-active={ui.selectedHostId === host.id}
-									onClick={() => void connectHost(host, { closeOverlay: true })}
+									key={server.id}
+									className="server-list__item"
+									data-active={ui.selectedServerId === server.id}
+									onClick={() =>
+										void connectServer(server, { closeOverlay: true })
+									}
 								>
-									<span>{host.label}</span>
-									<small>{hostBadge(host)}</small>
+									<span>{server.label}</span>
+									<small>{serverBadge(server)}</small>
 								</button>
 							))}
 							<button
 								type="button"
-								className="host-list__add"
-								onClick={openAddHostChooser}
+								className="server-list__add"
+								onClick={openAddServerChooser}
 							>
-								+ Add host
+								+ Add server
 							</button>
 						</div>
 					</div>
@@ -774,28 +788,28 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 				</aside>
 			) : null}
 
-			{hostModalMode !== "closed" ? (
-				<div className="host-modal-backdrop">
+			{serverModalMode !== "closed" ? (
+				<div className="server-modal-backdrop">
 					<div
-						className="host-modal"
+						className="server-modal"
 						role="dialog"
 						aria-modal="true"
-						aria-label="Add host modal"
+						aria-label="Add server modal"
 					>
 						<h2>
-							{hostModalMode === "chooser"
-								? "Add host"
-								: hostModalMode === "direct"
+							{serverModalMode === "chooser"
+								? "Add server"
+								: serverModalMode === "direct"
 									? "Direct connection"
 									: "Pairing link"}
 						</h2>
 
-						{hostModalMode === "chooser" ? (
-							<div className="host-option-list">
-								<button type="button" onClick={openDirectHostModal}>
+						{serverModalMode === "chooser" ? (
+							<div className="server-option-list">
+								<button type="button" onClick={openDirectServerModal}>
 									Direct connection
 								</button>
-								<button type="button" onClick={openPairingHostModal}>
+								<button type="button" onClick={openPairingServerModal}>
 									Pairing link
 								</button>
 								<button type="button" disabled>
@@ -804,20 +818,20 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 							</div>
 						) : null}
 
-						{hostModalMode === "direct" ? (
+						{serverModalMode === "direct" ? (
 							<form
-								className="host-form"
+								className="server-form"
 								onSubmit={(event) => {
 									event.preventDefault();
-									saveHost();
+									saveServer();
 								}}
 							>
 								<label className="field">
 									<span>Endpoint URL</span>
 									<input
-										value={hostForm.endpointUrl}
+										value={serverForm.endpointUrl}
 										onChange={(event) =>
-											setHostForm((state) => ({
+											setServerForm((state) => ({
 												...state,
 												kind: "direct",
 												endpointUrl: event.target.value,
@@ -826,16 +840,16 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 									/>
 								</label>
 								<div className="action-row">
-									<button type="submit">Save host</button>
-									<button type="button" onClick={closeHostModal}>
+									<button type="submit">Save server</button>
+									<button type="button" onClick={closeServerModal}>
 										Cancel
 									</button>
 								</div>
 							</form>
 						) : null}
 
-						{hostModalMode === "pairing" ? (
-							<div className="host-form">
+						{serverModalMode === "pairing" ? (
+							<div className="server-form">
 								<label className="field">
 									<span>Pairing link</span>
 									<input
@@ -851,7 +865,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 									>
 										Import
 									</button>
-									<button type="button" onClick={closeHostModal}>
+									<button type="button" onClick={closeServerModal}>
 										Cancel
 									</button>
 								</div>
