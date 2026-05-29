@@ -1,13 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { CURRENT_APP_PLATFORM } from "@/platform/runtime/platform";
 import { AppRoot } from "../AppRoot";
 
-export interface MountOptions {
-	clientKind: "web" | "tauri";
-	mobile: boolean;
-}
-
-export function mountApp({ clientKind, mobile }: MountOptions) {
+export function mountApp() {
 	const container = document.getElementById("root");
 	if (container === null) {
 		throw new Error("missing #root");
@@ -15,7 +11,7 @@ export function mountApp({ clientKind, mobile }: MountOptions) {
 
 	createRoot(container).render(
 		<StrictMode>
-			<AppRoot clientKind={clientKind} mobile={mobile} />
+			<AppRoot platform={CURRENT_APP_PLATFORM} />
 		</StrictMode>,
 	);
 }

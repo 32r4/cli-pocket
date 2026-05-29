@@ -750,49 +750,34 @@ dependencies = [
 name = "cli-pocket-desktop"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
- "bytes",
  "cli-pocket-client-core",
  "cli-pocket-daemon-core",
- "cli-pocket-proto",
+ "cli-pocket-tauri-app",
  "cli-pocket-tauri-bindings",
- "hex",
- "postcard",
- "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",
  "tauri-runtime-wry",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
 name = "cli-pocket-mobile"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
- "bytes",
  "cli-pocket-client-core",
- "cli-pocket-proto",
+ "cli-pocket-tauri-app",
  "cli-pocket-tauri-bindings",
- "hex",
- "postcard",
- "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-deep-link",
  "tauri-runtime-wry",
- "thiserror 1.0.69",
  "tokio",
- "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -860,6 +845,26 @@ dependencies = [
  "tokio-tungstenite",
  "toml 0.9.12+spec-1.1.0",
  "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "cli-pocket-tauri-app"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "cli-pocket-client-core",
+ "cli-pocket-proto",
+ "cli-pocket-tauri-bindings",
+ "hex",
+ "postcard",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-deep-link",
+ "tokio",
  "tracing",
  "uuid",
 ]

@@ -40,8 +40,8 @@ pub struct SecurityConfig {
 
 impl SecurityConfig {
     pub fn for_config_path(config_path: &Path) -> Self {
-        if config_path == Path::new("crates/server/daemon-bin/daemon.dev.toml") {
-            let base = PathBuf::from(".cache/cli-pocket-daemon-dev");
+        if config_path.ends_with(Path::new("crates/server/daemon-bin/daemon.dev.toml")) {
+            let base = workspace_root().join(".cache/cli-pocket-daemon-dev");
             return Self {
                 identity_path: base.join("identity.json"),
                 clients_path: base.join("clients.json"),
@@ -283,6 +283,13 @@ pub fn default_state_dir() -> PathBuf {
     )
 }
 
+pub fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.."))
+}
+
 fn daemon_build_template() -> &'static DaemonConfig {
     static TEMPLATE: OnceLock<DaemonConfig> = OnceLock::new();
 
@@ -317,7 +324,7 @@ mod tests {
     use super::{
         build_pairing_offer_url, default_config_path, default_state_dir, relay_client_ws_url,
         relay_client_ws_url_for_server, relay_server_ws_url, relay_server_ws_url_for_server,
-        AppConfig, PairingOffer,
+        workspace_root, AppConfig, PairingOffer, SecurityConfig,
     };
     use cli_pocket_proto::ServerId;
 
@@ -385,5 +392,24 @@ mod tests {
     #[test]
     fn default_config_path_is_inside_dot_cli_pocket() {
         assert!(default_config_path().ends_with(Path::new(".cli-pocket/daemon.toml")));
+    }
+
+    #[test]
+    fn dev_config_path_uses_workspace_cache_dir_even_when_absolute() {
+        let config_path = workspace_root().join("crates/server/daemon-bin/daemon.dev.toml");
+        let security = SecurityConfig::for_config_path(&config_path);
+
+        assert_eq!(
+            security.identity_path,
+            workspace_root().join(".cache/cli-pocket-daemon-dev/identity.json")
+        );
+        assert_eq!(
+            security.clients_path,
+            workspace_root().join(".cache/cli-pocket-daemon-dev/clients.json")
+        );
+        assert_eq!(
+            security.revoked_path,
+            workspace_root().join(".cache/cli-pocket-daemon-dev/revoked.json")
+        );
     }
 }

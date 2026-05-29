@@ -139,7 +139,9 @@ mod tests {
     use cli_pocket_daemon_core::config::{
         AppConfig, RelayConfig, RelayRetryConfig, SecurityConfig,
     };
-    use cli_pocket_daemon_core::service::{load_or_create_config, pair_url};
+    use cli_pocket_daemon_core::service::{
+        dev_config_template, load_or_create_config, load_or_create_config_with_template, pair_url,
+    };
     use cli_pocket_daemon_core::DaemonConfig;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -198,6 +200,27 @@ mod tests {
             dir.path().join("identity.json")
         );
         assert_eq!(config.relay.psk_hex.len(), 64);
+    }
+
+    #[test]
+    fn load_or_create_config_with_template_uses_dev_defaults() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("daemon.toml");
+        let config = load_or_create_config_with_template(path.clone(), dev_config_template())
+            .expect("load config");
+
+        assert!(path.exists());
+        assert_eq!(config.listen.port, 17842);
+        assert_eq!(config.relay.base_url, "ws://127.0.0.1:8080");
+        assert_eq!(
+            config.relay.psk_hex,
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+        );
+        assert_eq!(config.app.base_url, "http://127.0.0.1:5173");
+        assert_eq!(
+            config.security.identity_path,
+            dir.path().join("identity.json")
+        );
     }
 
     fn test_security_config() -> SecurityConfig {

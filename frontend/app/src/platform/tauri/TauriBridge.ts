@@ -1,14 +1,44 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { PersistedDaemonRegistry } from "@/state/daemon-registry/daemonRegistry";
 import type {
 	ClientBridge,
 	ConnectConfig,
 	CreateTerminalParams,
+	DaemonRegistryBridge,
+	EmbeddedDaemonBridge,
 } from "../bridge/types";
 
 const EVENT_CHANNEL = "cli_pocket:event";
 
+interface TauriBridgeOptions {
+	embeddedDaemon: boolean;
+}
+
 export class TauriBridge implements ClientBridge {
+	readonly daemonRegistry: DaemonRegistryBridge = {
+		load: () =>
+			invoke<PersistedDaemonRegistry | null>("cli_pocket_load_daemon_registry"),
+		save: async (state) => {
+			await invoke("cli_pocket_save_daemon_registry", { state });
+		},
+	};
+
+	readonly embeddedDaemon: EmbeddedDaemonBridge | null;
+
+	constructor({ embeddedDaemon }: TauriBridgeOptions) {
+		this.embeddedDaemon = embeddedDaemon
+			? {
+					localEndpoint: () =>
+						invoke<string>("cli_pocket_local_daemon_endpoint"),
+					pairUrl: () => invoke<string>("cli_pocket_daemon_pair_url"),
+					restart: async () => {
+						await invoke("cli_pocket_daemon_restart");
+					},
+				}
+			: null;
+	}
+
 	async connect(config: ConnectConfig) {
 		await invoke("cli_pocket_connect", { config });
 	}
@@ -66,18 +96,6 @@ export class TauriBridge implements ClientBridge {
 
 	async importIdentity(blob: Uint8Array) {
 		await invoke("cli_pocket_import_identity", { blob: Array.from(blob) });
-	}
-
-	async localDaemonEndpoint() {
-		return invoke<string>("cli_pocket_local_daemon_endpoint");
-	}
-
-	async daemonPairUrl() {
-		return invoke<string>("cli_pocket_daemon_pair_url");
-	}
-
-	async daemonRestart() {
-		await invoke("cli_pocket_daemon_restart");
 	}
 
 	async close() {

@@ -1,8 +1,7 @@
 mod commands;
-mod deep_link;
-mod event_pump;
 mod state;
 
+use cli_pocket_tauri_app::{deep_link, event_pump};
 use state::AppState;
 use tauri::Manager;
 
@@ -23,6 +22,8 @@ pub fn run() {
             commands::cli_pocket_export_identity,
             commands::cli_pocket_import_identity,
             commands::cli_pocket_close,
+            commands::cli_pocket_load_daemon_registry,
+            commands::cli_pocket_save_daemon_registry,
         ])
         .setup(|app| {
             let app_data_dir = app
@@ -35,7 +36,7 @@ pub fn run() {
 
             app.manage(app_state);
             event_pump::start(app.handle().clone(), event_rx);
-            deep_link::install(app.handle().clone());
+            deep_link::install(&app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

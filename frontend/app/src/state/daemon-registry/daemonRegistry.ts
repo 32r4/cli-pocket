@@ -1,17 +1,33 @@
 import { z } from "zod";
-import { createStore } from "zustand/vanilla";
+import { createStore, type StoreApi } from "zustand/vanilla";
 import type { DaemonRecord } from "./types";
 
-interface DaemonRegistryState {
+export interface PersistedDaemonRegistry {
+	version: 1;
+	daemons: DaemonRecord[];
+	selectedDaemonId: string | null;
+}
+
+export interface DaemonRegistryPersistence {
+	load(): Promise<PersistedDaemonRegistry | null>;
+	save(state: PersistedDaemonRegistry): Promise<void>;
+}
+
+export interface DaemonRegistryState {
 	daemons: DaemonRecord[];
 	selectedDaemonId: string | null;
 	upsertDaemon: (daemon: DaemonRecord) => void;
 	updateDaemonLabel: (id: string, label: string) => void;
 	selectDaemon: (id: string | null) => void;
 	removeDaemon: (id: string) => void;
+	replacePersistedState: (state: PersistedDaemonRegistry) => void;
 }
 
-const STORAGE_KEY = "cli-pocket/daemon-registry/v1";
+export interface DaemonRegistryStore extends StoreApi<DaemonRegistryState> {
+	snapshotPersistedState(): PersistedDaemonRegistry;
+	hydratePersistedState(state: PersistedDaemonRegistry): void;
+	setPersistence(persistence: DaemonRegistryPersistence): void;
+}
 
 const DirectDaemonRecordSchema = z.object({
 	id: z.string(),
@@ -42,64 +58,39 @@ const PersistedDaemonRegistrySchema = z.object({
 	selectedDaemonId: z.string().nullable(),
 });
 
-function loadPersistedState() {
-	if (typeof window === "undefined") {
-		return {
-			daemons: [] as DaemonRecord[],
-			selectedDaemonId: null as string | null,
-		};
-	}
-
-	try {
-		const raw = window.localStorage.getItem(STORAGE_KEY);
-		if (raw == null) {
-			return {
-				daemons: [] as DaemonRecord[],
-				selectedDaemonId: null as string | null,
-			};
-		}
-
-		const parsed = PersistedDaemonRegistrySchema.safeParse(JSON.parse(raw));
-		if (!parsed.success) {
-			return {
-				daemons: [] as DaemonRecord[],
-				selectedDaemonId: null as string | null,
-			};
-		}
-
-		return {
-			daemons: parsed.data.daemons,
-			selectedDaemonId: parsed.data.selectedDaemonId,
-		};
-	} catch {
-		return {
-			daemons: [] as DaemonRecord[],
-			selectedDaemonId: null as string | null,
-		};
-	}
+export function emptyPersistedDaemonRegistry(): PersistedDaemonRegistry {
+	return {
+		version: 1,
+		daemons: [],
+		selectedDaemonId: null,
+	};
 }
 
-function persistState(
+export function parsePersistedDaemonRegistry(
+	value: unknown,
+): PersistedDaemonRegistry | null {
+	const parsed = PersistedDaemonRegistrySchema.safeParse(value);
+	if (!parsed.success) {
+		return null;
+	}
+
+	return parsed.data;
+}
+
+function snapshotPersistedState(
 	state: Pick<DaemonRegistryState, "daemons" | "selectedDaemonId">,
-) {
-	if (typeof window === "undefined") {
-		return;
-	}
-
-	try {
-		window.localStorage.setItem(
-			STORAGE_KEY,
-			JSON.stringify({
-				version: 1,
-				daemons: state.daemons,
-				selectedDaemonId: state.selectedDaemonId,
-			}),
-		);
-	} catch {}
+): PersistedDaemonRegistry {
+	return {
+		version: 1,
+		daemons: state.daemons,
+		selectedDaemonId: state.selectedDaemonId,
+	};
 }
 
-export function createDaemonRegistryStore() {
-	const initialState = loadPersistedState();
+export function createDaemonRegistryStore(): DaemonRegistryStore {
+	const initialState = emptyPersistedDaemonRegistry();
+	let persistence: DaemonRegistryPersistence | null = null;
+	let skipNextPersist = false;
 	const store = createStore<DaemonRegistryState>((set) => ({
 		daemons: initialState.daemons,
 		selectedDaemonId: initialState.selectedDaemonId,
@@ -136,14 +127,36 @@ export function createDaemonRegistryStore() {
 					selectedDaemonId,
 				};
 			}),
+		replacePersistedState: (state) =>
+			set({
+				daemons: state.daemons,
+				selectedDaemonId: state.selectedDaemonId,
+			}),
 	}));
 
 	store.subscribe((state) => {
-		persistState({
-			daemons: state.daemons,
-			selectedDaemonId: state.selectedDaemonId,
-		});
+		if (skipNextPersist) {
+			skipNextPersist = false;
+			return;
+		}
+
+		if (persistence == null) {
+			return;
+		}
+
+		void persistence.save(snapshotPersistedState(state));
 	});
 
-	return store;
+	return Object.assign(store, {
+		snapshotPersistedState() {
+			return snapshotPersistedState(store.getState());
+		},
+		hydratePersistedState(state: PersistedDaemonRegistry) {
+			skipNextPersist = true;
+			store.getState().replacePersistedState(state);
+		},
+		setPersistence(nextPersistence: DaemonRegistryPersistence) {
+			persistence = nextPersistence;
+		},
+	});
 }

@@ -43,19 +43,23 @@ build-wasm:
     wasm-pack build crates/client/client-core-wasm --target web --release
 
 build-desktop:
+    just _frontend-install-if-missing
     npm --prefix frontend/app run build
     cd apps/desktop; cargo tauri build
 
 build-mobile-android:
     just mobile-android-init
+    just _frontend-install-if-missing
     npm --prefix frontend/app run build
     cd apps/mobile; cargo tauri android build --apk --aab
 
 build-mobile-ios:
+    just _frontend-install-if-missing
     npm --prefix frontend/app run build
     cd apps/mobile; cargo tauri ios build
 
 build-web:
+    just _frontend-install-if-missing
     npm --prefix frontend/app run build:web
 
 # ---- dev workflows ----
@@ -67,6 +71,7 @@ dev-relay:
     cargo run -p cli-pocket-relay -- --config crates/relay/relay-bin/relay.dev.toml
 
 dev-desktop:
+    just _frontend-install-if-missing
     cd apps/desktop; cargo tauri dev
 
 dev-mobile-android:
@@ -77,6 +82,7 @@ dev-mobile-ios:
     cd apps/mobile; cargo tauri ios dev
 
 dev-web:
+    just _frontend-install-if-missing
     npm --prefix frontend/app run dev:web
 
 # ---- deploy ----
@@ -97,7 +103,8 @@ clean:
 
 [windows]
 _clean-node:
-    Remove-Item -LiteralPath 'frontend/app/dist', 'frontend/app/node_modules' -Recurse -Force -ErrorAction SilentlyContinue
+    $paths = @('frontend/app/dist', 'frontend/app/node_modules') | Where-Object { Test-Path $_ }
+    if ($paths.Count -gt 0) { Remove-Item -LiteralPath $paths -Recurse -Force }
 
 [unix]
 _clean-node:
@@ -116,12 +123,21 @@ dist:
 # ---- frontend ----
 
 frontend-install:
-    npm --prefix frontend/app install
+    npm --prefix frontend/app ci
+
+[windows]
+_frontend-install-if-missing:
+    if (-not (Test-Path 'frontend/app/node_modules')) { npm --prefix frontend/app ci }
+
+[unix]
+_frontend-install-if-missing:
+    test -d frontend/app/node_modules || npm --prefix frontend/app ci
 
 mobile-android-init:
     cd apps/mobile; cargo tauri android init --ci
 
 frontend-check:
+    just _frontend-install-if-missing
     @npm --prefix frontend/app run --silent check
 
 # ---- guardrails ----

@@ -13,9 +13,11 @@ describe("SessionController", () => {
 			kill: vi.fn(),
 			exportIdentity: vi.fn(),
 			importIdentity: vi.fn(),
-			localDaemonEndpoint: vi.fn(),
-			daemonPairUrl: vi.fn(),
-			daemonRestart: vi.fn(),
+			daemonRegistry: {
+				load: vi.fn().mockResolvedValue(null),
+				save: vi.fn().mockResolvedValue(undefined),
+			},
+			embeddedDaemon: null,
 			close: vi.fn(),
 		};
 

@@ -21,17 +21,10 @@ tauri-plugin-deep-link = "=2.4.9"
 
 cli-pocket-client-core = { path = "../../../crates/client/client-core" }
 cli-pocket-daemon-core = { path = "../../../crates/server/daemon-core" }
-cli-pocket-proto = { path = "../../../crates/shared/proto" }
+cli-pocket-tauri-app = { path = "../../../crates/client/tauri-app" }
 cli-pocket-tauri-bindings = { path = "../../../crates/client/tauri-bindings" }
 
-base64 = { workspace = true }
-bytes = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
-serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-hex = "0.4"
-postcard = { workspace = true }
-uuid = { workspace = true }

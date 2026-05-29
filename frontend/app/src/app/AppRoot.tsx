@@ -5,10 +5,16 @@ import { importPairingOfferUrl } from "@/features/pairing/pairingOffer";
 import { SessionController } from "@/features/terminals/SessionController";
 import { XTermView } from "@/features/terminals/XTermView";
 import type { ClientBridge, ConnectConfig } from "@/platform/bridge/types";
-import { TauriBridge } from "@/platform/tauri/TauriBridge";
-import { WebBridge } from "@/platform/web/WebBridge";
+import {
+	type AppPlatform,
+	createBridgeForPlatform,
+} from "@/platform/runtime/platform";
 import { ErrorBanner } from "@/shared/components/ErrorBanner";
-import { createDaemonRegistryStore } from "@/state/daemon-registry/daemonRegistry";
+import {
+	createDaemonRegistryStore,
+	emptyPersistedDaemonRegistry,
+	type PersistedDaemonRegistry,
+} from "@/state/daemon-registry/daemonRegistry";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
 import { createUiStateStore, type OverlaySection } from "@/state/ui/uiState";
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
@@ -19,8 +25,8 @@ const uiState = createUiStateStore();
 const workspaceState = createWorkspaceStore();
 
 interface AppRootProps {
-	clientKind: "web" | "tauri";
-	mobile?: boolean;
+	platform: AppPlatform;
+	bridgeFactory?: (platform: AppPlatform) => Promise<ClientBridge>;
 }
 
 type ServerModalMode = "closed" | "chooser" | "direct" | "pairing";
@@ -129,15 +135,10 @@ function makeServerRecord(
 	};
 }
 
-async function createBridge(clientKind: "web" | "tauri") {
-	if (clientKind === "tauri") {
-		return new TauriBridge();
-	}
-
-	return WebBridge.create();
-}
-
-export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
+export function AppRoot({
+	platform,
+	bridgeFactory = createBridgeForPlatform,
+}: AppRootProps) {
 	const registry = useStore(daemonRegistry);
 	const ui = useStore(uiState);
 	const workspace = useStore(workspaceState);
@@ -153,6 +154,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	const [pairingUrl, setPairingUrl] = useState("");
 	const [inlineError, setInlineError] = useState<string | null>(null);
 	const [localPairUrl, setLocalPairUrl] = useState<string | null>(null);
+	const [daemonRegistryReady, setDaemonRegistryReady] = useState(false);
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
@@ -177,7 +179,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	useEffect(() => {
 		let active = true;
 
-		void createBridge(clientKind)
+		void bridgeFactory(platform)
 			.then((instance) => {
 				if (!active) {
 					void instance.close();
@@ -201,16 +203,61 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		return () => {
 			active = false;
 		};
-	}, [clientKind]);
+	}, [bridgeFactory, platform]);
 
 	useEffect(() => {
-		if (bridge == null || clientKind !== "tauri") {
+		if (bridge == null) {
 			return;
 		}
 
 		let cancelled = false;
-		void bridge
-			.localDaemonEndpoint()
+		setDaemonRegistryReady(false);
+		const persistence = {
+			load: () => bridge.daemonRegistry.load(),
+			save: (state: PersistedDaemonRegistry) =>
+				bridge.daemonRegistry.save(state),
+		};
+		daemonRegistry.setPersistence(persistence);
+
+		void persistence
+			.load()
+			.then((state) => {
+				if (cancelled) {
+					return;
+				}
+
+				daemonRegistry.hydratePersistedState(
+					state ?? emptyPersistedDaemonRegistry(),
+				);
+				setDaemonRegistryReady(true);
+			})
+			.catch((error: unknown) => {
+				if (cancelled) {
+					return;
+				}
+
+				daemonRegistry.hydratePersistedState(emptyPersistedDaemonRegistry());
+				setInlineError(
+					error instanceof Error
+						? error.message
+						: "failed to restore saved servers",
+				);
+				setDaemonRegistryReady(true);
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [bridge]);
+
+	useEffect(() => {
+		if (bridge?.embeddedDaemon == null || !daemonRegistryReady) {
+			return;
+		}
+
+		let cancelled = false;
+		void bridge.embeddedDaemon
+			.localEndpoint()
 			.then((endpointUrl) => {
 				if (cancelled) {
 					return;
@@ -245,7 +292,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		return () => {
 			cancelled = true;
 		};
-	}, [bridge, clientKind]);
+	}, [bridge, daemonRegistryReady]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
@@ -264,6 +311,10 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	}, []);
 
 	useEffect(() => {
+		if (!daemonRegistryReady) {
+			return;
+		}
+
 		const fallbackServerId =
 			registry.selectedDaemonId ?? registry.daemons[0]?.id ?? null;
 		const selectedServerStillExists = registry.daemons.some(
@@ -285,9 +336,14 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		registry.selectedDaemonId,
 		ui.selectedServerId,
 		registry,
+		daemonRegistryReady,
 	]);
 
 	useEffect(() => {
+		if (!daemonRegistryReady) {
+			return;
+		}
+
 		if (mainServer == null) {
 			autoConnectServerIdRef.current = null;
 			return;
@@ -316,7 +372,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 				workspaceState.getState().markConnectionFailed(message);
 				setInlineError(message);
 			});
-	}, [controller, mainServer, workspace.connectionState]);
+	}, [controller, mainServer, workspace.connectionState, daemonRegistryReady]);
 
 	useEffect(() => {
 		if (
@@ -485,12 +541,12 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	};
 
 	const generateLocalPairUrl = () => {
-		if (bridge == null) {
+		if (bridge?.embeddedDaemon == null) {
 			return;
 		}
 
-		void bridge
-			.daemonPairUrl()
+		void bridge.embeddedDaemon
+			.pairUrl()
 			.then((url) => {
 				setLocalPairUrl(url);
 				setInlineError(null);
@@ -505,12 +561,12 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	};
 
 	const restartLocalDaemon = () => {
-		if (bridge == null) {
+		if (bridge?.embeddedDaemon == null) {
 			return;
 		}
 
-		void bridge
-			.daemonRestart()
+		void bridge.embeddedDaemon
+			.restart()
 			.then(() => {
 				setInlineError(null);
 			})
@@ -571,14 +627,14 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	};
 
 	const errorMessage = inlineError ?? workspace.lastError ?? bridgeError;
-	const hasSavedServers = registry.daemons.length > 0;
-	const isMobileUi = mobile || isNarrowViewport;
+	const hasSavedServers = daemonRegistryReady && registry.daemons.length > 0;
+	const isMobileUi = platform.shell === "mobile" || isNarrowViewport;
 	const mobileOverlayShowsDetail = isMobileUi && !ui.isOverlayMenuRoot;
 	const overlayDetailSection =
 		ui.overlaySection === "settings" ? (
 			<section className="detail-section">
 				<h2>Settings</h2>
-				{clientKind === "tauri" ? (
+				{bridge?.embeddedDaemon != null ? (
 					<div className="action-row">
 						<button type="button" onClick={generateLocalPairUrl}>
 							Generate pair URL
@@ -588,7 +644,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 						</button>
 					</div>
 				) : null}
-				{clientKind === "tauri" && localPairUrl != null ? (
+				{bridge?.embeddedDaemon != null && localPairUrl != null ? (
 					<div className="detail-grid">
 						<div>
 							<span>Pair URL</span>
@@ -639,7 +695,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 					</div>
 					<div>
 						<span>Client</span>
-						<strong>{isMobileUi ? "mobile" : clientKind}</strong>
+						<strong>{platform.id}</strong>
 					</div>
 					<div>
 						<span>Active terminal</span>
@@ -675,7 +731,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 					</div>
 					<div>
 						<span>Client</span>
-						<strong>{isMobileUi ? "mobile" : clientKind}</strong>
+						<strong>{platform.id}</strong>
 					</div>
 					<div>
 						<span>Protocol</span>
@@ -695,7 +751,15 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 			onCloseOverlay={ui.closeOverlay}
 		>
 			<main className="app-shell__main">
-				{workspace.connectionState === "connected" ? (
+				{!daemonRegistryReady ? (
+					<section
+						className="connection-status-panel"
+						aria-label="Restoring saved servers"
+					>
+						<h2>Loading servers</h2>
+						<p>Restoring saved servers.</p>
+					</section>
+				) : workspace.connectionState === "connected" ? (
 					<section className="workspace-panel" aria-label="Terminal workspace">
 						<div className="terminal-tabs" role="tablist" aria-label="Sessions">
 							{workspace.terminals.map((terminal) => (

@@ -25,17 +25,9 @@ tauri-runtime-wry = { version = "=2.11.2", features = [] }
 tauri-plugin-deep-link = { version = "=2.4.9", features = [] }
 
 cli-pocket-client-core = { path = "../../../crates/client/client-core" }
-cli-pocket-proto = { path = "../../../crates/shared/proto" }
+cli-pocket-tauri-app = { path = "../../../crates/client/tauri-app" }
 cli-pocket-tauri-bindings = { path = "../../../crates/client/tauri-bindings" }
 
-base64 = { workspace = true }
-bytes = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
-serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-hex = { version = "0.4", features = [] }
-postcard = { workspace = true }
-uuid = { workspace = true }

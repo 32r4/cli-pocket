@@ -1,7 +1,12 @@
 use cli_pocket_client_core::ClientEvent;
-use cli_pocket_daemon_core::service::load_or_create_config;
+use cli_pocket_daemon_core::config::{default_config_path, workspace_root};
+use cli_pocket_daemon_core::service::{
+    build_config_template, dev_config_template, load_or_create_config_with_template,
+};
 use cli_pocket_daemon_core::{Daemon, DaemonConfig};
+use cli_pocket_tauri_app::spawn_session_runtime;
 use cli_pocket_tauri_bindings::{FileKvStore, SessionHandle};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
@@ -23,10 +28,14 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Result<(Self, mpsc::Receiver<ClientEvent>), String> {
-        let kv = FileKvStore::open_default().map_err(|error| error.to_string())?;
-        let daemon_config = load_or_create_config(None).map_err(|error| error.to_string())?;
-        let (event_tx, event_rx) = mpsc::channel::<ClientEvent>(64);
-        let session = SessionHandle::spawn(event_tx);
+        let daemon_config = load_or_create_config_with_template(
+            desktop_daemon_config_path(),
+            desktop_daemon_template(),
+        )
+        .map_err(|error| error.to_string())?;
+        let kv = FileKvStore::open_at(desktop_store_dir(&daemon_config))
+            .map_err(|error| error.to_string())?;
+        let (session, event_rx) = spawn_session_runtime();
 
         Ok((
             Self {
@@ -42,6 +51,30 @@ impl AppState {
             event_rx,
         ))
     }
+}
+
+fn desktop_daemon_template() -> &'static str {
+    if cfg!(debug_assertions) {
+        dev_config_template()
+    } else {
+        build_config_template()
+    }
+}
+
+fn desktop_daemon_config_path() -> PathBuf {
+    if cfg!(debug_assertions) {
+        workspace_root().join("crates/server/daemon-bin/daemon.dev.toml")
+    } else {
+        default_config_path()
+    }
+}
+
+fn desktop_store_dir(daemon_config: &DaemonConfig) -> &std::path::Path {
+    daemon_config
+        .security
+        .identity_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
 }
 
 impl EmbeddedDaemonRuntime {

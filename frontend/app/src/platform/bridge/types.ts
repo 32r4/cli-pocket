@@ -1,3 +1,5 @@
+import type { PersistedDaemonRegistry } from "@/state/daemon-registry/daemonRegistry";
+
 export type ConnectConfig =
 	| {
 			kind: "direct";
@@ -29,6 +31,17 @@ export interface CreateTerminalParams {
 	scrollbackBytes?: number;
 }
 
+export interface DaemonRegistryBridge {
+	load(): Promise<PersistedDaemonRegistry | null>;
+	save(state: PersistedDaemonRegistry): Promise<void>;
+}
+
+export interface EmbeddedDaemonBridge {
+	localEndpoint(): Promise<string>;
+	pairUrl(): Promise<string>;
+	restart(): Promise<void>;
+}
+
 export interface ClientBridge {
 	connect(config: ConnectConfig): Promise<void>;
 	events(): AsyncIterable<unknown>;
@@ -38,8 +51,7 @@ export interface ClientBridge {
 	kill(terminalId: string, signal: string): Promise<void>;
 	exportIdentity(): Promise<Uint8Array>;
 	importIdentity(blob: Uint8Array): Promise<void>;
-	localDaemonEndpoint(): Promise<string>;
-	daemonPairUrl(): Promise<string>;
-	daemonRestart(): Promise<void>;
+	daemonRegistry: DaemonRegistryBridge;
+	embeddedDaemon: EmbeddedDaemonBridge | null;
 	close(): Promise<void>;
 }

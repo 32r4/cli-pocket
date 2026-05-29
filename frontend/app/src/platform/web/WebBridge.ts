@@ -9,13 +9,56 @@ import init, {
 	resize_client_terminal,
 	send_client_input,
 } from "cli-pocket-client-core-wasm";
+import {
+	type PersistedDaemonRegistry,
+	parsePersistedDaemonRegistry,
+} from "@/state/daemon-registry/daemonRegistry";
 import type {
 	ClientBridge,
 	ConnectConfig,
 	CreateTerminalParams,
+	DaemonRegistryBridge,
 } from "../bridge/types";
 
+const STORAGE_KEY = "cli-pocket/daemon-registry/v1";
+
+function loadDaemonRegistryFromLocalStorage(): PersistedDaemonRegistry | null {
+	if (typeof window === "undefined") {
+		return null;
+	}
+
+	try {
+		const raw = window.localStorage.getItem(STORAGE_KEY);
+		if (raw == null) {
+			return null;
+		}
+
+		return parsePersistedDaemonRegistry(JSON.parse(raw));
+	} catch {
+		return null;
+	}
+}
+
+function saveDaemonRegistryToLocalStorage(state: PersistedDaemonRegistry) {
+	if (typeof window === "undefined") {
+		return;
+	}
+
+	try {
+		window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+	} catch {}
+}
+
 export class WebBridge implements ClientBridge {
+	readonly daemonRegistry: DaemonRegistryBridge = {
+		load: async () => loadDaemonRegistryFromLocalStorage(),
+		save: async (state) => {
+			saveDaemonRegistryToLocalStorage(state);
+		},
+	};
+
+	readonly embeddedDaemon = null;
+
 	static async create() {
 		await init();
 		return new WebBridge();
@@ -85,18 +128,6 @@ export class WebBridge implements ClientBridge {
 
 	async importIdentity(blob: Uint8Array) {
 		await import_client_identity(new TextDecoder().decode(blob));
-	}
-
-	async localDaemonEndpoint(): Promise<string> {
-		throw new Error("local daemon is only available in desktop");
-	}
-
-	async daemonPairUrl(): Promise<string> {
-		throw new Error("embedded daemon is only available in desktop");
-	}
-
-	async daemonRestart() {
-		throw new Error("embedded daemon is only available in desktop");
 	}
 
 	async close() {

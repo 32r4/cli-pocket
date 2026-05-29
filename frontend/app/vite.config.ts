@@ -5,12 +5,9 @@ import { defineConfig } from "vite";
 export default defineConfig(({ mode }) => {
 	const isTauri = mode === "tauri" || mode === "mobile";
 	const tauriDevHost = process.env.TAURI_DEV_HOST;
-	const entryPath =
-		mode === "web"
-			? "/src/entries/web.tsx"
-			: mode === "mobile"
-				? "/src/entries/mobile.tsx"
-				: "/src/entries/desktop.tsx";
+	const appPlatform =
+		mode === "web" ? "web" : mode === "mobile" ? "mobile" : "desktop";
+	const entryPath = "/src/entries/main.tsx";
 
 	return {
 		plugins: [
@@ -35,8 +32,7 @@ export default defineConfig(({ mode }) => {
 			},
 		},
 		define: {
-			__CLIENT_KIND__: JSON.stringify(mode === "web" ? "web" : "tauri"),
-			__MOBILE_ENTRY__: JSON.stringify(mode === "mobile"),
+			__APP_PLATFORM__: JSON.stringify(appPlatform),
 		},
 		server: {
 			...(isTauri ? { host: tauriDevHost ?? "0.0.0.0" } : {}),
