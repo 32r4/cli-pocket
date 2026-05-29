@@ -80,11 +80,33 @@ pub struct RelayConfig {
     pub psk_hex: String,
     #[serde(default)]
     pub server_auth_token: Option<String>,
+    #[serde(default)]
+    pub retry: RelayRetryConfig,
 }
 
 impl Default for RelayConfig {
     fn default() -> Self {
         daemon_build_template().relay.clone()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelayRetryConfig {
+    #[serde(default = "default_relay_retry_initial_ms")]
+    pub initial_ms: u64,
+    #[serde(default = "default_relay_retry_max_ms")]
+    pub max_ms: u64,
+    #[serde(default = "default_relay_retry_mul_x10")]
+    pub mul_x10: u32,
+}
+
+impl Default for RelayRetryConfig {
+    fn default() -> Self {
+        Self {
+            initial_ms: default_relay_retry_initial_ms(),
+            max_ms: default_relay_retry_max_ms(),
+            mul_x10: default_relay_retry_mul_x10(),
+        }
     }
 }
 
@@ -240,6 +262,18 @@ fn relay_ws_url(base_url: &str, suffix: &str) -> crate::DaemonResult<String> {
     }
 
     Ok(format!("{}{suffix}", trimmed.trim_end_matches('/')))
+}
+
+fn default_relay_retry_initial_ms() -> u64 {
+    500
+}
+
+fn default_relay_retry_max_ms() -> u64 {
+    30_000
+}
+
+fn default_relay_retry_mul_x10() -> u32 {
+    20
 }
 
 pub fn default_state_dir() -> PathBuf {

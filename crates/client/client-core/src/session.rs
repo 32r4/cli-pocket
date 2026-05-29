@@ -40,6 +40,9 @@ pub enum SessionEndpoint {
     },
 }
 
+const HEARTBEAT_IDLE_MS: u64 = 10_000;
+const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
+
 pub trait SessionSpawner {
     fn spawn(&self, fut: LocalBoxFuture<'static, ()>);
 }
@@ -183,6 +186,7 @@ async fn run_session_loop<T, C, R, K>(
 
     loop {
         let _ = events_tx.clone().send(ClientEvent::Connecting).await;
+        let mut reached_connected = false;
         let mut transport = match transport_factory().await {
             Ok(transport) => transport,
             Err(err) => {
@@ -202,6 +206,8 @@ async fn run_session_loop<T, C, R, K>(
         let outcome = run_one_connection(
             &identity,
             &config,
+            &clock,
+            &rng,
             &mut transport,
             &mut cmd_rx,
             &mut session_cmd_rx,
@@ -212,11 +218,15 @@ async fn run_session_loop<T, C, R, K>(
                 events_tx: events_tx.clone(),
                 cmd_tx: &cmd_tx,
                 terminal: &terminal,
+                reached_connected: &mut reached_connected,
             },
         )
         .await;
 
         resume_state.clear_pending_creates();
+        if reached_connected {
+            delay = start;
+        }
 
         match outcome {
             Ok(()) => {
@@ -249,16 +259,23 @@ async fn run_session_loop<T, C, R, K>(
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-async fn run_one_connection<T: Transport>(
+async fn run_one_connection<T, C, R>(
     identity: &ClientIdentity,
     config: &SessionConfig,
+    clock: &C,
+    rng: &R,
     transport: &mut T,
     cmd_rx: &mut mpsc::Receiver<TerminalCmd>,
     session_cmd_rx: &mut mpsc::Receiver<SessionCommand>,
     pending_cmds: &mut VecDeque<TerminalCmd>,
     pending_session_cmds: &mut VecDeque<SessionCommand>,
     state: ConnectionState<'_>,
-) -> ClientResult<()> {
+) -> ClientResult<()>
+where
+    T: Transport,
+    C: Clock,
+    R: Rng,
+{
     let mut session = match &config.endpoint {
         SessionEndpoint::Direct(_) => {
             let mut noise = NoiseAnonymousInitiator::new(&identity.keypair)?;
@@ -319,6 +336,8 @@ async fn run_one_connection<T: Transport>(
             server_label,
         })
         .await;
+    *state.reached_connected = true;
+    let mut heartbeat = HeartbeatState::new(clock.now_ms());
     state.resume.set_session_id(session_id);
     if resumed {
         let attachment = {
@@ -383,13 +402,21 @@ async fn run_one_connection<T: Transport>(
     }
 
     loop {
-        enum Action {
-            Send(Frame),
-            SendPendingCommand(Frame),
-            SendPendingSessionCommand(Frame),
-            Emit(ClientEvent),
-            Return(ClientResult<()>),
-            None,
+        match heartbeat.poll(clock.now_ms(), rng) {
+            HeartbeatPoll::SendPing(nonce) => {
+                send_encrypted(
+                    transport,
+                    &mut session,
+                    &Frame::body(FrameBody::Ping { nonce }),
+                )
+                .await?;
+                continue;
+            }
+            HeartbeatPoll::Timeout => {
+                let _ = transport.close().await;
+                return Err(ClientError::Transport("heartbeat timeout".to_owned()));
+            }
+            HeartbeatPoll::Wait => {}
         }
 
         let action = {
@@ -404,12 +431,17 @@ async fn run_one_connection<T: Transport>(
                     Either::Left((Some(frame), ()))
                 } else {
                     pending_cmds.push_front(cmd);
-                    Either::Right((recv_encrypted(transport, &mut session).await, ()))
+                    Either::Right((
+                        recv_with_heartbeat(transport, &mut session, clock, rng, &mut heartbeat)
+                            .await,
+                        (),
+                    ))
                 }
             } else {
                 let next_cmd = cmd_rx.next().fuse();
                 let next_session_cmd = session_cmd_rx.next().fuse();
-                let next_frame = recv_encrypted(transport, &mut session).fuse();
+                let next_frame =
+                    recv_with_heartbeat(transport, &mut session, clock, rng, &mut heartbeat).fuse();
                 futures_util::pin_mut!(next_cmd, next_session_cmd, next_frame);
 
                 match futures_util::future::select(
@@ -649,6 +681,43 @@ async fn run_one_connection<T: Transport>(
     }
 }
 
+async fn recv_with_heartbeat<T, C, R>(
+    transport: &mut T,
+    session: &mut NoiseSession,
+    clock: &C,
+    rng: &R,
+    heartbeat: &mut HeartbeatState,
+) -> ClientResult<Frame>
+where
+    T: Transport,
+    C: Clock,
+    R: Rng,
+{
+    loop {
+        match heartbeat.poll(clock.now_ms(), rng) {
+            HeartbeatPoll::SendPing(nonce) => {
+                send_encrypted(transport, session, &Frame::body(FrameBody::Ping { nonce })).await?;
+            }
+            HeartbeatPoll::Timeout => {
+                let _ = transport.close().await;
+                return Err(ClientError::Transport("heartbeat timeout".to_owned()));
+            }
+            HeartbeatPoll::Wait => {
+                let recv = recv_encrypted(transport, session).fuse();
+                let sleep = clock.sleep_ms(heartbeat.sleep_ms(clock.now_ms())).fuse();
+                futures_util::pin_mut!(recv, sleep);
+                match futures_util::future::select(recv, sleep).await {
+                    Either::Left((frame, _)) => {
+                        heartbeat.on_inbound(clock.now_ms());
+                        return frame;
+                    }
+                    Either::Right(((), _)) => {}
+                }
+            }
+        }
+    }
+}
+
 async fn send_encrypted<T: Transport>(
     transport: &mut T,
     session: &mut NoiseSession,
@@ -715,6 +784,16 @@ struct ConnectionState<'a> {
     events_tx: mpsc::Sender<ClientEvent>,
     cmd_tx: &'a mpsc::Sender<TerminalCmd>,
     terminal: &'a Rc<RefCell<Option<TerminalHandle>>>,
+    reached_connected: &'a mut bool,
+}
+
+enum Action {
+    Send(Frame),
+    SendPendingCommand(Frame),
+    SendPendingSessionCommand(Frame),
+    Emit(ClientEvent),
+    Return(ClientResult<()>),
+    None,
 }
 
 async fn sleep_backoff<C: Clock, R: Rng>(clock: &C, rng: &R, delay_ms: u64) {
@@ -723,6 +802,60 @@ async fn sleep_backoff<C: Clock, R: Rng>(clock: &C, rng: &R, delay_ms: u64) {
     clock
         .sleep_ms(crate::reconnect::jitter(delay_ms, byte[0]))
         .await;
+}
+
+#[derive(Debug, Clone)]
+struct HeartbeatState {
+    last_inbound_at_ms: u64,
+    ping_outstanding: bool,
+}
+
+enum HeartbeatPoll {
+    SendPing(u32),
+    Timeout,
+    Wait,
+}
+
+impl HeartbeatState {
+    fn new(now_ms: u64) -> Self {
+        Self {
+            last_inbound_at_ms: now_ms,
+            ping_outstanding: false,
+        }
+    }
+
+    fn on_inbound(&mut self, now_ms: u64) {
+        self.last_inbound_at_ms = now_ms;
+        self.ping_outstanding = false;
+    }
+
+    fn poll<R: Rng>(&mut self, now_ms: u64, rng: &R) -> HeartbeatPoll {
+        let elapsed_ms = now_ms.saturating_sub(self.last_inbound_at_ms);
+        if self.ping_outstanding {
+            if elapsed_ms >= HEARTBEAT_TIMEOUT_MS {
+                HeartbeatPoll::Timeout
+            } else {
+                HeartbeatPoll::Wait
+            }
+        } else if elapsed_ms >= HEARTBEAT_IDLE_MS {
+            let mut bytes = [0_u8; 4];
+            rng.fill(&mut bytes);
+            self.ping_outstanding = true;
+            HeartbeatPoll::SendPing(u32::from_le_bytes(bytes))
+        } else {
+            HeartbeatPoll::Wait
+        }
+    }
+
+    fn sleep_ms(&self, now_ms: u64) -> u64 {
+        let elapsed_ms = now_ms.saturating_sub(self.last_inbound_at_ms);
+        if self.ping_outstanding {
+            HEARTBEAT_TIMEOUT_MS.saturating_sub(elapsed_ms)
+        } else {
+            HEARTBEAT_IDLE_MS.saturating_sub(elapsed_ms)
+        }
+        .max(1)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

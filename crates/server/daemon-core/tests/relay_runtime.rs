@@ -4,7 +4,8 @@ use std::time::Duration;
 use cli_pocket_crypto::{KeyPair, NoiseInitiator};
 use cli_pocket_daemon_core::client_db::ClientRecord;
 use cli_pocket_daemon_core::config::{
-    AppConfig, DaemonConfig, LimitsConfig, ListenConfig, RelayConfig, SecurityConfig,
+    AppConfig, DaemonConfig, LimitsConfig, ListenConfig, RelayConfig, RelayRetryConfig,
+    SecurityConfig,
 };
 use cli_pocket_daemon_core::server::Daemon;
 use cli_pocket_proto::codec::{
@@ -45,6 +46,25 @@ async fn daemon_registers_with_relay() {
         "daemon server id should appear in relay registry"
     );
 
+    daemon.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn daemon_retries_until_relay_is_available() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind future relay");
+    let relay_addr = listener.local_addr().expect("future relay addr");
+    drop(listener);
+
+    let mut daemon = DaemonFixture::boot(relay_addr).await;
+    let server_id = daemon.server_id();
+    daemon.start().await.expect("start daemon");
+
+    sleep(Duration::from_millis(800)).await;
+    let relay = RelayFixture::start_on(relay_addr).await;
+
+    daemon.wait_until_registered(&relay, server_id).await;
     daemon.shutdown().await;
 }
 
@@ -126,13 +146,22 @@ struct RelayFixture {
 
 impl RelayFixture {
     async fn start() -> Self {
-        let mut config = RelayServerConfig::default();
-        config.listen.addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
-        config.listen.port = 0;
-        let server = RelayServer::new(config);
-        let app = router(server.state.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind relay");
         let addr = listener.local_addr().expect("relay addr");
+        Self::start_with_listener(listener, addr).await
+    }
+
+    async fn start_on(addr: SocketAddr) -> Self {
+        let listener = TcpListener::bind(addr).await.expect("bind relay");
+        Self::start_with_listener(listener, addr).await
+    }
+
+    async fn start_with_listener(listener: TcpListener, addr: SocketAddr) -> Self {
+        let mut config = RelayServerConfig::default();
+        config.listen.addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        config.listen.port = addr.port();
+        let server = RelayServer::new(config);
+        let app = router(server.state.clone());
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
@@ -166,6 +195,7 @@ impl DaemonFixture {
                 base_url: format!("ws://{relay_addr}"),
                 psk_hex: String::new(),
                 server_auth_token: None,
+                retry: RelayRetryConfig::default(),
             },
             app: AppConfig::default(),
             limits: LimitsConfig::default(),

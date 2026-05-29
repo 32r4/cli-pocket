@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{header::AUTHORIZATION, HeaderValue};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::accept::{AcceptedTransport, AcceptedTransportKind};
 use crate::config::{relay_server_ws_url_for_server, RelayConfig};
@@ -62,6 +62,62 @@ struct PairBridge {
 }
 
 pub async fn run(
+    config: RelayConfig,
+    server_id: ServerId,
+    identity: KeyPair,
+    accepted_tx: mpsc::Sender<AcceptedTransport<PairTransport>>,
+) -> crate::DaemonResult<()> {
+    run_once(config, server_id, identity, accepted_tx).await
+}
+
+pub async fn run_forever(
+    config: RelayConfig,
+    server_id: ServerId,
+    identity: KeyPair,
+    accepted_tx: mpsc::Sender<AcceptedTransport<PairTransport>>,
+) -> crate::DaemonResult<()> {
+    let relay_url = config.base_url.clone();
+    let mut delay_ms = config.retry.initial_ms.max(50);
+    let mut attempts: u64 = 0;
+
+    loop {
+        attempts = attempts.saturating_add(1);
+        match run_once(
+            config.clone(),
+            server_id,
+            identity.clone(),
+            accepted_tx.clone(),
+        )
+        .await
+        {
+            Ok(()) => {
+                delay_ms = config.retry.initial_ms.max(50);
+                warn!(
+                    url = %relay_url,
+                    server_id = ?server_id,
+                    attempt = attempts,
+                    next_delay_ms = delay_ms,
+                    "relay session ended; retry scheduled"
+                );
+            }
+            Err(err) => {
+                let sleep_ms = jitter(delay_ms, jitter_seed());
+                warn!(
+                    url = %relay_url,
+                    server_id = ?server_id,
+                    attempt = attempts,
+                    next_delay_ms = sleep_ms,
+                    error = %err,
+                    "relay dialer attempt failed; retry scheduled"
+                );
+                tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+                delay_ms = next_delay(delay_ms, config.retry.max_ms, config.retry.mul_x10);
+            }
+        }
+    }
+}
+
+async fn run_once(
     config: RelayConfig,
     server_id: ServerId,
     identity: KeyPair,
@@ -245,6 +301,31 @@ where
     }
 
     Ok(())
+}
+
+fn next_delay(cur_ms: u64, max_ms: u64, mul_x10: u32) -> u64 {
+    let scaled = (u128::from(cur_ms) * u128::from(mul_x10)) / 10;
+    u64::try_from(scaled)
+        .unwrap_or(u64::MAX)
+        .min(max_ms)
+        .max(50)
+}
+
+fn jitter(base_ms: u64, rng_byte: u8) -> u64 {
+    let offset = i64::from(rng_byte) - 128;
+    let delta = (i128::from(base_ms) * i128::from(offset)) / 512;
+    let jittered = i128::from(base_ms) + delta;
+    if jittered <= 0 {
+        1
+    } else {
+        u64::try_from(jittered).unwrap_or(u64::MAX)
+    }
+}
+
+fn jitter_seed() -> u8 {
+    let mut byte = [128_u8; 1];
+    let _ = getrandom::getrandom(&mut byte);
+    byte[0]
 }
 
 async fn next_binary<WS>(stream: &mut WS) -> crate::DaemonResult<Vec<u8>>

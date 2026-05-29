@@ -54,10 +54,7 @@ impl EmbeddedDaemonRuntime {
         let mut daemon = Daemon::boot(state.config.clone())
             .await
             .map_err(|error| error.to_string())?;
-        daemon
-            .start_local_only()
-            .await
-            .map_err(|error| error.to_string())?;
+        daemon.start().await.map_err(|error| error.to_string())?;
         state.daemon = Some(daemon);
         Ok(())
     }
@@ -71,10 +68,7 @@ impl EmbeddedDaemonRuntime {
         let mut daemon = Daemon::boot(state.config.clone())
             .await
             .map_err(|error| error.to_string())?;
-        daemon
-            .start_local_only()
-            .await
-            .map_err(|error| error.to_string())?;
+        daemon.start().await.map_err(|error| error.to_string())?;
         state.daemon = Some(daemon);
         Ok(())
     }
@@ -85,10 +79,7 @@ impl EmbeddedDaemonRuntime {
             let mut daemon = Daemon::boot(state.config.clone())
                 .await
                 .map_err(|error| error.to_string())?;
-            daemon
-                .start_local_only()
-                .await
-                .map_err(|error| error.to_string())?;
+            daemon.start().await.map_err(|error| error.to_string())?;
             state.daemon = Some(daemon);
         }
 

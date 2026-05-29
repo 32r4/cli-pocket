@@ -17,8 +17,11 @@ export default defineConfig(({ mode }) => {
 			react(),
 			{
 				name: "cli-pocket-entry-html",
-				transformIndexHtml(html) {
-					return html.replace("%APP_ENTRY%", entryPath);
+				transformIndexHtml: {
+					order: "pre",
+					handler(html) {
+						return html.replace("%APP_ENTRY%", entryPath);
+					},
 				},
 			},
 		],

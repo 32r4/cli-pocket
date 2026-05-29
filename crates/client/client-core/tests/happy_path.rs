@@ -5,7 +5,7 @@ use cli_pocket_client_core::{
     ClientEvent, ClientIdentity, ClientResult, Clock, KeyValueStore, Rng, SessionBuilder,
     SessionConfig, SessionEndpoint, Transport,
 };
-use cli_pocket_crypto::{KeyPair, NoiseResponder, NoiseSession};
+use cli_pocket_crypto::{KeyPair, NoiseAnonymousResponder, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
     AnchorState, CharsetState, ClientId, Color, Frame, FrameBody, HelloOk, MouseMode, ServerInfo,
@@ -15,6 +15,9 @@ use cli_pocket_proto::{
 use cli_pocket_transport::InMemoryTransportPair;
 use futures_channel::mpsc;
 use futures_util::{future::LocalBoxFuture, FutureExt, StreamExt};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEST_NOW_MS: AtomicU64 = AtomicU64::new(0);
 
 #[tokio::test(flavor = "current_thread")]
 async fn session_emits_happy_path_terminal_output() {
@@ -195,7 +198,7 @@ impl HappyPathDaemon {
         &self,
         transport: &mut cli_pocket_transport::InMemoryTransport,
     ) -> ClientResult<NoiseSession> {
-        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let mut responder = NoiseAnonymousResponder::new(&self.keypair)?;
         let m1 = recv_transport(transport).await?;
         responder.read_handshake(&m1)?;
         cli_pocket_transport::Transport::send(transport, responder.write_handshake()?).await?;
@@ -211,10 +214,13 @@ struct TestClock;
 #[async_trait(?Send)]
 impl Clock for TestClock {
     fn now_ms(&self) -> u64 {
-        0
+        TEST_NOW_MS.load(Ordering::Relaxed)
     }
 
-    async fn sleep_ms(&self, _ms: u64) {}
+    async fn sleep_ms(&self, ms: u64) {
+        tokio::task::yield_now().await;
+        TEST_NOW_MS.fetch_add(ms, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone, Default)]

@@ -1,12 +1,12 @@
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use cli_pocket_client_core::session::SessionSpawner;
 use cli_pocket_client_core::{
-    ClientEvent, ClientIdentity, ClientResult, Clock, KeyValueStore, Rng, SessionBuilder,
-    SessionConfig, SessionEndpoint, Transport,
+    ClientError, ClientEvent, ClientIdentity, ClientResult, Clock, KeyValueStore, Rng,
+    SessionBuilder, SessionConfig, SessionEndpoint, Transport,
 };
-use cli_pocket_crypto::{KeyPair, NoiseResponder, NoiseSession};
+use cli_pocket_crypto::{KeyPair, NoiseAnonymousResponder, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
     AnchorState, CharsetState, ClientId, Color, Frame, FrameBody, HelloOk, MouseMode, ServerInfo,
@@ -84,6 +84,154 @@ async fn reconnect_with_resume_inner() {
         b"resumed output".to_vec(),
     )
     .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn backoff_resets_after_connected_session() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            backoff_resets_after_connected_session_inner().await;
+        })
+        .await;
+}
+
+async fn backoff_resets_after_connected_session_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let session_id = SessionId::new();
+    let sleeps = Arc::new(Mutex::new(Vec::new()));
+    let now_ms = Arc::new(AtomicU64::new(0));
+    let daemon = FlakyThenConnectedDaemon {
+        keypair: server_keypair,
+        session_id,
+        attempts: Arc::new(AtomicU32::new(0)),
+    };
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            resume_token: None,
+            backoff: (50, 200, 20),
+        },
+        RecordingClock {
+            sleeps: Arc::clone(&sleeps),
+            now_ms: Arc::clone(&now_ms),
+        },
+        TestRng,
+        TestKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (_session, mut events) = builder.start();
+
+    assert_connecting(&mut events).await;
+    assert_disconnected(&mut events, true).await;
+    assert_connecting(&mut events).await;
+    assert_disconnected(&mut events, true).await;
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, session_id).await;
+    assert_disconnected(&mut events, true).await;
+
+    for _ in 0..100 {
+        if sleeps.lock().unwrap().len() >= 3 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+
+    let short_sleeps: Vec<u64> = sleeps
+        .lock()
+        .unwrap()
+        .iter()
+        .copied()
+        .filter(|ms| *ms <= 200)
+        .collect();
+    assert_eq!(
+        short_sleeps.as_slice(),
+        [50, 100, 50],
+        "successful protocol connection must reset reconnect backoff"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn heartbeat_timeout_triggers_reconnect() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            heartbeat_timeout_triggers_reconnect_inner().await;
+        })
+        .await;
+}
+
+async fn heartbeat_timeout_triggers_reconnect_inner() {
+    let server_keypair = KeyPair::generate().unwrap();
+    let client_keypair = KeyPair::generate().unwrap();
+    let terminal = TerminalId::new();
+    let session_id = SessionId::new();
+    let info = terminal_info(terminal);
+    let ping_count = Arc::new(AtomicU32::new(0));
+    let daemon = HeartbeatTimeoutDaemon {
+        keypair: server_keypair,
+        session_id,
+        info: info.clone(),
+        first_stream: StreamId(17),
+        resumed_stream: StreamId(27),
+        attempts: Arc::new(AtomicU32::new(0)),
+        ping_count: Arc::clone(&ping_count),
+    };
+    let now_ms = Arc::new(AtomicU64::new(0));
+
+    let builder = SessionBuilder::new(
+        ClientIdentity {
+            client_id: ClientId(
+                cli_pocket_crypto::Identity::from_keypair(&client_keypair).server_id,
+            ),
+            keypair: client_keypair,
+        },
+        SessionConfig {
+            endpoint: SessionEndpoint::Direct("ws://localhost".to_owned()),
+            resume_token: None,
+            backoff: (50, 200, 20),
+        },
+        RecordingClock {
+            sleeps: Arc::new(Mutex::new(Vec::new())),
+            now_ms,
+        },
+        TestRng,
+        TestKv,
+        daemon.transport_factory(),
+        AsyncSpawner,
+    );
+
+    let (_session, mut events) = builder.start();
+
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, session_id).await;
+    assert_terminal_created(&mut events, &info).await;
+    assert_disconnected(&mut events, true).await;
+    assert_connecting(&mut events).await;
+    assert_connected(&mut events, session_id).await;
+    assert_terminal_output(
+        &mut events,
+        terminal,
+        StreamSeq(1),
+        b"after-heartbeat-reconnect".to_vec(),
+    )
+    .await;
+
+    assert_eq!(
+        ping_count.load(Ordering::SeqCst),
+        1,
+        "client should send one heartbeat ping before timing out the first connection"
+    );
 }
 
 #[derive(Clone)]
@@ -265,7 +413,82 @@ impl ReconnectDaemon {
         &self,
         transport: &mut cli_pocket_transport::InMemoryTransport,
     ) -> ClientResult<NoiseSession> {
-        let mut responder = NoiseResponder::new(&self.keypair, None)?;
+        let mut responder = NoiseAnonymousResponder::new(&self.keypair)?;
+        let m1 = recv_transport(transport).await?;
+        responder.read_handshake(&m1)?;
+        cli_pocket_transport::Transport::send(transport, responder.write_handshake()?).await?;
+        let m3 = recv_transport(transport).await?;
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
+}
+
+#[derive(Clone)]
+struct FlakyThenConnectedDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    attempts: Arc<AtomicU32>,
+}
+
+impl FlakyThenConnectedDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<ClientTransport>> + 'static {
+        let state = self.clone();
+        move || {
+            let state = state.clone();
+            async move {
+                let attempt = state.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                match attempt {
+                    1 | 2 => Err(ClientError::Transport("dial refused".to_owned())),
+                    3 => {
+                        let pair = InMemoryTransportPair::new(8);
+                        let client = ClientTransport(pair.a);
+                        let server = pair.b;
+                        tokio::task::spawn_local(async move {
+                            state.run_connected_then_close(server).await.unwrap();
+                        });
+                        Ok(client)
+                    }
+                    _ => std::future::pending().await,
+                }
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connected_then_close(
+        self,
+        mut transport: cli_pocket_transport::InMemoryTransport,
+    ) -> ClientResult<()> {
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(hello.body, FrameBody::Hello(_)));
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::HelloOk(HelloOk {
+                protocol: PROTOCOL_VERSION,
+                server_info: ServerInfo {
+                    server_version: "backoff-test-daemon".to_owned(),
+                    server_label: Some("test-server".to_owned()),
+                },
+                session_id: self.session_id,
+                resumed: false,
+            })),
+        )
+        .await?;
+        let list = recv_encrypted(&mut transport, &mut session).await?;
+        assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+        cli_pocket_transport::Transport::close(&mut transport).await?;
+        Ok(())
+    }
+
+    async fn handshake(
+        &self,
+        transport: &mut cli_pocket_transport::InMemoryTransport,
+    ) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseAnonymousResponder::new(&self.keypair)?;
         let m1 = recv_transport(transport).await?;
         responder.read_handshake(&m1)?;
         cli_pocket_transport::Transport::send(transport, responder.write_handshake()?).await?;
@@ -278,13 +501,224 @@ impl ReconnectDaemon {
 #[derive(Clone, Default)]
 struct TestClock;
 
+static TEST_NOW_MS: AtomicU64 = AtomicU64::new(0);
+
 #[async_trait::async_trait(?Send)]
 impl Clock for TestClock {
     fn now_ms(&self) -> u64 {
-        0
+        TEST_NOW_MS.load(Ordering::Relaxed)
     }
 
-    async fn sleep_ms(&self, _ms: u64) {}
+    async fn sleep_ms(&self, ms: u64) {
+        tokio::task::yield_now().await;
+        TEST_NOW_MS.fetch_add(ms, Ordering::Relaxed);
+    }
+}
+
+#[derive(Clone)]
+struct RecordingClock {
+    sleeps: Arc<Mutex<Vec<u64>>>,
+    now_ms: Arc<AtomicU64>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl Clock for RecordingClock {
+    fn now_ms(&self) -> u64 {
+        self.now_ms.load(Ordering::Relaxed)
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        tokio::task::yield_now().await;
+        self.sleeps.lock().unwrap().push(ms);
+        self.now_ms.fetch_add(ms, Ordering::Relaxed);
+    }
+}
+
+#[derive(Clone)]
+struct HeartbeatTimeoutDaemon {
+    keypair: KeyPair,
+    session_id: SessionId,
+    info: TerminalInfo,
+    first_stream: StreamId,
+    resumed_stream: StreamId,
+    attempts: Arc<AtomicU32>,
+    ping_count: Arc<AtomicU32>,
+}
+
+impl HeartbeatTimeoutDaemon {
+    fn transport_factory(
+        &self,
+    ) -> impl FnMut() -> LocalBoxFuture<'static, ClientResult<ClientTransport>> + 'static {
+        let state = self.clone();
+        move || {
+            let state = state.clone();
+            async move {
+                let pair = InMemoryTransportPair::new(8);
+                let client = ClientTransport(pair.a);
+                let server = pair.b;
+                tokio::task::spawn_local(async move {
+                    state.run_connection(server).await.unwrap();
+                });
+                Ok(client)
+            }
+            .boxed_local()
+        }
+    }
+
+    async fn run_connection(
+        self,
+        mut transport: cli_pocket_transport::InMemoryTransport,
+    ) -> ClientResult<()> {
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut session = self.handshake(&mut transport).await?;
+        let hello = recv_encrypted(&mut transport, &mut session).await?;
+
+        match hello.body {
+            FrameBody::Hello(hello) => {
+                assert_eq!(hello.protocol_min, PROTOCOL_VERSION);
+                assert_eq!(hello.protocol_max, PROTOCOL_VERSION);
+                match attempt {
+                    1 => assert!(hello.resume.is_none(), "first connection should not resume"),
+                    2 => {
+                        let resume = hello.resume.expect("second connection should resume");
+                        assert_eq!(resume.session_id, self.session_id);
+                        assert_eq!(resume.attachments.len(), 1);
+                        assert_eq!(resume.attachments[0].terminal, self.info.terminal);
+                        assert_eq!(resume.attachments[0].last_seq, StreamSeq(0));
+                    }
+                    _ => {}
+                }
+            }
+            other => panic!("expected Hello, got {other:?}"),
+        }
+
+        send_encrypted(
+            &mut transport,
+            &mut session,
+            Frame::body(FrameBody::HelloOk(HelloOk {
+                protocol: PROTOCOL_VERSION,
+                server_info: ServerInfo {
+                    server_version: "heartbeat-timeout-daemon".to_owned(),
+                    server_label: Some("test-server".to_owned()),
+                },
+                session_id: self.session_id,
+                resumed: attempt == 2,
+            })),
+        )
+        .await?;
+
+        match attempt {
+            1 => {
+                let list = recv_encrypted(&mut transport, &mut session).await?;
+                assert!(matches!(list.body, FrameBody::TerminalList { .. }));
+
+                send_encrypted(
+                    &mut transport,
+                    &mut session,
+                    Frame::body(FrameBody::TerminalListOk {
+                        request_id: 1,
+                        terminals: vec![self.info.clone()],
+                    }),
+                )
+                .await?;
+
+                let attach = recv_encrypted(&mut transport, &mut session).await?;
+                match attach.body {
+                    FrameBody::TerminalAttach {
+                        request_id,
+                        terminal,
+                        since,
+                    } => {
+                        assert_eq!(request_id, 1);
+                        assert_eq!(terminal, self.info.terminal);
+                        assert_eq!(since, None);
+                    }
+                    other => panic!("expected TerminalAttach, got {other:?}"),
+                }
+
+                send_encrypted(
+                    &mut transport,
+                    &mut session,
+                    Frame::body(FrameBody::TerminalAttachOk {
+                        request_id: 1,
+                        snapshot: snapshot(StreamSeq(0)),
+                        head_seq: StreamSeq(0),
+                        stream: self.first_stream,
+                        initial_window: 4096,
+                    }),
+                )
+                .await?;
+
+                match recv_encrypted(&mut transport, &mut session).await?.body {
+                    FrameBody::Ping { .. } => {
+                        self.ping_count.fetch_add(1, Ordering::SeqCst);
+                    }
+                    other => panic!("expected heartbeat Ping, got {other:?}"),
+                }
+
+                assert!(
+                    cli_pocket_transport::Transport::recv(&mut transport)
+                        .await?
+                        .is_none(),
+                    "client should close the first transport after heartbeat timeout"
+                );
+                Ok(())
+            }
+            2 => {
+                let attach = recv_encrypted(&mut transport, &mut session).await?;
+                match attach.body {
+                    FrameBody::TerminalAttach {
+                        request_id,
+                        terminal,
+                        since,
+                    } => {
+                        assert_eq!(request_id, 1);
+                        assert_eq!(terminal, self.info.terminal);
+                        assert_eq!(since, Some(StreamSeq(0)));
+                    }
+                    other => panic!("expected resumed TerminalAttach, got {other:?}"),
+                }
+
+                send_encrypted(
+                    &mut transport,
+                    &mut session,
+                    Frame::body(FrameBody::TerminalAttachOk {
+                        request_id: 1,
+                        snapshot: snapshot(StreamSeq(0)),
+                        head_seq: StreamSeq(0),
+                        stream: self.resumed_stream,
+                        initial_window: 4096,
+                    }),
+                )
+                .await?;
+
+                send_encrypted(
+                    &mut transport,
+                    &mut session,
+                    Frame::body(FrameBody::Output {
+                        stream: self.resumed_stream,
+                        seq: StreamSeq(1),
+                        bytes: b"after-heartbeat-reconnect".to_vec().into(),
+                    }),
+                )
+                .await
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn handshake(
+        &self,
+        transport: &mut cli_pocket_transport::InMemoryTransport,
+    ) -> ClientResult<NoiseSession> {
+        let mut responder = NoiseAnonymousResponder::new(&self.keypair)?;
+        let m1 = recv_transport(transport).await?;
+        responder.read_handshake(&m1)?;
+        cli_pocket_transport::Transport::send(transport, responder.write_handshake()?).await?;
+        let m3 = recv_transport(transport).await?;
+        responder.read_handshake(&m3)?;
+        Ok(responder.finish()?)
+    }
 }
 
 #[derive(Clone, Default)]

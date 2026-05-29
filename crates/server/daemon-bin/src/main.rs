@@ -136,7 +136,9 @@ async fn run_start(cfg: DaemonConfig) -> Result<()> {
 mod tests {
     use super::Cli;
     use clap::Parser;
-    use cli_pocket_daemon_core::config::{AppConfig, RelayConfig, SecurityConfig};
+    use cli_pocket_daemon_core::config::{
+        AppConfig, RelayConfig, RelayRetryConfig, SecurityConfig,
+    };
     use cli_pocket_daemon_core::service::{load_or_create_config, pair_url};
     use cli_pocket_daemon_core::DaemonConfig;
     use std::path::PathBuf;
@@ -160,6 +162,7 @@ mod tests {
                 base_url: "wss://relay.example".to_owned(),
                 psk_hex: "22".repeat(32),
                 server_auth_token: None,
+                retry: RelayRetryConfig::default(),
             },
             security: test_security_config(),
             ..DaemonConfig::default()

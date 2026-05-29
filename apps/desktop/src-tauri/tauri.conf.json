@@ -7,7 +7,7 @@
     "beforeDevCommand": "npm --prefix ../../frontend/app run dev",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "npm --prefix ../../frontend/app run build",
-    "frontendDist": "../../frontend/app/dist/tauri"
+    "frontendDist": "../../../frontend/app/dist/tauri"
   },
   "app": {
     "windows": [
@@ -20,7 +20,7 @@
   "bundle": {
     "active": true,
     "targets": ["deb", "rpm", "msi", "app", "dmg"],
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png", "icons/icon.ico"]
   },
   "plugins": {
     "deep-link": {
