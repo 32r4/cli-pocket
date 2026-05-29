@@ -13,6 +13,9 @@ describe("SessionController", () => {
 			kill: vi.fn(),
 			exportIdentity: vi.fn(),
 			importIdentity: vi.fn(),
+			localDaemonEndpoint: vi.fn(),
+			daemonPairUrl: vi.fn(),
+			daemonRestart: vi.fn(),
 			close: vi.fn(),
 		};
 

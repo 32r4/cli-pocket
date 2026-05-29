@@ -5,9 +5,23 @@ import { defineConfig } from "vite";
 export default defineConfig(({ mode }) => {
 	const isTauri = mode === "tauri" || mode === "mobile";
 	const tauriDevHost = process.env.TAURI_DEV_HOST;
+	const entryPath =
+		mode === "web"
+			? "/src/entries/web.tsx"
+			: mode === "mobile"
+				? "/src/entries/mobile.tsx"
+				: "/src/entries/desktop.tsx";
 
 	return {
-		plugins: [react()],
+		plugins: [
+			react(),
+			{
+				name: "cli-pocket-entry-html",
+				transformIndexHtml(html) {
+					return html.replace("%APP_ENTRY%", entryPath);
+				},
+			},
+		],
 		resolve: {
 			alias: {
 				"@": path.resolve(__dirname, "src"),

@@ -10,6 +10,7 @@ pub mod listener;
 pub mod relay_dialer;
 pub mod resume;
 pub mod server;
+pub mod service;
 pub mod session;
 
 pub use config::DaemonConfig;

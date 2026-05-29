@@ -2,7 +2,7 @@ use crate::state::AppState;
 use bytes::Bytes;
 use cli_pocket_client_core::{ClientIdentity, SessionBuilder, SessionConfig, SessionEndpoint};
 use cli_pocket_proto::{ResumeToken, TerminalCreateParams, TerminalId};
-use cli_pocket_tauri_bindings::{OsRandom, TokioClock, TokioWsTransport};
+use cli_pocket_tauri_bindings::{FileKvStore, OsRandom, TokioClock, TokioWsTransport};
 use serde::Deserialize;
 use tauri::async_runtime;
 use tauri::State;
@@ -62,8 +62,7 @@ pub async fn cli_pocket_connect(
     let resume_token = parse_resume_token(config.resume_token_hex.as_deref())?;
     let session = state.session.clone();
     let kv = state.kv.clone();
-    let identity = async_runtime::block_on(ClientIdentity::load_or_create(&kv, &OsRandom))
-        .map_err(|error| error.to_string())?;
+    let identity = load_identity(kv.clone()).await?;
     let endpoint = config.endpoint;
     let transport_url = config.transport_url;
 
@@ -81,9 +80,7 @@ pub async fn cli_pocket_connect(
                 kv.clone(),
                 move || {
                     let url = transport_url.clone();
-                    Box::pin(async move {
-                        TokioWsTransport::connect(&url, Some("cli-pocket-server/v1")).await
-                    })
+                    Box::pin(async move { TokioWsTransport::connect(&url, None).await })
                 },
                 spawner.clone(),
             )
@@ -152,24 +149,42 @@ pub async fn cli_pocket_kill(
 }
 
 #[tauri::command]
-pub fn cli_pocket_export_identity(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
-    let identity = async_runtime::block_on(ClientIdentity::load_or_create(&state.kv, &OsRandom))
-        .map_err(|error| error.to_string())?;
+pub async fn cli_pocket_export_identity(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
+    let identity = load_identity(state.kv.clone()).await?;
     identity
         .export_serialized()
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn cli_pocket_import_identity(state: State<'_, AppState>, blob: Vec<u8>) -> Result<(), String> {
-    async_runtime::block_on(ClientIdentity::import_serialized(&state.kv, &blob))
-        .map_err(|error| error.to_string())
+pub async fn cli_pocket_import_identity(
+    state: State<'_, AppState>,
+    blob: Vec<u8>,
+) -> Result<(), String> {
+    import_identity(state.kv.clone(), blob).await
 }
 
 #[tauri::command]
 pub async fn cli_pocket_close(state: State<'_, AppState>) -> Result<(), String> {
     state.session.shutdown().await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn cli_pocket_local_daemon_endpoint(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state.daemon.local_endpoint_url().await
+}
+
+#[tauri::command]
+pub async fn cli_pocket_daemon_pair_url(state: State<'_, AppState>) -> Result<String, String> {
+    state.daemon.pair_url().await
+}
+
+#[tauri::command]
+pub async fn cli_pocket_daemon_restart(state: State<'_, AppState>) -> Result<(), String> {
+    state.daemon.restart().await
 }
 
 fn parse_resume_token(value: Option<&str>) -> Result<Option<ResumeToken>, String> {
@@ -229,6 +244,24 @@ fn validate_signal(signal: Option<&str>) -> Result<(), String> {
         "TERM" | "HUP" | "KILL" => Ok(()),
         _ => Err(format!("unsupported signal: {signal}")),
     }
+}
+
+async fn load_identity(kv: FileKvStore) -> Result<ClientIdentity, String> {
+    async_runtime::spawn_blocking(move || {
+        async_runtime::block_on(ClientIdentity::load_or_create(&kv, &OsRandom))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+async fn import_identity(kv: FileKvStore, blob: Vec<u8>) -> Result<(), String> {
+    async_runtime::spawn_blocking(move || {
+        async_runtime::block_on(ClientIdentity::import_serialized(&kv, &blob))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[cfg(test)]

@@ -38,5 +38,8 @@ export interface ClientBridge {
 	kill(terminalId: string, signal: string): Promise<void>;
 	exportIdentity(): Promise<Uint8Array>;
 	importIdentity(blob: Uint8Array): Promise<void>;
+	localDaemonEndpoint(): Promise<string>;
+	daemonPairUrl(): Promise<string>;
+	daemonRestart(): Promise<void>;
 	close(): Promise<void>;
 }

@@ -12,7 +12,9 @@ use tracing::{error, info};
 
 use crate::accept::{run_accepted_transport, AcceptDeps, AcceptedTransport};
 use crate::client_db::ClientDb;
-use crate::config::DaemonConfig;
+use crate::config::{
+    build_pairing_offer_url, relay_client_ws_url_for_server, DaemonConfig, PairingOffer,
+};
 use crate::identity_store::{load_or_create, DaemonIdentity};
 use crate::listener::serve;
 use crate::session::SessionManager;
@@ -70,6 +72,15 @@ impl Daemon {
     /// Start the WS listener on the configured address and spawn the relay
     /// dialer task.
     pub async fn start(&mut self) -> crate::DaemonResult<()> {
+        self.start_inner(true).await
+    }
+
+    /// Start only the local direct listener.
+    pub async fn start_local_only(&mut self) -> crate::DaemonResult<()> {
+        self.start_inner(false).await
+    }
+
+    async fn start_inner(&mut self, enable_relay: bool) -> crate::DaemonResult<()> {
         let addr = SocketAddr::new(self.config.listen.addr, self.config.listen.port);
         let listener = TcpListener::bind(addr).await?;
 
@@ -108,30 +119,33 @@ impl Daemon {
         });
         self.listener_handle = Some(handle);
 
-        let relay_config = self.config.relay.clone();
-        let server_id = self.identity.server_id;
-        let identity_keypair = self.identity.keypair.clone();
-        let (relay_tx, mut relay_rx) =
-            mpsc::channel::<AcceptedTransport<crate::relay_dialer::PairTransport>>(32);
-        let relay_deps = accept_deps.clone();
-        let handle = tokio::spawn(async move {
-            while let Some(accepted) = relay_rx.recv().await {
-                let deps = relay_deps.clone();
-                tokio::spawn(async move {
-                    let _ = run_accepted_transport(accepted, deps).await;
-                });
-            }
-        });
-        self.relay_accept_handle = Some(handle);
+        if enable_relay {
+            let relay_config = self.config.relay.clone();
+            let server_id = self.identity.server_id;
+            let identity_keypair = self.identity.keypair.clone();
+            let (relay_tx, mut relay_rx) =
+                mpsc::channel::<AcceptedTransport<crate::relay_dialer::PairTransport>>(32);
+            let relay_deps = accept_deps.clone();
+            let handle = tokio::spawn(async move {
+                while let Some(accepted) = relay_rx.recv().await {
+                    let deps = relay_deps.clone();
+                    tokio::spawn(async move {
+                        let _ = run_accepted_transport(accepted, deps).await;
+                    });
+                }
+            });
+            self.relay_accept_handle = Some(handle);
 
-        let handle = tokio::spawn(async move {
-            if let Err(e) =
-                crate::relay_dialer::run(relay_config, server_id, identity_keypair, relay_tx).await
-            {
-                error!(error = %e, "relay dialer exited with error");
-            }
-        });
-        self.relay_handle = Some(handle);
+            let handle = tokio::spawn(async move {
+                if let Err(e) =
+                    crate::relay_dialer::run(relay_config, server_id, identity_keypair, relay_tx)
+                        .await
+                {
+                    error!(error = %e, "relay dialer exited with error");
+                }
+            });
+            self.relay_handle = Some(handle);
+        }
 
         info!("daemon started");
         Ok(())
@@ -156,6 +170,36 @@ impl Daemon {
     /// Utility: return the daemon's public key as a hex string.
     pub fn public_key_hex(&self) -> String {
         hex::encode(self.identity.keypair.public)
+    }
+
+    pub fn pair_url(&self) -> crate::DaemonResult<String> {
+        let relay_url =
+            relay_client_ws_url_for_server(&self.config.relay.base_url, self.identity.server_id)?;
+        let relay_psk_hex = self.config.relay.psk_hex.trim();
+        if relay_psk_hex.is_empty() {
+            return Err(crate::DaemonError::Config(
+                "pair-url requires relay.psk_hex".to_owned(),
+            ));
+        }
+
+        let relay_psk = hex::decode(relay_psk_hex)
+            .map_err(|error| crate::DaemonError::Config(format!("relay.psk_hex: {error}")))?;
+        if relay_psk.len() != 32 {
+            return Err(crate::DaemonError::Config(
+                "pair-url requires relay.psk_hex to decode to 32 bytes".to_owned(),
+            ));
+        }
+
+        build_pairing_offer_url(
+            &self.config.app.base_url,
+            &PairingOffer {
+                label: None,
+                server_id: self.identity.server_id,
+                server_public_hex: self.public_key_hex(),
+                relay_url,
+                relay_psk_hex: relay_psk_hex.to_owned(),
+            },
+        )
     }
 }
 

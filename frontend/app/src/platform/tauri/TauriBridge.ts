@@ -68,6 +68,18 @@ export class TauriBridge implements ClientBridge {
 		await invoke("cli_pocket_import_identity", { blob: Array.from(blob) });
 	}
 
+	async localDaemonEndpoint() {
+		return invoke<string>("cli_pocket_local_daemon_endpoint");
+	}
+
+	async daemonPairUrl() {
+		return invoke<string>("cli_pocket_daemon_pair_url");
+	}
+
+	async daemonRestart() {
+		await invoke("cli_pocket_daemon_restart");
+	}
+
 	async close() {
 		await invoke("cli_pocket_close");
 	}

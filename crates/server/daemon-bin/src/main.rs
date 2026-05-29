@@ -9,16 +9,12 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use cli_pocket_daemon_core::client_db::ClientDb;
-use cli_pocket_daemon_core::config::{
-    build_pairing_offer_url, default_config_path, relay_client_ws_url_for_server, DaemonConfig,
-    PairingOffer, SecurityConfig,
-};
-use cli_pocket_daemon_core::identity_store::{load_or_create, DaemonIdentity};
+use cli_pocket_daemon_core::config::DaemonConfig;
+use cli_pocket_daemon_core::identity_store::load_or_create;
+use cli_pocket_daemon_core::service::{build_config_template, load_or_create_config};
 use cli_pocket_daemon_core::Daemon;
 use cli_pocket_proto::ClientId;
 use uuid::Uuid;
-
-const BUILD_CONFIG_TEMPLATE: &str = include_str!("../daemon.build.toml");
 
 #[derive(Parser)]
 #[command(name = "cli-pocket-daemon", version, about = "cli-pocket daemon")]
@@ -67,11 +63,11 @@ async fn main() -> Result<()> {
 
     // `print-sample-config` must work without loading a config file.
     if matches!(cli.cmd, Cmd::PrintSampleConfig) {
-        print!("{BUILD_CONFIG_TEMPLATE}");
+        print!("{}", build_config_template());
         return Ok(());
     }
 
-    let cfg = load_config(cli.config.as_ref())?;
+    let cfg = load_or_create_config(cli.config.clone())?;
 
     match cli.cmd {
         Cmd::Start => run_start(cfg).await?,
@@ -82,9 +78,8 @@ async fn main() -> Result<()> {
             println!("public_pk = {}", hex::encode(id.keypair.public));
         }
         Cmd::PairUrl => {
-            let id = load_or_create(&cfg.security.identity_path)
-                .context("load or create daemon identity")?;
-            let url = build_pair_url(&cfg, &id)?;
+            let daemon = Daemon::boot(cfg.clone()).await.context("boot daemon")?;
+            let url = daemon.pair_url().context("build pair url")?;
             println!("{url}");
         }
         Cmd::ListClients => {
@@ -128,57 +123,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn load_config(config_path: Option<&PathBuf>) -> Result<DaemonConfig> {
-    let path = config_path.cloned().unwrap_or_else(default_config_path);
-
-    if path.exists() {
-        return DaemonConfig::load_from(&path)
-            .with_context(|| format!("load config {}", path.display()));
-    }
-
-    let mut cfg = DaemonConfig {
-        security: SecurityConfig::for_config_path(&path),
-        ..DaemonConfig::default()
-    };
-    cfg.relay.psk_hex = generate_relay_psk_hex().context("generate relay.psk_hex")?;
-    cfg.save_to(&path)
-        .with_context(|| format!("create default config {}", path.display()))?;
-    Ok(cfg)
-}
-
-fn generate_relay_psk_hex() -> Result<String> {
-    let mut bytes = [0_u8; 32];
-    getrandom::getrandom(&mut bytes).context("read OS random bytes")?;
-    Ok(hex::encode(bytes))
-}
-
-fn build_pair_url(cfg: &DaemonConfig, identity: &DaemonIdentity) -> Result<String> {
-    let relay_url = relay_client_ws_url_for_server(&cfg.relay.base_url, identity.server_id)
-        .context("pair-url requires relay.base_url to be a valid ws:// or wss:// URL")?;
-
-    let relay_psk_hex = cfg.relay.psk_hex.trim();
-    anyhow::ensure!(!relay_psk_hex.is_empty(), "pair-url requires relay.psk_hex");
-
-    let relay_psk =
-        hex::decode(relay_psk_hex).context("pair-url relay.psk_hex must be valid hex")?;
-    anyhow::ensure!(
-        relay_psk.len() == 32,
-        "pair-url requires relay.psk_hex to decode to 32 bytes"
-    );
-
-    build_pairing_offer_url(
-        &cfg.app.base_url,
-        &PairingOffer {
-            label: None,
-            server_id: identity.server_id,
-            server_public_hex: hex::encode(identity.keypair.public),
-            relay_url,
-            relay_psk_hex: relay_psk_hex.to_owned(),
-        },
-    )
-    .map_err(Into::into)
-}
-
 async fn run_start(cfg: DaemonConfig) -> Result<()> {
     let mut daemon = Daemon::boot(cfg).await.context("boot daemon")?;
     daemon.start().await.context("start daemon")?;
@@ -190,15 +134,13 @@ async fn run_start(cfg: DaemonConfig) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_pair_url, generate_relay_psk_hex, Cli};
+    use super::Cli;
     use clap::Parser;
-    use cli_pocket_crypto::KeyPair;
     use cli_pocket_daemon_core::config::{AppConfig, RelayConfig, SecurityConfig};
-    use cli_pocket_daemon_core::identity_store::DaemonIdentity;
+    use cli_pocket_daemon_core::service::{load_or_create_config, pair_url};
     use cli_pocket_daemon_core::DaemonConfig;
-    use cli_pocket_proto::ServerId;
     use std::path::PathBuf;
-    use uuid::Uuid;
+    use tempfile::TempDir;
 
     #[test]
     fn pair_url_subcommand_parses() {
@@ -208,9 +150,8 @@ mod tests {
         assert!(matches!(cli.cmd, super::Cmd::PairUrl));
     }
 
-    #[test]
-    fn pair_url_builds_canonical_offer_url() {
-        let identity = test_identity();
+    #[tokio::test]
+    async fn pair_url_builds_canonical_offer_url() {
         let config = DaemonConfig {
             app: AppConfig {
                 base_url: "https://cli-pocket.example/".to_owned(),
@@ -224,40 +165,36 @@ mod tests {
             ..DaemonConfig::default()
         };
 
-        let url = build_pair_url(&config, &identity).expect("build pair url");
+        let url = pair_url(config).await.expect("build pair url");
 
         assert!(url.starts_with("https://cli-pocket.example/#pair="));
     }
 
-    #[test]
-    fn pair_url_requires_relay_psk() {
-        let err = build_pair_url(
-            &DaemonConfig {
-                security: test_security_config(),
-                relay: RelayConfig::default(),
-                ..DaemonConfig::default()
-            },
-            &test_identity(),
-        )
+    #[tokio::test]
+    async fn pair_url_requires_relay_psk() {
+        let err = pair_url(DaemonConfig {
+            security: test_security_config(),
+            relay: RelayConfig::default(),
+            ..DaemonConfig::default()
+        })
+        .await
         .expect_err("missing relay psk should fail");
 
         assert!(err.to_string().contains("relay.psk_hex"));
     }
 
     #[test]
-    fn generated_relay_psk_has_32_random_bytes() {
-        let psk_hex = generate_relay_psk_hex().expect("generate relay psk");
-        assert_eq!(psk_hex.len(), 64);
-        assert!(psk_hex.chars().all(|ch| ch.is_ascii_hexdigit()));
-    }
+    fn load_or_create_config_writes_default_file() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("daemon.toml");
+        let config = load_or_create_config(Some(path.clone())).expect("load config");
 
-    fn test_identity() -> DaemonIdentity {
-        let keypair = KeyPair::generate().expect("generate keypair");
-
-        DaemonIdentity {
-            server_id: ServerId(Uuid::now_v7()),
-            keypair,
-        }
+        assert!(path.exists());
+        assert_eq!(
+            config.security.identity_path,
+            dir.path().join("identity.json")
+        );
+        assert_eq!(config.relay.psk_hex.len(), 64);
     }
 
     fn test_security_config() -> SecurityConfig {

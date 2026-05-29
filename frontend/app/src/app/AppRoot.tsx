@@ -69,7 +69,7 @@ function initialFormState(server?: DaemonRecord): ServerFormState {
 	if (server == null) {
 		return {
 			kind: "direct",
-			endpointUrl: "ws://127.0.0.1:7842/session",
+			endpointUrl: "",
 			relayUrl: "wss://relay.example/ws/client?server=",
 			serverId: "",
 			relayPskHex: "",
@@ -152,6 +152,7 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 	);
 	const [pairingUrl, setPairingUrl] = useState("");
 	const [inlineError, setInlineError] = useState<string | null>(null);
+	const [localPairUrl, setLocalPairUrl] = useState<string | null>(null);
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
@@ -201,6 +202,50 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 			active = false;
 		};
 	}, [clientKind]);
+
+	useEffect(() => {
+		if (bridge == null || clientKind !== "tauri") {
+			return;
+		}
+
+		let cancelled = false;
+		void bridge
+			.localDaemonEndpoint()
+			.then((endpointUrl) => {
+				if (cancelled) {
+					return;
+				}
+
+				const existing = daemonRegistry
+					.getState()
+					.daemons.find((daemon) => daemon.id === "local-daemon");
+				const localDaemon: DaemonRecord = {
+					id: "local-daemon",
+					label: existing?.label ?? "This desktop",
+					kind: "direct",
+					endpointUrl,
+					resumeTokenHex: existing?.resumeTokenHex ?? null,
+					lastConnectedAt: existing?.lastConnectedAt ?? null,
+				};
+				daemonRegistry.getState().upsertDaemon(localDaemon);
+				daemonRegistry.getState().selectDaemon(localDaemon.id);
+				uiState.getState().setSelectedServerId(localDaemon.id);
+			})
+			.catch((error: unknown) => {
+				if (cancelled) {
+					return;
+				}
+				setInlineError(
+					error instanceof Error
+						? error.message
+						: "failed to resolve local daemon endpoint",
+				);
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [bridge, clientKind]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
@@ -439,6 +484,43 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		}
 	};
 
+	const generateLocalPairUrl = () => {
+		if (bridge == null) {
+			return;
+		}
+
+		void bridge
+			.daemonPairUrl()
+			.then((url) => {
+				setLocalPairUrl(url);
+				setInlineError(null);
+			})
+			.catch((error: unknown) => {
+				setInlineError(
+					error instanceof Error
+						? error.message
+						: "failed to generate pair url",
+				);
+			});
+	};
+
+	const restartLocalDaemon = () => {
+		if (bridge == null) {
+			return;
+		}
+
+		void bridge
+			.daemonRestart()
+			.then(() => {
+				setInlineError(null);
+			})
+			.catch((error: unknown) => {
+				setInlineError(
+					error instanceof Error ? error.message : "failed to restart daemon",
+				);
+			});
+	};
+
 	const openAddServerChooser = () => {
 		setInlineError(null);
 		setPairingUrl("");
@@ -496,6 +578,24 @@ export function AppRoot({ clientKind, mobile = false }: AppRootProps) {
 		ui.overlaySection === "settings" ? (
 			<section className="detail-section">
 				<h2>Settings</h2>
+				{clientKind === "tauri" ? (
+					<div className="action-row">
+						<button type="button" onClick={generateLocalPairUrl}>
+							Generate pair URL
+						</button>
+						<button type="button" onClick={restartLocalDaemon}>
+							Restart daemon
+						</button>
+					</div>
+				) : null}
+				{clientKind === "tauri" && localPairUrl != null ? (
+					<div className="detail-grid">
+						<div>
+							<span>Pair URL</span>
+							<strong>{localPairUrl}</strong>
+						</div>
+					</div>
+				) : null}
 				<div className="detail-grid">
 					<div>
 						<span>Theme</span>

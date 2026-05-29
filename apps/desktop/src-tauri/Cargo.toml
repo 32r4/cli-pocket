@@ -20,6 +20,7 @@ tauri-runtime-wry = "=2.11.2"
 tauri-plugin-deep-link = "=2.4.9"
 
 cli-pocket-client-core = { path = "../../../crates/client/client-core" }
+cli-pocket-daemon-core = { path = "../../../crates/server/daemon-core" }
 cli-pocket-proto = { path = "../../../crates/shared/proto" }
 cli-pocket-tauri-bindings = { path = "../../../crates/client/tauri-bindings" }
 

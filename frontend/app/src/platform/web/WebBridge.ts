@@ -87,6 +87,18 @@ export class WebBridge implements ClientBridge {
 		await import_client_identity(new TextDecoder().decode(blob));
 	}
 
+	async localDaemonEndpoint(): Promise<string> {
+		throw new Error("local daemon is only available in desktop");
+	}
+
+	async daemonPairUrl(): Promise<string> {
+		throw new Error("embedded daemon is only available in desktop");
+	}
+
+	async daemonRestart() {
+		throw new Error("embedded daemon is only available in desktop");
+	}
+
 	async close() {
 		await close_client();
 	}
