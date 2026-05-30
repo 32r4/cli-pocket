@@ -44,18 +44,18 @@ build-wasm:
 
 build-desktop:
     just _frontend-install-if-missing
-    npm --prefix frontend/app run build
+    npm --prefix frontend/app run build:desktop
     cd apps/desktop; cargo tauri build
 
 build-mobile-android:
     just mobile-android-init
     just _frontend-install-if-missing
-    npm --prefix frontend/app run build
+    npm --prefix frontend/app run build:mobile
     cd apps/mobile; cargo tauri android build --apk --aab
 
 build-mobile-ios:
     just _frontend-install-if-missing
-    npm --prefix frontend/app run build
+    npm --prefix frontend/app run build:mobile
     cd apps/mobile; cargo tauri ios build
 
 build-web:
@@ -117,7 +117,7 @@ dist:
     just build-daemon
     just build-relay
     just build-wasm
-    npm --prefix frontend/app run build
+    npm --prefix frontend/app run build:desktop
     npm --prefix frontend/app run build:web
 
 # ---- frontend ----

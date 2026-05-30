@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "dev.cli-pocket.desktop",
   "build": {
-    "beforeDevCommand": "npm --prefix ../../frontend/app run dev",
+    "beforeDevCommand": "npm --prefix ../../frontend/app run dev:desktop",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix ../../frontend/app run build",
-    "frontendDist": "../../../frontend/app/dist/tauri"
+    "beforeBuildCommand": "npm --prefix ../../frontend/app run build:desktop",
+    "frontendDist": "../../../frontend/app/dist/desktop"
   },
   "app": {
     "windows": [

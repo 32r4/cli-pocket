@@ -2,11 +2,11 @@ pub mod commands;
 pub mod deep_link;
 pub mod event_pump;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cli_pocket_client_core::ClientEvent;
 use cli_pocket_tauri_bindings::{FileKvStore, SessionHandle};
-use tauri::AppHandle;
+use tauri::{App, AppHandle, Manager, Runtime};
 use tokio::sync::mpsc;
 
 pub fn spawn_session_runtime() -> (SessionHandle, mpsc::Receiver<ClientEvent>) {
@@ -35,6 +35,40 @@ impl ClientRuntimeState {
     pub fn kv(&self) -> FileKvStore {
         self.kv.clone()
     }
+}
+
+pub struct ManagedAppState<D> {
+    client: ClientRuntimeState,
+    daemon: D,
+}
+
+impl<D> ManagedAppState<D> {
+    pub fn new_at(
+        data_dir: &Path,
+        daemon: D,
+    ) -> Result<(Self, mpsc::Receiver<ClientEvent>), String> {
+        let (client, event_rx) = ClientRuntimeState::new_at(data_dir)?;
+
+        Ok((Self { client, daemon }, event_rx))
+    }
+
+    pub fn session(&self) -> SessionHandle {
+        self.client.session()
+    }
+
+    pub fn kv(&self) -> FileKvStore {
+        self.client.kv()
+    }
+
+    pub fn daemon(&self) -> &D {
+        &self.daemon
+    }
+}
+
+pub fn resolve_app_data_dir<R: Runtime>(app: &App<R>) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|error| format!("resolve app data dir: {error}"))
 }
 
 pub fn install_tracing() {

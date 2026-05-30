@@ -68,17 +68,17 @@ pub async fn cli_pocket_close(state: State<'_, AppState>) -> Result<(), String> 
 pub async fn cli_pocket_local_daemon_endpoint(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    state.daemon.local_endpoint_url().await
+    state.daemon().local_endpoint_url().await
 }
 
 #[tauri::command]
 pub async fn cli_pocket_daemon_pair_url(state: State<'_, AppState>) -> Result<String, String> {
-    state.daemon.pair_url().await
+    state.daemon().pair_url().await
 }
 
 #[tauri::command]
 pub async fn cli_pocket_daemon_restart(state: State<'_, AppState>) -> Result<(), String> {
-    state.daemon.restart().await
+    state.daemon().restart().await
 }
 
 #[tauri::command]

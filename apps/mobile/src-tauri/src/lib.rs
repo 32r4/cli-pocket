@@ -1,7 +1,11 @@
 mod commands;
 
-use cli_pocket_tauri_app::{install_app_hooks, install_tracing, ClientRuntimeState};
+use cli_pocket_tauri_app::{
+    install_app_hooks, install_tracing, resolve_app_data_dir, ManagedAppState,
+};
 use tauri::Manager;
+
+pub type AppState = ManagedAppState<()>;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,14 +26,10 @@ pub fn run() {
             commands::cli_pocket_save_daemon_registry,
         ])
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .map_err(|error| std::io::Error::other(format!("resolve app data dir: {error}")))?;
-            let (app_state, event_rx) =
-                ClientRuntimeState::new_at(&app_data_dir).map_err(|error| {
-                    std::io::Error::other(format!("mobile app state should initialize: {error}"))
-                })?;
+            let app_data_dir = resolve_app_data_dir(app).map_err(std::io::Error::other)?;
+            let (app_state, event_rx) = AppState::new_at(&app_data_dir, ()).map_err(|error| {
+                std::io::Error::other(format!("mobile app state should initialize: {error}"))
+            })?;
 
             app.manage(app_state);
             install_app_hooks(&app.handle().clone(), event_rx);

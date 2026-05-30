@@ -2,11 +2,19 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+const APP_PLATFORM_BY_MODE = {
+	web: "web",
+	mobile: "mobile",
+	desktop: "desktop",
+	tauri: "desktop",
+} as const;
+
 export default defineConfig(({ mode }) => {
-	const isTauri = mode === "tauri" || mode === "mobile";
+	const isTauri = mode in APP_PLATFORM_BY_MODE && mode !== "web";
 	const tauriDevHost = process.env.TAURI_DEV_HOST;
 	const appPlatform =
-		mode === "web" ? "web" : mode === "mobile" ? "mobile" : "desktop";
+		APP_PLATFORM_BY_MODE[mode as keyof typeof APP_PLATFORM_BY_MODE] ??
+		"desktop";
 	const entryPath = "/src/entries/main.tsx";
 
 	return {
