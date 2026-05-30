@@ -38,6 +38,8 @@ thread_local! {
     static GLOBAL_CLIENT: RefCell<Option<CliPocketClient>> = const { RefCell::new(None) };
 }
 
+const WEB_RECONNECT_BACKOFF: (u64, u64, u32) = (500, 30_000, 20);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,7 +526,7 @@ impl CliPocketClient {
             SessionConfig {
                 endpoint,
                 resume_token,
-                backoff: (50, 1_000, 20),
+                backoff: WEB_RECONNECT_BACKOFF,
             },
             PerfClock,
             CryptoRng,

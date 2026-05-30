@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { pairAndStoreDaemon } from "@/features/pairing/pairingFlow";
-import { importPairingOfferUrl } from "@/features/pairing/pairingOffer";
 import { SessionController } from "@/features/terminals/SessionController";
 import { XTermView } from "@/features/terminals/XTermView";
 import type { ClientBridge, ConnectConfig } from "@/platform/bridge/types";
@@ -38,6 +37,11 @@ interface ServerFormState {
 	serverId: string;
 	relayPskHex: string;
 	serverPublicHex: string;
+}
+
+interface ImportPairingOptions {
+	clearLocationHash?: boolean;
+	closeModal?: boolean;
 }
 
 function toConnectConfig(server: DaemonRecord): ConnectConfig {
@@ -104,6 +108,33 @@ function initialFormState(server?: DaemonRecord): ServerFormState {
 	};
 }
 
+function currentPairingUrlFromLocation() {
+	if (typeof window === "undefined") {
+		return null;
+	}
+
+	const fragment = window.location.hash.startsWith("#")
+		? window.location.hash.slice(1)
+		: window.location.hash;
+	if (new URLSearchParams(fragment).get("pair") == null) {
+		return null;
+	}
+
+	return window.location.href;
+}
+
+function clearLocationHash() {
+	if (typeof window === "undefined" || window.location.hash.length === 0) {
+		return;
+	}
+
+	const nextUrl =
+		window.location.search.length > 0
+			? `${window.location.pathname}${window.location.search}`
+			: window.location.pathname;
+	window.history.replaceState(null, "", nextUrl);
+}
+
 function makeServerRecord(
 	form: ServerFormState,
 	currentServerId: string | null,
@@ -155,10 +186,15 @@ export function AppRoot({
 	const [inlineError, setInlineError] = useState<string | null>(null);
 	const [localPairUrl, setLocalPairUrl] = useState<string | null>(null);
 	const [daemonRegistryReady, setDaemonRegistryReady] = useState(false);
+	const [eventStreamActive, setEventStreamActive] = useState(false);
+	const [pairingImportInProgress, setPairingImportInProgress] = useState(false);
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
 	const autoConnectServerIdRef = useRef<string | null>(null);
+	const pendingPairingServerIdRef = useRef<string | null>(null);
+	const pendingInitialTerminalRef = useRef<string | null>(null);
+	const processedPairingUrlRef = useRef<string | null>(null);
 
 	const selectedServer =
 		registry.daemons.find((daemon) => daemon.id === ui.selectedServerId) ??
@@ -175,6 +211,7 @@ export function AppRoot({
 		) ??
 		workspace.terminals[0] ??
 		null;
+	const hasPendingPairingUrl = currentPairingUrlFromLocation() != null;
 
 	useEffect(() => {
 		let active = true;
@@ -182,7 +219,12 @@ export function AppRoot({
 		void bridgeFactory(platform)
 			.then((instance) => {
 				if (!active) {
-					void instance.close();
+					// The web bridge wraps a wasm global singleton client.
+					// Closing a stale instance here tears down the live session
+					// created by the StrictMode remount.
+					if (platform.bridge !== "web") {
+						void instance.close();
+					}
 					return;
 				}
 
@@ -351,6 +393,9 @@ export function AppRoot({
 		if (controller == null) {
 			return;
 		}
+		if (hasPendingPairingUrl || pairingImportInProgress) {
+			return;
+		}
 		if (
 			workspace.connectionState === "connected" ||
 			workspace.connectionState === "connecting"
@@ -365,21 +410,27 @@ export function AppRoot({
 		setInlineError(null);
 
 		void controller
-			.connectAndCreate(mainServer.id, toConnectConfig(mainServer))
+			.connect(mainServer.id, toConnectConfig(mainServer))
+			.then(() => {
+				setEventStreamActive(true);
+			})
 			.catch((error: unknown) => {
 				const message =
 					error instanceof Error ? error.message : "connection failed";
 				workspaceState.getState().markConnectionFailed(message);
 				setInlineError(message);
 			});
-	}, [controller, mainServer, workspace.connectionState, daemonRegistryReady]);
+	}, [
+		controller,
+		mainServer,
+		workspace.connectionState,
+		daemonRegistryReady,
+		hasPendingPairingUrl,
+		pairingImportInProgress,
+	]);
 
 	useEffect(() => {
-		if (
-			bridge == null ||
-			workspace.activeConnectionServerId == null ||
-			workspace.connectionState !== "connected"
-		) {
+		if (bridge == null || !eventStreamActive) {
 			return;
 		}
 
@@ -419,9 +470,30 @@ export function AppRoot({
 								);
 						}
 						workspaceState.getState().markConnected();
+						const activeServerId =
+							workspaceState.getState().activeConnectionServerId;
+						if (
+							activeServerId != null &&
+							workspaceState.getState().terminals.length === 0 &&
+							pendingInitialTerminalRef.current !== activeServerId
+						) {
+							pendingInitialTerminalRef.current = activeServerId;
+							void bridge
+								.createTerminal({ cols: 120, rows: 32 })
+								.catch((error: unknown) => {
+									pendingInitialTerminalRef.current = null;
+									const message =
+										error instanceof Error
+											? error.message
+											: "failed to create terminal";
+									workspaceState.getState().markConnectionFailed(message);
+									setInlineError(message);
+								});
+						}
 						continue;
 					}
 					if (kind === "Disconnected") {
+						pendingInitialTerminalRef.current = null;
 						workspaceState.getState().markDisconnected();
 						continue;
 					}
@@ -448,6 +520,7 @@ export function AppRoot({
 							title: label,
 							status: "ready",
 						});
+						pendingInitialTerminalRef.current = null;
 						continue;
 					}
 					if (kind === "TerminalExited") {
@@ -465,6 +538,7 @@ export function AppRoot({
 							"message" in event && typeof event.message === "string"
 								? event.message
 								: "runtime error";
+						pendingInitialTerminalRef.current = null;
 						workspaceState.getState().markConnectionFailed(message);
 						setInlineError(message);
 					}
@@ -475,6 +549,7 @@ export function AppRoot({
 				}
 				const message =
 					error instanceof Error ? error.message : "event stream failed";
+				pendingInitialTerminalRef.current = null;
 				workspaceState.getState().markConnectionFailed(message);
 				setInlineError(message);
 			}
@@ -483,7 +558,111 @@ export function AppRoot({
 		return () => {
 			cancelled = true;
 		};
-	}, [bridge, workspace.activeConnectionServerId, workspace.connectionState]);
+	}, [bridge, eventStreamActive]);
+
+	useEffect(() => {
+		const pendingServerId = pendingPairingServerIdRef.current;
+		if (pendingServerId == null) {
+			return;
+		}
+
+		if (
+			workspace.connectionState === "connected" &&
+			workspace.activeConnectionServerId === pendingServerId
+		) {
+			pendingPairingServerIdRef.current = null;
+		}
+
+		if (workspace.connectionState === "failed") {
+			pendingPairingServerIdRef.current = null;
+		}
+	}, [workspace.activeConnectionServerId, workspace.connectionState]);
+
+	const closeServerModal = useCallback(() => {
+		setServerModalMode("closed");
+		setInlineError(null);
+	}, []);
+
+	const importPairingUrl = useCallback(
+		async (rawUrl: string, options?: ImportPairingOptions) => {
+			try {
+				if (controller == null) {
+					throw new Error("client bridge not ready");
+				}
+
+				setPairingImportInProgress(true);
+				const importedServer = await pairAndStoreDaemon(
+					rawUrl,
+					async (serverId, config) => {
+						pendingPairingServerIdRef.current = serverId;
+						await controller.connect(serverId, config);
+						setEventStreamActive(true);
+						await new Promise<void>((resolve, reject) => {
+							const startedAt = Date.now();
+							const interval = window.setInterval(() => {
+								const state = workspaceState.getState();
+								if (
+									state.connectionState === "connected" &&
+									state.activeConnectionServerId === serverId
+								) {
+									window.clearInterval(interval);
+									resolve();
+									return;
+								}
+								if (state.connectionState === "failed") {
+									window.clearInterval(interval);
+									reject(
+										new Error(
+											state.lastError ?? "failed to connect paired server",
+										),
+									);
+									return;
+								}
+								if (Date.now() - startedAt > 15_000) {
+									window.clearInterval(interval);
+									reject(new Error("timed out waiting for paired connection"));
+								}
+							}, 100);
+						});
+					},
+					registry.upsertDaemon,
+				);
+				registry.selectDaemon(importedServer.id);
+				uiState.getState().setSelectedServerId(importedServer.id);
+				setPairingUrl("");
+				if (options?.closeModal === true) {
+					closeServerModal();
+				}
+			} catch (error: unknown) {
+				setInlineError(
+					error instanceof Error
+						? error.message
+						: "failed to import pairing link",
+				);
+			} finally {
+				setPairingImportInProgress(false);
+				if (options?.clearLocationHash === true) {
+					clearLocationHash();
+				}
+			}
+		},
+		[closeServerModal, controller, registry],
+	);
+
+	useEffect(() => {
+		if (!daemonRegistryReady || controller == null) {
+			return;
+		}
+
+		const rawUrl = currentPairingUrlFromLocation();
+		if (rawUrl == null || processedPairingUrlRef.current === rawUrl) {
+			return;
+		}
+
+		processedPairingUrlRef.current = rawUrl;
+		setInlineError(null);
+		void importPairingUrl(rawUrl, { clearLocationHash: true });
+	}, [controller, daemonRegistryReady, importPairingUrl]);
 
 	const connectServer = async (
 		server: DaemonRecord,
@@ -507,7 +686,8 @@ export function AppRoot({
 		}
 
 		try {
-			await controller.connectAndCreate(server.id, toConnectConfig(server));
+			await controller.connect(server.id, toConnectConfig(server));
+			setEventStreamActive(true);
 		} catch (error: unknown) {
 			const message =
 				error instanceof Error ? error.message : "connection failed";
@@ -596,11 +776,6 @@ export function AppRoot({
 		setServerModalMode("pairing");
 	};
 
-	const closeServerModal = () => {
-		setServerModalMode("closed");
-		setInlineError(null);
-	};
-
 	const saveServer = () => {
 		const nextServer = makeServerRecord(serverForm, null);
 		registry.upsertDaemon(nextServer);
@@ -610,20 +785,7 @@ export function AppRoot({
 	};
 
 	const importPairingLink = async () => {
-		try {
-			const importedServer = importPairingOfferUrl(pairingUrl);
-			await pairAndStoreDaemon(pairingUrl, registry.upsertDaemon);
-			registry.selectDaemon(importedServer.id);
-			uiState.getState().setSelectedServerId(importedServer.id);
-			setPairingUrl("");
-			closeServerModal();
-		} catch (error: unknown) {
-			setInlineError(
-				error instanceof Error
-					? error.message
-					: "failed to import pairing link",
-			);
-		}
+		await importPairingUrl(pairingUrl, { closeModal: true });
 	};
 
 	const errorMessage = inlineError ?? workspace.lastError ?? bridgeError;

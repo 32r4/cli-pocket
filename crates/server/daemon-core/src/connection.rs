@@ -44,8 +44,13 @@ pub struct ConnectionDeps {
 
 #[derive(Clone, Copy)]
 pub enum HandshakeKind<'a> {
-    Direct { auto_pair: bool },
-    Relay { psk: Option<&'a [u8; 32]> },
+    Direct {
+        auto_pair: bool,
+    },
+    Relay {
+        psk: Option<&'a [u8; 32]>,
+        auto_pair: bool,
+    },
 }
 
 /// Run the full per-connection state machine on an already-accepted transport.
@@ -77,8 +82,8 @@ pub async fn run_connection_with_handshake<T: Transport>(
             anonymous_responder_handshake(&mut transport, identity, &deps.client_db, auto_pair)
                 .await?
         }
-        HandshakeKind::Relay { psk } => {
-            responder_handshake(&mut transport, identity, psk, &deps.client_db).await?
+        HandshakeKind::Relay { psk, auto_pair } => {
+            responder_handshake(&mut transport, identity, psk, &deps.client_db, auto_pair).await?
         }
     };
 

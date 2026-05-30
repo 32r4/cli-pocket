@@ -10,8 +10,12 @@ export function mountApp() {
 	}
 
 	createRoot(container).render(
-		<StrictMode>
+		CURRENT_APP_PLATFORM.bridge === "web" ? (
 			<AppRoot platform={CURRENT_APP_PLATFORM} />
-		</StrictMode>,
+		) : (
+			<StrictMode>
+				<AppRoot platform={CURRENT_APP_PLATFORM} />
+			</StrictMode>
+		),
 	);
 }

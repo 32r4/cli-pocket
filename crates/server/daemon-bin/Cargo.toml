@@ -26,6 +26,7 @@ tokio              = { workspace = true, features = ["rt-multi-thread", "macros"
 toml               = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rustls             = { version = "0.23.40", default-features = false, features = ["std", "aws_lc_rs"] }
 uuid               = { workspace = true }
 
 [dev-dependencies]

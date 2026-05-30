@@ -27,6 +27,7 @@ pub async fn responder_handshake<T: Transport + ?Sized>(
     identity: &KeyPair,
     psk: Option<&[u8; 32]>,
     db: &ClientDb,
+    auto_pair: bool,
 ) -> crate::DaemonResult<AcceptedHandshake> {
     // Step 1: Create the NoiseResponder with our identity keypair and optional PSK.
     let mut responder = NoiseResponder::new(identity, psk).map_err(crate::DaemonError::Crypto)?;
@@ -73,10 +74,18 @@ pub async fn responder_handshake<T: Transport + ?Sized>(
     let session = responder.finish().map_err(crate::DaemonError::Crypto)?;
 
     // Step 7: Look up the client in the database by their static public key.
-    let record = db
-        .lookup_by_public(&client_pk)
-        .await?
-        .ok_or_else(|| crate::DaemonError::NotPaired(hex::encode(client_pk)))?;
+    let record = match db.lookup_by_public(&client_pk).await? {
+        Some(record) => record,
+        None if auto_pair => {
+            db.add_or_lookup_by_public(ClientRecord {
+                client_id: ClientId(uuid::Uuid::now_v7()),
+                public_key: client_pk,
+                paired_at: now_unix_secs(),
+            })
+            .await?
+        }
+        None => return Err(crate::DaemonError::NotPaired(hex::encode(client_pk))),
+    };
 
     // Step 8: Check if the client has been revoked.
     if db.is_revoked(&record.client_id).await {

@@ -30,16 +30,8 @@ export class SessionController {
 		private readonly workspace: WorkspaceStore,
 	) {}
 
-	async connectAndCreate(serverId: string, config: ConnectConfig) {
+	async connect(serverId: string, config: ConnectConfig) {
 		this.workspace.getState().startConnecting(serverId);
 		await this.bridge.connect(config);
-		this.workspace.getState().markConnected();
-		this.workspace.getState().openTerminal({
-			id: "pending-terminal",
-			title: "shell",
-			status: "connecting",
-		});
-		await this.bridge.createTerminal({ cols: 120, rows: 32 });
-		this.workspace.getState().markTerminalReady("pending-terminal");
 	}
 }

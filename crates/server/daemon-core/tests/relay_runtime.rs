@@ -138,6 +138,86 @@ async fn relay_transport_reaches_daemon_handshake() {
     daemon.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn relay_transport_auto_pairs_unknown_client() {
+    let relay = RelayFixture::start().await;
+    let mut daemon = DaemonFixture::boot(relay.addr).await;
+    let server_id = daemon.server_id();
+    let client_keypair = KeyPair::generate().expect("client keypair");
+
+    daemon.start().await.expect("start daemon");
+    daemon.wait_until_registered(&relay, server_id).await;
+
+    let (mut client_ws, _) = tokio_tungstenite::connect_async(format!(
+        "ws://{}/ws/client?server={}",
+        relay.addr, server_id.0
+    ))
+    .await
+    .expect("connect client relay socket");
+    client_ws
+        .send(Message::Binary(
+            encode_relay_ctrl(&RelayCtrl::ClientConnect { server_id })
+                .expect("encode pair request"),
+        ))
+        .await
+        .expect("send pair request");
+
+    match recv_relay(&mut client_ws).await {
+        RelayWire::Ctrl(RelayCtrl::PairOpen { .. }) => {}
+        other => panic!("expected PairOpen, got {other:?}"),
+    }
+
+    let mut initiator =
+        NoiseInitiator::new(&client_keypair, &daemon.public_key(), None).expect("initiator");
+    let msg1 = initiator.write_handshake().expect("write msg1");
+    client_ws
+        .send(Message::Binary(msg1))
+        .await
+        .expect("send handshake msg1");
+
+    let msg2 = recv_client_bytes(&mut client_ws).await;
+    initiator.read_handshake(&msg2).expect("read msg2");
+
+    let msg3 = initiator.write_handshake().expect("write msg3");
+    client_ws
+        .send(Message::Binary(msg3))
+        .await
+        .expect("send handshake msg3");
+
+    let mut session = initiator.finish().expect("finish initiator");
+    let hello = Frame::body(FrameBody::Hello(Hello {
+        protocol_min: PROTOCOL_VERSION,
+        protocol_max: PROTOCOL_VERSION,
+        resume: None,
+    }));
+    let hello_bytes = encode_frame(&hello).expect("encode hello");
+    let hello_ciphertext = session.encrypt(&hello_bytes).expect("encrypt hello");
+    client_ws
+        .send(Message::Binary(hello_ciphertext))
+        .await
+        .expect("send hello");
+
+    let hello_response = recv_client_bytes(&mut client_ws).await;
+    let plaintext = session
+        .decrypt(&hello_response)
+        .expect("decrypt hello response");
+    let response = decode_frame(&plaintext).expect("decode hello response");
+    assert!(matches!(response.body, FrameBody::HelloOk(_)));
+
+    let stored = daemon
+        .daemon
+        .client_db
+        .lookup_by_public(&client_keypair.public)
+        .await
+        .expect("lookup paired client");
+    assert!(
+        stored.is_some(),
+        "relay client should auto-pair on first connect"
+    );
+
+    daemon.shutdown().await;
+}
+
 struct RelayFixture {
     addr: SocketAddr,
     server: RelayServer,

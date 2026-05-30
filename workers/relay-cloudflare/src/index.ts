@@ -232,19 +232,35 @@ function uuidToBytes(uuid: string): Uint8Array {
   return out;
 }
 
-function encodeLen(length: number): Uint8Array {
-  if (length >= 0x80) {
-    throw new Error("lengths >= 128 are not implemented in relay-cloudflare");
-  }
-  return Uint8Array.of(length);
+function encodeUuid(uuid: string): Uint8Array {
+  return uuidToBytes(uuid);
 }
 
-function encodeUuid(uuid: string): Uint8Array {
-  const bytes = uuidToBytes(uuid);
-  const out = new Uint8Array(1 + bytes.length);
-  out[0] = 16;
-  out.set(bytes, 1);
-  return out;
+function encodeVarint(value: number): Uint8Array {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`invalid varint value ${value}`);
+  }
+
+  const bytes: number[] = [];
+  let remaining = value;
+  do {
+    let next = remaining % 0x80;
+    remaining = Math.floor(remaining / 0x80);
+    if (remaining > 0) {
+      next |= 0x80;
+    }
+    bytes.push(next);
+  } while (remaining > 0);
+
+  return Uint8Array.from(bytes);
+}
+
+function encodeByteArray(bytes: Uint8Array): Uint8Array {
+  return concatBytes([encodeVarint(bytes.length), bytes]);
+}
+
+function encodeString(value: string): Uint8Array {
+  return encodeByteArray(new TextEncoder().encode(value));
 }
 
 function concatBytes(parts: Uint8Array[]): Uint8Array {
@@ -281,17 +297,33 @@ class Cursor {
     return out;
   }
 
-  readLenPrefixedBytes(): Uint8Array {
-    const length = this.readByte();
+  readVarint(): number {
+    let value = 0;
+    let shift = 0;
+    while (true) {
+      const byte = this.readByte();
+      value += (byte & 0x7f) * 2 ** shift;
+      if ((byte & 0x80) === 0) {
+        return value;
+      }
+      shift += 7;
+      if (shift > 49) {
+        throw new Error("varint too large");
+      }
+    }
+  }
+
+  readByteArray(): Uint8Array {
+    const length = this.readVarint();
     return this.readBytes(length);
   }
 
   readUuid(): string {
-    const length = this.readByte();
-    if (length !== 16) {
-      throw new Error(`unexpected uuid length ${length}`);
-    }
-    return bytesToUuid(this.readBytes(length));
+    return bytesToUuid(this.readBytes(16));
+  }
+
+  readString(): string {
+    return new TextDecoder().decode(this.readByteArray());
   }
 }
 
@@ -300,18 +332,18 @@ function decodeRelay(bytes: Uint8Array): RelayMessage {
   const discriminator = cursor.readByte();
 
   if (discriminator === RELAY_DISC_CTRL) {
-    const kind = cursor.readByte();
+    const kind = cursor.readVarint();
     switch (kind) {
       case CTRL_SERVER_REGISTER: {
         const serverId = cursor.readUuid();
-        cursor.readLenPrefixedBytes();
-        cursor.readLenPrefixedBytes();
+        cursor.readByteArray();
+        cursor.readByteArray();
         return { kind: "ServerRegister", serverId };
       }
       case CTRL_SERVER_REGISTER_OK:
         return { kind: "ServerRegisterOk" };
       case CTRL_SERVER_REGISTER_ERR: {
-        const reason = new TextDecoder().decode(cursor.readLenPrefixedBytes());
+        const reason = cursor.readString();
         return { kind: "ServerRegisterErr", reason };
       }
       case CTRL_SERVER_HEARTBEAT:
@@ -330,7 +362,7 @@ function decodeRelay(bytes: Uint8Array): RelayMessage {
       }
       case CTRL_PAIR_CLOSE: {
         const pairId = cursor.readUuid();
-        const reasonTag = cursor.readByte();
+        const reasonTag = cursor.readVarint();
         const reason =
           reasonTag === 0
             ? { type: "Normal" as const }
@@ -342,9 +374,9 @@ function decodeRelay(bytes: Uint8Array): RelayMessage {
                   ? { type: "Stuck" as const }
                   : reasonTag === 4
                     ? { type: "RelayShutdown" as const }
-                    : {
+                  : {
                         type: "Rejected" as const,
-                        message: new TextDecoder().decode(cursor.readLenPrefixedBytes()),
+                        message: cursor.readString(),
                       };
         return { kind: "PairClose", pairId, reason };
       }
@@ -354,12 +386,12 @@ function decodeRelay(bytes: Uint8Array): RelayMessage {
   }
 
   if (discriminator === RELAY_DISC_DATA) {
-    const kind = cursor.readByte();
+    const kind = cursor.readVarint();
     if (kind !== 0) {
       throw new Error(`unknown relay data kind ${kind}`);
     }
     const pairId = cursor.readUuid();
-    const payload = cursor.readLenPrefixedBytes();
+    const payload = cursor.readByteArray();
     return { kind: "DataForward", pairId, bytes: payload };
   }
 
@@ -369,18 +401,17 @@ function decodeRelay(bytes: Uint8Array): RelayMessage {
 function encodePairCloseReason(reason: CloseReason): Uint8Array {
   switch (reason.type) {
     case "Normal":
-      return Uint8Array.of(0);
+      return encodeVarint(0);
     case "ServerGone":
-      return Uint8Array.of(1);
+      return encodeVarint(1);
     case "ClientGone":
-      return Uint8Array.of(2);
+      return encodeVarint(2);
     case "Stuck":
-      return Uint8Array.of(3);
+      return encodeVarint(3);
     case "RelayShutdown":
-      return Uint8Array.of(4);
+      return encodeVarint(4);
     case "Rejected": {
-      const encoded = new TextEncoder().encode(reason.message);
-      return concatBytes([Uint8Array.of(5), encodeLen(encoded.length), encoded]);
+      return concatBytes([encodeVarint(5), encodeString(reason.message)]);
     }
   }
 }
@@ -388,37 +419,42 @@ function encodePairCloseReason(reason: CloseReason): Uint8Array {
 function encodeRelay(message: RelayMessage): Uint8Array {
   switch (message.kind) {
     case "ServerRegisterOk":
-      return Uint8Array.of(RELAY_DISC_CTRL, CTRL_SERVER_REGISTER_OK);
-    case "ServerRegisterErr": {
-      const encoded = new TextEncoder().encode(message.reason);
       return concatBytes([
-        Uint8Array.of(RELAY_DISC_CTRL, CTRL_SERVER_REGISTER_ERR),
-        encodeLen(encoded.length),
-        encoded,
+        Uint8Array.of(RELAY_DISC_CTRL),
+        encodeVarint(CTRL_SERVER_REGISTER_OK),
+      ]);
+    case "ServerRegisterErr": {
+      return concatBytes([
+        Uint8Array.of(RELAY_DISC_CTRL),
+        encodeVarint(CTRL_SERVER_REGISTER_ERR),
+        encodeString(message.reason),
       ]);
     }
     case "PairInbound":
       return concatBytes([
-        Uint8Array.of(RELAY_DISC_CTRL, CTRL_PAIR_INBOUND),
+        Uint8Array.of(RELAY_DISC_CTRL),
+        encodeVarint(CTRL_PAIR_INBOUND),
         encodeUuid(message.pairId),
       ]);
     case "PairOpen":
       return concatBytes([
-        Uint8Array.of(RELAY_DISC_CTRL, CTRL_PAIR_OPEN),
+        Uint8Array.of(RELAY_DISC_CTRL),
+        encodeVarint(CTRL_PAIR_OPEN),
         encodeUuid(message.pairId),
       ]);
     case "PairClose":
       return concatBytes([
-        Uint8Array.of(RELAY_DISC_CTRL, CTRL_PAIR_CLOSE),
+        Uint8Array.of(RELAY_DISC_CTRL),
+        encodeVarint(CTRL_PAIR_CLOSE),
         encodeUuid(message.pairId),
         encodePairCloseReason(message.reason),
       ]);
     case "DataForward":
       return concatBytes([
-        Uint8Array.of(RELAY_DISC_DATA, 0),
+        Uint8Array.of(RELAY_DISC_DATA),
+        encodeVarint(0),
         encodeUuid(message.pairId),
-        encodeLen(message.bytes.length),
-        message.bytes,
+        encodeByteArray(message.bytes),
       ]);
     default:
       throw new Error(`encoding ${message.kind} is not supported`);

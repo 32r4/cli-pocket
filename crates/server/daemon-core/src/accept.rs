@@ -17,7 +17,7 @@ pub struct AcceptedTransport<T> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AcceptedTransportKind {
     Direct { auto_pair: bool },
-    Relay,
+    Relay { auto_pair: bool },
 }
 
 #[derive(Clone)]
@@ -53,8 +53,9 @@ where
     } = accepted;
     let handshake = match kind {
         AcceptedTransportKind::Direct { auto_pair } => HandshakeKind::Direct { auto_pair },
-        AcceptedTransportKind::Relay => HandshakeKind::Relay {
+        AcceptedTransportKind::Relay { auto_pair } => HandshakeKind::Relay {
             psk: deps.relay_psk.as_deref(),
+            auto_pair,
         },
     };
     let result =

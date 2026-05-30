@@ -3,7 +3,7 @@ import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { SessionController } from "./SessionController";
 
 describe("SessionController", () => {
-	it("opens a terminal after connect succeeds", async () => {
+	it("starts connecting and delegates transport connect", async () => {
 		const bridge = {
 			connect: vi.fn().mockResolvedValue(undefined),
 			events: vi.fn().mockReturnValue((async function* () {})()),
@@ -24,13 +24,13 @@ describe("SessionController", () => {
 		const workspace = createWorkspaceStore();
 		const controller = new SessionController(bridge, workspace);
 
-		await controller.connectAndCreate("server-1", {
+		await controller.connect("server-1", {
 			kind: "direct",
 			endpointUrl: "ws://127.0.0.1:7842",
 		});
 
 		expect(bridge.connect).toHaveBeenCalledTimes(1);
-		expect(bridge.createTerminal).toHaveBeenCalledTimes(1);
-		expect(workspace.getState().connectionState).toBe("connected");
+		expect(bridge.createTerminal).not.toHaveBeenCalled();
+		expect(workspace.getState().connectionState).toBe("connecting");
 	});
 });

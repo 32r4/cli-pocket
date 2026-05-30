@@ -3,7 +3,7 @@ addr = "127.0.0.1"
 port = 17842
 
 [relay]
-base_url = "ws://127.0.0.1:8080"
+base_url = "wss://relay.cli-pocket.32r4.asia"
 psk_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 
 [app]

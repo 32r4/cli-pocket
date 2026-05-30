@@ -14,6 +14,7 @@ use cli_pocket_daemon_core::identity_store::load_or_create;
 use cli_pocket_daemon_core::service::{build_config_template, load_or_create_config};
 use cli_pocket_daemon_core::Daemon;
 use cli_pocket_proto::ClientId;
+use rustls::crypto::aws_lc_rs;
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -53,6 +54,8 @@ enum Cmd {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    install_rustls_crypto_provider();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -121,6 +124,10 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn install_rustls_crypto_provider() {
+    let _ = aws_lc_rs::default_provider().install_default();
 }
 
 async fn run_start(cfg: DaemonConfig) -> Result<()> {
@@ -211,7 +218,7 @@ mod tests {
 
         assert!(path.exists());
         assert_eq!(config.listen.port, 17842);
-        assert_eq!(config.relay.base_url, "ws://127.0.0.1:8080");
+        assert_eq!(config.relay.base_url, "wss://relay.cli-pocket.32r4.asia");
         assert_eq!(
             config.relay.psk_hex,
             "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"

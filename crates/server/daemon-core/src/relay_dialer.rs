@@ -259,7 +259,7 @@ where
                     accepted_tx
                         .send(AcceptedTransport {
                             label: format!("relay:{pair_id:?}"),
-                            kind: AcceptedTransportKind::Relay,
+                            kind: AcceptedTransportKind::Relay { auto_pair: true },
                             transport: PairTransport {
                                 to_daemon_rx,
                                 from_daemon_tx,
