@@ -9,12 +9,21 @@ const APP_PLATFORM_BY_MODE = {
 	tauri: "desktop",
 } as const;
 
+const DEV_PORT_BY_MODE = {
+	web: 5175,
+	mobile: 5174,
+	desktop: 5173,
+	tauri: 5173,
+} as const;
+
 export default defineConfig(({ mode }) => {
 	const isTauri = mode in APP_PLATFORM_BY_MODE && mode !== "web";
 	const tauriDevHost = process.env.TAURI_DEV_HOST;
 	const appPlatform =
 		APP_PLATFORM_BY_MODE[mode as keyof typeof APP_PLATFORM_BY_MODE] ??
 		"desktop";
+	const devPort =
+		DEV_PORT_BY_MODE[mode as keyof typeof DEV_PORT_BY_MODE] ?? 5173;
 	const entryPath = "/src/entries/main.tsx";
 
 	return {
@@ -44,7 +53,7 @@ export default defineConfig(({ mode }) => {
 		},
 		server: {
 			...(isTauri ? { host: tauriDevHost ?? "0.0.0.0" } : {}),
-			port: 5173,
+			port: devPort,
 			strictPort: true,
 			fs: {
 				allow: [path.resolve(__dirname, "../..")],

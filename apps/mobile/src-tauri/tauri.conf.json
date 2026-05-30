@@ -5,7 +5,7 @@
   "identifier": "dev.cli-pocket.mobile",
   "build": {
     "beforeDevCommand": "npm --prefix ../../frontend/app run dev:mobile",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5174",
     "beforeBuildCommand": "npm --prefix ../../frontend/app run build:mobile",
     "frontendDist": "../../../frontend/app/dist/mobile"
   },
