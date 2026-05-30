@@ -51,7 +51,7 @@ mod tests {
         client
             .connect_inner(
                 serde_json::json!({
-                    "endpoint_url": "ws://127.0.0.1:9/ws/client",
+                    "endpointUrl": "ws://127.0.0.1:9/ws/client",
                 })
                 .to_string()
                 .into(),
@@ -245,7 +245,7 @@ struct JsCreateTerminalParams {
     /// Environment overrides as `[[key, value], ...]`.
     #[serde(default)]
     env: Vec<(String, String)>,
-    #[serde(default)]
+    #[serde(default, alias = "scrollbackBytes")]
     scrollback_bytes: Option<u32>,
 }
 

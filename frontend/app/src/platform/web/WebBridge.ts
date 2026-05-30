@@ -11,6 +11,23 @@ import type {
 } from "../bridge/types";
 
 const STORAGE_KEY = "cli-pocket/daemon-registry/v1";
+let wasmInitPromise: Promise<void> | null = null;
+
+function ensureWasmInitialized() {
+	if (wasmInitPromise != null) {
+		return wasmInitPromise;
+	}
+
+	wasmInitPromise = init().then(
+		() => undefined,
+		(error) => {
+			wasmInitPromise = null;
+			throw error;
+		},
+	);
+
+	return wasmInitPromise;
+}
 
 function loadDaemonRegistryFromLocalStorage(): PersistedDaemonRegistry | null {
 	if (typeof window === "undefined") {
@@ -60,28 +77,32 @@ export class WebBridge implements ClientBridge {
 	readonly embeddedDaemon = null;
 
 	static async create() {
-		await init();
+		await ensureWasmInitialized();
 		return new WebBridge(new CliPocketClient());
 	}
 
 	async connect(config: ConnectConfig) {
 		if (config.kind === "direct") {
-			await this.client.connect({
-				kind: "direct",
-				endpoint_url: config.endpointUrl,
-				resume_token_hex: config.resumeTokenHex ?? null,
-			});
+			await this.client.connect(
+				JSON.stringify({
+					kind: "direct",
+					endpointUrl: config.endpointUrl,
+					resumeTokenHex: config.resumeTokenHex ?? null,
+				}),
+			);
 			return;
 		}
 
-		await this.client.connect({
-			kind: "relay",
-			relay_url: config.relayUrl,
-			server_id: config.serverId,
-			psk_hex: config.pskHex,
-			server_public_hex: config.serverPublicHex,
-			resume_token_hex: config.resumeTokenHex ?? null,
-		});
+		await this.client.connect(
+			JSON.stringify({
+				kind: "relay",
+				relayUrl: config.relayUrl,
+				serverId: config.serverId,
+				pskHex: config.pskHex,
+				serverPublicHex: config.serverPublicHex,
+				resumeTokenHex: config.resumeTokenHex ?? null,
+			}),
+		);
 	}
 
 	events(): AsyncIterable<unknown> {
@@ -112,7 +133,7 @@ export class WebBridge implements ClientBridge {
 				cwd: params.cwd ?? null,
 				cmd: params.cmd ?? [],
 				env: Object.entries(params.env ?? {}),
-				scrollback_bytes: params.scrollbackBytes ?? null,
+				scrollbackBytes: params.scrollbackBytes ?? null,
 			}),
 		);
 	}
