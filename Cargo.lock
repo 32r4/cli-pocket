@@ -755,6 +755,7 @@ dependencies = [
  "cli-pocket-daemon-core",
  "cli-pocket-tauri-app",
  "cli-pocket-tauri-bindings",
+ "rustls",
  "serde_json",
  "tauri",
  "tauri-build",
