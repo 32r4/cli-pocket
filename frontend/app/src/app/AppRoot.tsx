@@ -186,7 +186,7 @@ export function AppRoot({
 	const [inlineError, setInlineError] = useState<string | null>(null);
 	const [localPairUrl, setLocalPairUrl] = useState<string | null>(null);
 	const [daemonRegistryReady, setDaemonRegistryReady] = useState(false);
-	const [eventStreamActive, setEventStreamActive] = useState(false);
+	const [eventStreamGeneration, setEventStreamGeneration] = useState(0);
 	const [pairingImportInProgress, setPairingImportInProgress] = useState(false);
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
@@ -212,22 +212,21 @@ export function AppRoot({
 		workspace.terminals[0] ??
 		null;
 	const hasPendingPairingUrl = currentPairingUrlFromLocation() != null;
+	const startEventStream = useCallback(() => {
+		setEventStreamGeneration((generation) => generation + 1);
+	}, []);
 
 	useEffect(() => {
 		let active = true;
+		let activeInstance: ClientBridge | null = null;
 
 		void bridgeFactory(platform)
 			.then((instance) => {
 				if (!active) {
-					// The web bridge wraps a wasm global singleton client.
-					// Closing a stale instance here tears down the live session
-					// created by the StrictMode remount.
-					if (platform.bridge !== "web") {
-						void instance.close();
-					}
 					return;
 				}
 
+				activeInstance = instance;
 				setBridge(instance);
 				setController(new SessionController(instance, workspaceState));
 			})
@@ -244,6 +243,9 @@ export function AppRoot({
 
 		return () => {
 			active = false;
+			if (activeInstance != null) {
+				void activeInstance.close();
+			}
 		};
 	}, [bridgeFactory, platform]);
 
@@ -412,7 +414,7 @@ export function AppRoot({
 		void controller
 			.connect(mainServer.id, toConnectConfig(mainServer))
 			.then(() => {
-				setEventStreamActive(true);
+				startEventStream();
 			})
 			.catch((error: unknown) => {
 				const message =
@@ -427,10 +429,11 @@ export function AppRoot({
 		daemonRegistryReady,
 		hasPendingPairingUrl,
 		pairingImportInProgress,
+		startEventStream,
 	]);
 
 	useEffect(() => {
-		if (bridge == null || !eventStreamActive) {
+		if (bridge == null || eventStreamGeneration === 0) {
 			return;
 		}
 
@@ -558,7 +561,7 @@ export function AppRoot({
 		return () => {
 			cancelled = true;
 		};
-	}, [bridge, eventStreamActive]);
+	}, [bridge, eventStreamGeneration]);
 
 	useEffect(() => {
 		const pendingServerId = pendingPairingServerIdRef.current;
@@ -596,7 +599,7 @@ export function AppRoot({
 					async (serverId, config) => {
 						pendingPairingServerIdRef.current = serverId;
 						await controller.connect(serverId, config);
-						setEventStreamActive(true);
+						startEventStream();
 						await new Promise<void>((resolve, reject) => {
 							const startedAt = Date.now();
 							const interval = window.setInterval(() => {
@@ -646,7 +649,7 @@ export function AppRoot({
 				}
 			}
 		},
-		[closeServerModal, controller, registry],
+		[closeServerModal, controller, registry, startEventStream],
 	);
 
 	useEffect(() => {
@@ -687,7 +690,7 @@ export function AppRoot({
 
 		try {
 			await controller.connect(server.id, toConnectConfig(server));
-			setEventStreamActive(true);
+			startEventStream();
 		} catch (error: unknown) {
 			const message =
 				error instanceof Error ? error.message : "connection failed";

@@ -34,10 +34,6 @@ use crate::kv_idb::IdbStore;
 use crate::rng_crypto::CryptoRng;
 use crate::ws_transport::WsTransport;
 
-thread_local! {
-    static GLOBAL_CLIENT: RefCell<Option<CliPocketClient>> = const { RefCell::new(None) };
-}
-
 const WEB_RECONNECT_BACKOFF: (u64, u64, u32) = (500, 30_000, 20);
 
 #[cfg(test)]
@@ -217,95 +213,6 @@ mod tests {
 pub fn _start() {
     console_error_panic_hook::set_once();
     let _ = tracing_wasm::try_set_as_global_default();
-}
-
-#[wasm_bindgen]
-pub fn connect_client(config: JsValue) -> Promise {
-    match global_client() {
-        Ok(client) => future_to_promise(async move {
-            client.connect_inner(config).await?;
-            Ok(JsValue::UNDEFINED)
-        }),
-        Err(error) => Promise::reject(&error),
-    }
-}
-
-#[wasm_bindgen]
-pub fn next_client_event() -> Promise {
-    match global_client() {
-        Ok(client) => future_to_promise(async move { client.next_event_inner().await }),
-        Err(error) => Promise::reject(&error),
-    }
-}
-
-#[wasm_bindgen]
-pub fn create_client_terminal(params_json: String) -> Promise {
-    match global_client() {
-        Ok(client) => future_to_promise(async move {
-            client.create_terminal_inner(params_json).await?;
-            Ok(JsValue::UNDEFINED)
-        }),
-        Err(error) => Promise::reject(&error),
-    }
-}
-
-#[wasm_bindgen]
-pub fn send_client_input(data: Vec<u8>) -> Promise {
-    match global_client() {
-        Ok(client) => future_to_promise(async move {
-            client.send_input_inner(data).await?;
-            Ok(JsValue::UNDEFINED)
-        }),
-        Err(error) => Promise::reject(&error),
-    }
-}
-
-#[wasm_bindgen]
-pub fn resize_client_terminal(cols: u16, rows: u16) -> Promise {
-    match global_client() {
-        Ok(client) => future_to_promise(async move {
-            client.resize_inner(cols, rows).await?;
-            Ok(JsValue::UNDEFINED)
-        }),
-        Err(error) => Promise::reject(&error),
-    }
-}
-
-#[wasm_bindgen]
-pub fn kill_client_terminal() -> Promise {
-    match global_client() {
-        Ok(client) => future_to_promise(async move {
-            client.kill_inner().await?;
-            Ok(JsValue::UNDEFINED)
-        }),
-        Err(error) => Promise::reject(&error),
-    }
-}
-
-#[wasm_bindgen]
-pub fn export_client_identity() -> Result<String, JsValue> {
-    global_client()?.export_identity()
-}
-
-#[wasm_bindgen]
-pub fn import_client_identity(blob: String) -> Promise {
-    match global_client() {
-        Ok(client) => future_to_promise(async move {
-            client.import_identity_inner(blob).await?;
-            Ok(JsValue::UNDEFINED)
-        }),
-        Err(error) => Promise::reject(&error),
-    }
-}
-
-#[wasm_bindgen]
-pub fn close_client() -> Result<(), JsValue> {
-    GLOBAL_CLIENT.with(|slot| {
-        if let Some(client) = slot.borrow().as_ref() {
-            client.close()?;
-        }
-        Ok(())
-    })
 }
 
 /// JS-facing client.
@@ -825,17 +732,4 @@ fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&error.to_string())
-}
-
-fn global_client() -> Result<CliPocketClient, JsValue> {
-    GLOBAL_CLIENT.with(|slot| {
-        if slot.borrow().is_none() {
-            *slot.borrow_mut() = Some(CliPocketClient::new()?);
-        }
-
-        slot.borrow()
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| JsValue::from_str("failed to initialize client"))
-    })
 }

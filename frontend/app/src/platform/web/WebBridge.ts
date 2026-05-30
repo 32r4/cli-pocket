@@ -1,14 +1,4 @@
-import init, {
-	close_client,
-	connect_client,
-	create_client_terminal,
-	export_client_identity,
-	import_client_identity,
-	kill_client_terminal,
-	next_client_event,
-	resize_client_terminal,
-	send_client_input,
-} from "cli-pocket-client-core-wasm";
+import init, { CliPocketClient } from "cli-pocket-client-core-wasm";
 import {
 	type PersistedDaemonRegistry,
 	parsePersistedDaemonRegistry,
@@ -50,6 +40,8 @@ function saveDaemonRegistryToLocalStorage(state: PersistedDaemonRegistry) {
 }
 
 export class WebBridge implements ClientBridge {
+	private constructor(private readonly client: CliPocketClient) {}
+
 	readonly daemonRegistry: DaemonRegistryBridge = {
 		load: async () => loadDaemonRegistryFromLocalStorage(),
 		save: async (state) => {
@@ -61,12 +53,12 @@ export class WebBridge implements ClientBridge {
 
 	static async create() {
 		await init();
-		return new WebBridge();
+		return new WebBridge(new CliPocketClient());
 	}
 
 	async connect(config: ConnectConfig) {
 		if (config.kind === "direct") {
-			await connect_client({
+			await this.client.connect({
 				kind: "direct",
 				endpoint_url: config.endpointUrl,
 				resume_token_hex: config.resumeTokenHex ?? null,
@@ -74,7 +66,7 @@ export class WebBridge implements ClientBridge {
 			return;
 		}
 
-		await connect_client({
+		await this.client.connect({
 			kind: "relay",
 			relay_url: config.relayUrl,
 			server_id: config.serverId,
@@ -85,10 +77,11 @@ export class WebBridge implements ClientBridge {
 	}
 
 	events(): AsyncIterable<unknown> {
+		const client = this.client;
 		return {
 			[Symbol.asyncIterator]: () => ({
 				next: async () => {
-					const value = await next_client_event();
+					const value = await client.next_event();
 					return value == null
 						? { value: undefined, done: true }
 						: { value, done: false };
@@ -98,7 +91,7 @@ export class WebBridge implements ClientBridge {
 	}
 
 	async createTerminal(params: CreateTerminalParams) {
-		await create_client_terminal(
+		await this.client.create_terminal(
 			JSON.stringify({
 				cols: params.cols,
 				rows: params.rows,
@@ -111,26 +104,26 @@ export class WebBridge implements ClientBridge {
 	}
 
 	async sendInput(_terminalId: string, bytes: Uint8Array) {
-		await send_client_input(bytes);
+		await this.client.send_input(bytes);
 	}
 
 	async resize(_terminalId: string, cols: number, rows: number) {
-		await resize_client_terminal(cols, rows);
+		await this.client.resize(cols, rows);
 	}
 
 	async kill(_terminalId: string, _signal: string) {
-		await kill_client_terminal();
+		await this.client.kill();
 	}
 
 	async exportIdentity(): Promise<Uint8Array> {
-		return new TextEncoder().encode(export_client_identity());
+		return new TextEncoder().encode(this.client.export_identity());
 	}
 
 	async importIdentity(blob: Uint8Array) {
-		await import_client_identity(new TextDecoder().decode(blob));
+		await this.client.import_identity(new TextDecoder().decode(blob));
 	}
 
 	async close() {
-		await close_client();
+		this.client.close();
 	}
 }
