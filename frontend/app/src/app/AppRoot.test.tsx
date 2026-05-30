@@ -266,6 +266,47 @@ describe("AppRoot", () => {
 		expect(window.location.hash).toBe("");
 	});
 
+	it("reuses a single bridge event subscription across reconnect attempts", async () => {
+		const serverId = "423e4567-e89b-42d3-a456-426614174000";
+		const bridge = createFakeBridge({
+			version: 1,
+			daemons: [
+				{
+					id: serverId,
+					label: "Saved server",
+					kind: "relay",
+					serverId,
+					serverPublicHex: "33".repeat(32),
+					relayUrl: `wss://relay.example/ws/client?server=${serverId}`,
+					relayPskHex: "44".repeat(32),
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: serverId,
+		});
+		const AppRoot = await loadAppRoot();
+
+		render(
+			<AppRoot platform={WEB_PLATFORM} bridgeFactory={async () => bridge} />,
+		);
+
+		await waitFor(() => expect(bridge.connect).toHaveBeenCalledTimes(1));
+		await waitFor(() => expect(bridge.events).toHaveBeenCalledTimes(1));
+
+		bridge.pushEvent({
+			kind: "Disconnected",
+			will_retry: false,
+			reason: "lost",
+		});
+
+		await waitFor(() =>
+			expect(screen.getByText("Connecting")).toBeInTheDocument(),
+		);
+		await waitFor(() => expect(bridge.connect).toHaveBeenCalledTimes(2));
+		expect(bridge.events).toHaveBeenCalledTimes(1);
+	});
+
 	it("keeps the live bridge when a stale StrictMode mount resolves late", async () => {
 		const firstBridge = createFakeBridge(EMPTY_REGISTRY);
 		const secondBridge = createFakeBridge(EMPTY_REGISTRY);

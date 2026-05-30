@@ -40,6 +40,14 @@ function saveDaemonRegistryToLocalStorage(state: PersistedDaemonRegistry) {
 }
 
 export class WebBridge implements ClientBridge {
+	private readonly eventQueue: unknown[] = [];
+	private eventWaiters: Array<{
+		resolve: (result: IteratorResult<unknown>) => void;
+		reject: (error: unknown) => void;
+	}> = [];
+	private eventPumpStarted = false;
+	private eventStreamClosed = false;
+
 	private constructor(private readonly client: CliPocketClient) {}
 
 	readonly daemonRegistry: DaemonRegistryBridge = {
@@ -77,14 +85,20 @@ export class WebBridge implements ClientBridge {
 	}
 
 	events(): AsyncIterable<unknown> {
-		const client = this.client;
+		this.startEventPump();
+
 		return {
 			[Symbol.asyncIterator]: () => ({
 				next: async () => {
-					const value = await client.next_event();
-					return value == null
-						? { value: undefined, done: true }
-						: { value, done: false };
+					const queued = this.eventQueue.shift();
+					if (queued !== undefined) {
+						return { value: queued, done: false };
+					}
+					if (this.eventStreamClosed) {
+						return { value: undefined, done: true };
+					}
+
+					return await this.waitForNextEvent();
 				},
 			}),
 		};
@@ -124,6 +138,67 @@ export class WebBridge implements ClientBridge {
 	}
 
 	async close() {
+		this.eventStreamClosed = true;
+		for (const waiter of this.eventWaiters) {
+			waiter.resolve({ value: undefined, done: true });
+		}
+		this.eventWaiters = [];
 		this.client.close();
+	}
+
+	private waitForNextEvent() {
+		return new Promise<IteratorResult<unknown>>((resolve, reject) => {
+			this.eventWaiters = [...this.eventWaiters, { resolve, reject }];
+		});
+	}
+
+	private startEventPump() {
+		if (this.eventPumpStarted) {
+			return;
+		}
+
+		this.eventPumpStarted = true;
+		void this.pumpEvents();
+	}
+
+	private async pumpEvents() {
+		try {
+			while (!this.eventStreamClosed) {
+				const value = await this.client.next_event();
+				if (value == null) {
+					this.eventStreamClosed = true;
+					break;
+				}
+				this.pushEvent(value);
+			}
+		} catch (error) {
+			this.eventStreamClosed = true;
+			this.rejectWaiters(error);
+			return;
+		}
+
+		for (const waiter of this.eventWaiters) {
+			waiter.resolve({ value: undefined, done: true });
+		}
+		this.eventWaiters = [];
+	}
+
+	private pushEvent(value: unknown) {
+		const waiter = this.eventWaiters.shift();
+		if (waiter != null) {
+			waiter.resolve({ value, done: false });
+			return;
+		}
+
+		this.eventQueue.push(value);
+	}
+
+	private rejectWaiters(error: unknown) {
+		const reason =
+			error instanceof Error ? error : new Error("event stream failed");
+		for (const waiter of this.eventWaiters) {
+			waiter.reject(reason);
+		}
+		this.eventWaiters = [];
 	}
 }

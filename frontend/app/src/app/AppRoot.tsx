@@ -168,8 +168,8 @@ export function AppRoot({
 	const [inlineError, setInlineError] = useState<string | null>(null);
 	const [localPairUrl, setLocalPairUrl] = useState<string | null>(null);
 	const [daemonRegistryReady, setDaemonRegistryReady] = useState(false);
-	const [eventStreamGeneration, setEventStreamGeneration] = useState(0);
 	const [pairingImportInProgress, setPairingImportInProgress] = useState(false);
+	const [eventStreamStarted, setEventStreamStarted] = useState(false);
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
@@ -195,7 +195,7 @@ export function AppRoot({
 		null;
 	const hasPendingPairingUrl = currentPairingUrlFromLocation() != null;
 	const startEventStream = useCallback(() => {
-		setEventStreamGeneration((generation) => generation + 1);
+		setEventStreamStarted((started) => started || true);
 	}, []);
 	const connectBridge = useCallback(
 		async (serverId: string, config: ConnectConfig) => {
@@ -425,7 +425,7 @@ export function AppRoot({
 	]);
 
 	useEffect(() => {
-		if (bridge == null || eventStreamGeneration === 0) {
+		if (bridge == null || !eventStreamStarted) {
 			return;
 		}
 
@@ -553,7 +553,7 @@ export function AppRoot({
 		return () => {
 			cancelled = true;
 		};
-	}, [bridge, eventStreamGeneration]);
+	}, [bridge, eventStreamStarted]);
 
 	useEffect(() => {
 		const pendingServerId = pendingPairingServerIdRef.current;
