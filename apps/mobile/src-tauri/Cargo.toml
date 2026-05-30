@@ -29,5 +29,6 @@ cli-pocket-tauri-app = { path = "../../../crates/client/tauri-app" }
 cli-pocket-tauri-bindings = { path = "../../../crates/client/tauri-bindings" }
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+rustls = { version = "0.23.40", default-features = false, features = ["std", "aws_lc_rs"] }
 serde_json = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

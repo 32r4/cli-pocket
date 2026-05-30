@@ -60,7 +60,7 @@ pub async fn connect(
     session: SessionHandle,
     kv: FileKvStore,
     config: serde_json::Value,
-    ws_subprotocol: Option<&'static str>,
+    direct_ws_subprotocol: Option<&'static str>,
 ) -> Result<(), String> {
     let config: ConnectArgs = serde_json::from_value(config).map_err(|error| error.to_string())?;
     let config = parse_connect_args(config)?;
@@ -68,6 +68,7 @@ pub async fn connect(
     let identity = load_identity(kv.clone()).await?;
     let endpoint = config.endpoint;
     let transport_url = config.transport_url;
+    let ws_subprotocol = effective_ws_subprotocol(&endpoint, direct_ws_subprotocol);
 
     session
         .connect(move |spawner| {
@@ -233,6 +234,16 @@ fn parse_connect_args(config: ConnectArgs) -> Result<ParsedConnectArgs, String> 
     }
 }
 
+fn effective_ws_subprotocol(
+    endpoint: &SessionEndpoint,
+    direct_ws_subprotocol: Option<&'static str>,
+) -> Option<&'static str> {
+    match endpoint {
+        SessionEndpoint::Direct(_) => direct_ws_subprotocol,
+        SessionEndpoint::Relay { .. } => None,
+    }
+}
+
 fn parse_terminal_id(value: &str) -> Result<TerminalId, String> {
     let uuid = uuid::Uuid::parse_str(value).map_err(|error| format!("terminal_id: {error}"))?;
     Ok(TerminalId(uuid))
@@ -261,7 +272,8 @@ async fn load_identity(kv: FileKvStore) -> Result<ClientIdentity, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_connect_args, parse_resume_token, parse_terminal_id, validate_signal, ConnectArgs,
+        effective_ws_subprotocol, parse_connect_args, parse_resume_token, parse_terminal_id,
+        validate_signal, ConnectArgs,
     };
     use cli_pocket_client_core::SessionEndpoint;
     use cli_pocket_proto::{ResumeAttachment, ResumeToken, SessionId, StreamSeq, TerminalId};
@@ -338,5 +350,29 @@ mod tests {
                 panic!("expected relay endpoint, got {other:?}")
             }
         }
+    }
+
+    #[test]
+    fn effective_ws_subprotocol_only_applies_to_direct_connections() {
+        assert_eq!(
+            effective_ws_subprotocol(
+                &SessionEndpoint::Direct("ws://127.0.0.1:17842/session".to_owned()),
+                Some("cli-pocket-server/v1"),
+            ),
+            Some("cli-pocket-server/v1")
+        );
+
+        assert_eq!(
+            effective_ws_subprotocol(
+                &SessionEndpoint::Relay {
+                    url: "wss://relay.example/ws/client".to_owned(),
+                    server_id: cli_pocket_proto::ServerId(uuid::Uuid::nil()),
+                    psk_hex: "aa".repeat(32),
+                    server_public: [0xbb; 32],
+                },
+                Some("cli-pocket-server/v1"),
+            ),
+            None
+        );
     }
 }

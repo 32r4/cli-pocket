@@ -16,6 +16,9 @@ use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use uuid::Uuid;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -69,6 +72,32 @@ async fn session_path_accepts_paired_client() {
 
     let response = recv_frame(&mut transport, &mut session).await;
     assert!(matches!(response.body, FrameBody::HelloOk(_)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_path_negotiates_mobile_subprotocol() {
+    let fixture = ListenerFixture::start().await;
+    let mut request = format!("ws://{}/session", fixture.addr)
+        .into_client_request()
+        .expect("build websocket request");
+    request.headers_mut().insert(
+        SEC_WEBSOCKET_PROTOCOL,
+        "cli-pocket-server/v1"
+            .parse()
+            .expect("valid subprotocol header"),
+    );
+
+    let (_, response) = connect_async(request)
+        .await
+        .expect("connect with mobile subprotocol");
+
+    assert_eq!(
+        response
+            .headers()
+            .get(SEC_WEBSOCKET_PROTOCOL)
+            .and_then(|value| value.to_str().ok()),
+        Some("cli-pocket-server/v1")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

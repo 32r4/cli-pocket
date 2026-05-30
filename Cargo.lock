@@ -773,6 +773,7 @@ dependencies = [
  "cli-pocket-client-core",
  "cli-pocket-tauri-app",
  "cli-pocket-tauri-bindings",
+ "rustls",
  "serde_json",
  "tauri",
  "tauri-build",

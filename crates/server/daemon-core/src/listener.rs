@@ -11,10 +11,13 @@ use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::handshake::server::{
     Callback, ErrorResponse, Request, Response,
 };
+use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::MaybeTlsStream;
 use tracing::{error, info};
 
 use crate::accept::{AcceptedTransport, AcceptedTransportKind};
+
+const DIRECT_SESSION_SUBPROTOCOL: &str = "cli-pocket-server/v1";
 
 /// Bind to the given address and accept inbound WebSocket `/session` transports.
 ///
@@ -96,8 +99,34 @@ struct PathCapture {
 
 impl Callback for PathCapture {
     #[allow(clippy::result_large_err, clippy::unnecessary_wraps)]
-    fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
+    fn on_request(
+        self,
+        request: &Request,
+        mut response: Response,
+    ) -> Result<Response, ErrorResponse> {
         *self.request_path.lock() = Some(request.uri().path().to_string());
+
+        if request
+            .headers()
+            .get(SEC_WEBSOCKET_PROTOCOL)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(requested_subprotocol_supported)
+        {
+            response.headers_mut().insert(
+                SEC_WEBSOCKET_PROTOCOL,
+                DIRECT_SESSION_SUBPROTOCOL
+                    .parse()
+                    .expect("valid websocket subprotocol header"),
+            );
+        }
+
         Ok(response)
     }
+}
+
+fn requested_subprotocol_supported(value: &str) -> bool {
+    value
+        .split(',')
+        .map(str::trim)
+        .any(|item| item == DIRECT_SESSION_SUBPROTOCOL)
 }

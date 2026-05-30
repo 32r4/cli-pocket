@@ -488,8 +488,13 @@ export function AppRoot({
 						continue;
 					}
 					if (kind === "Disconnected") {
+						const reason =
+							"reason" in event && typeof event.reason === "string"
+								? event.reason
+								: "connection closed";
 						pendingInitialTerminalRef.current = null;
 						workspaceState.getState().markDisconnected();
+						setInlineError(reason);
 						continue;
 					}
 					if (kind === "TerminalCreated") {
@@ -554,6 +559,14 @@ export function AppRoot({
 			cancelled = true;
 		};
 	}, [bridge, eventStreamStarted]);
+
+	useEffect(() => {
+		if (bridge == null) {
+			return;
+		}
+
+		startEventStream();
+	}, [bridge, startEventStream]);
 
 	useEffect(() => {
 		const pendingServerId = pendingPairingServerIdRef.current;

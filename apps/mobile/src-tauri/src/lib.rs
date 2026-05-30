@@ -3,12 +3,14 @@ mod commands;
 use cli_pocket_tauri_app::{
     install_app_hooks, install_tracing, resolve_app_data_dir, ManagedAppState,
 };
+use rustls::crypto::aws_lc_rs;
 use tauri::Manager;
 
 pub type AppState = ManagedAppState<()>;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_rustls_crypto_provider();
     install_tracing();
 
     tauri::Builder::default()
@@ -37,4 +39,8 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("tauri run failed");
+}
+
+fn install_rustls_crypto_provider() {
+    let _ = aws_lc_rs::default_provider().install_default();
 }

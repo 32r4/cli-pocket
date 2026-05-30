@@ -185,7 +185,7 @@ afterEach(() => {
 });
 
 describe("AppRoot", () => {
-	it("does not consume bridge events before a connection starts", async () => {
+	it("starts the bridge event stream as soon as the bridge is ready", async () => {
 		const bridge = createFakeBridge(EMPTY_REGISTRY);
 		const AppRoot = await loadAppRoot();
 
@@ -194,7 +194,7 @@ describe("AppRoot", () => {
 		);
 
 		await screen.findByRole("button", { name: "Direct connection" });
-		expect(bridge.events).not.toHaveBeenCalled();
+		await waitFor(() => expect(bridge.events).toHaveBeenCalledTimes(1));
 		expect(bridge.connect).not.toHaveBeenCalled();
 	});
 
@@ -266,7 +266,7 @@ describe("AppRoot", () => {
 		expect(window.location.hash).toBe("");
 	});
 
-	it("reuses a single bridge event subscription across reconnect attempts", async () => {
+	it("keeps a single bridge event subscription and surfaces disconnect reasons", async () => {
 		const serverId = "423e4567-e89b-42d3-a456-426614174000";
 		const bridge = createFakeBridge({
 			version: 1,
@@ -301,9 +301,8 @@ describe("AppRoot", () => {
 		});
 
 		await waitFor(() =>
-			expect(screen.getByText("Connecting")).toBeInTheDocument(),
+			expect(screen.getByRole("alert")).toHaveTextContent("lost"),
 		);
-		await waitFor(() => expect(bridge.connect).toHaveBeenCalledTimes(2));
 		expect(bridge.events).toHaveBeenCalledTimes(1);
 	});
 
