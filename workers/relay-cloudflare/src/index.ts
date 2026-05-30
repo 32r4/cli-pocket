@@ -233,7 +233,7 @@ function uuidToBytes(uuid: string): Uint8Array {
 }
 
 function encodeUuid(uuid: string): Uint8Array {
-  return uuidToBytes(uuid);
+  return encodeByteArray(uuidToBytes(uuid));
 }
 
 function encodeVarint(value: number): Uint8Array {
@@ -319,7 +319,11 @@ class Cursor {
   }
 
   readUuid(): string {
-    return bytesToUuid(this.readBytes(16));
+    const bytes = this.readByteArray();
+    if (bytes.length !== 16) {
+      throw new Error(`unexpected uuid length ${bytes.length}`);
+    }
+    return bytesToUuid(bytes);
   }
 
   readString(): string {
