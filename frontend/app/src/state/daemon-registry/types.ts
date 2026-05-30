@@ -1,3 +1,5 @@
+import type { ConnectConfig } from "@/platform/bridge/types";
+
 interface DaemonRecordBase {
 	id: string;
 	label: string;
@@ -17,3 +19,24 @@ export type DaemonRecord =
 			relayUrl: string;
 			relayPskHex: string;
 	  });
+
+export function daemonRecordToConnectConfig(
+	daemon: DaemonRecord,
+): ConnectConfig {
+	if (daemon.kind === "direct") {
+		return {
+			kind: "direct",
+			endpointUrl: daemon.endpointUrl,
+			resumeTokenHex: daemon.resumeTokenHex ?? undefined,
+		};
+	}
+
+	return {
+		kind: "relay",
+		relayUrl: daemon.relayUrl,
+		serverId: daemon.serverId,
+		pskHex: daemon.relayPskHex,
+		serverPublicHex: daemon.serverPublicHex,
+		resumeTokenHex: daemon.resumeTokenHex ?? undefined,
+	};
+}

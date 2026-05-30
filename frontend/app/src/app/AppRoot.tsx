@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
-import { pairAndStoreDaemon } from "@/features/pairing/pairingFlow";
-import { SessionController } from "@/features/terminals/SessionController";
+import { importPairingOfferUrl } from "@/features/pairing/pairingOffer";
 import { XTermView } from "@/features/terminals/XTermView";
 import type { ClientBridge, ConnectConfig } from "@/platform/bridge/types";
 import {
@@ -14,7 +13,10 @@ import {
 	emptyPersistedDaemonRegistry,
 	type PersistedDaemonRegistry,
 } from "@/state/daemon-registry/daemonRegistry";
-import type { DaemonRecord } from "@/state/daemon-registry/types";
+import {
+	type DaemonRecord,
+	daemonRecordToConnectConfig,
+} from "@/state/daemon-registry/types";
 import { createUiStateStore, type OverlaySection } from "@/state/ui/uiState";
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { Shell } from "./shell/Shell";
@@ -42,25 +44,6 @@ interface ServerFormState {
 interface ImportPairingOptions {
 	clearLocationHash?: boolean;
 	closeModal?: boolean;
-}
-
-function toConnectConfig(server: DaemonRecord): ConnectConfig {
-	if (server.kind === "direct") {
-		return {
-			kind: "direct",
-			endpointUrl: server.endpointUrl,
-			resumeTokenHex: server.resumeTokenHex ?? undefined,
-		};
-	}
-
-	return {
-		kind: "relay",
-		relayUrl: server.relayUrl,
-		serverId: server.serverId,
-		pskHex: server.relayPskHex,
-		serverPublicHex: server.serverPublicHex,
-		resumeTokenHex: server.resumeTokenHex ?? undefined,
-	};
 }
 
 function serverBadge(server: DaemonRecord) {
@@ -176,7 +159,6 @@ export function AppRoot({
 
 	const [bridge, setBridge] = useState<ClientBridge | null>(null);
 	const [bridgeError, setBridgeError] = useState<string | null>(null);
-	const [controller, setController] = useState<SessionController | null>(null);
 	const [serverModalMode, setServerModalMode] =
 		useState<ServerModalMode>("closed");
 	const [serverForm, setServerForm] = useState<ServerFormState>(() =>
@@ -215,6 +197,17 @@ export function AppRoot({
 	const startEventStream = useCallback(() => {
 		setEventStreamGeneration((generation) => generation + 1);
 	}, []);
+	const connectBridge = useCallback(
+		async (serverId: string, config: ConnectConfig) => {
+			if (bridge == null) {
+				throw new Error("client bridge not ready");
+			}
+
+			workspaceState.getState().startConnecting(serverId);
+			await bridge.connect(config);
+		},
+		[bridge],
+	);
 
 	useEffect(() => {
 		let active = true;
@@ -228,7 +221,6 @@ export function AppRoot({
 
 				activeInstance = instance;
 				setBridge(instance);
-				setController(new SessionController(instance, workspaceState));
 			})
 			.catch((error: unknown) => {
 				if (!active) {
@@ -392,7 +384,7 @@ export function AppRoot({
 			autoConnectServerIdRef.current = null;
 			return;
 		}
-		if (controller == null) {
+		if (bridge == null) {
 			return;
 		}
 		if (hasPendingPairingUrl || pairingImportInProgress) {
@@ -411,8 +403,7 @@ export function AppRoot({
 		autoConnectServerIdRef.current = mainServer.id;
 		setInlineError(null);
 
-		void controller
-			.connect(mainServer.id, toConnectConfig(mainServer))
+		void connectBridge(mainServer.id, daemonRecordToConnectConfig(mainServer))
 			.then(() => {
 				startEventStream();
 			})
@@ -423,12 +414,13 @@ export function AppRoot({
 				setInlineError(message);
 			});
 	}, [
-		controller,
 		mainServer,
 		workspace.connectionState,
+		bridge,
 		daemonRegistryReady,
 		hasPendingPairingUrl,
 		pairingImportInProgress,
+		connectBridge,
 		startEventStream,
 	]);
 
@@ -589,47 +581,40 @@ export function AppRoot({
 	const importPairingUrl = useCallback(
 		async (rawUrl: string, options?: ImportPairingOptions) => {
 			try {
-				if (controller == null) {
-					throw new Error("client bridge not ready");
-				}
-
 				setPairingImportInProgress(true);
-				const importedServer = await pairAndStoreDaemon(
-					rawUrl,
-					async (serverId, config) => {
-						pendingPairingServerIdRef.current = serverId;
-						await controller.connect(serverId, config);
-						startEventStream();
-						await new Promise<void>((resolve, reject) => {
-							const startedAt = Date.now();
-							const interval = window.setInterval(() => {
-								const state = workspaceState.getState();
-								if (
-									state.connectionState === "connected" &&
-									state.activeConnectionServerId === serverId
-								) {
-									window.clearInterval(interval);
-									resolve();
-									return;
-								}
-								if (state.connectionState === "failed") {
-									window.clearInterval(interval);
-									reject(
-										new Error(
-											state.lastError ?? "failed to connect paired server",
-										),
-									);
-									return;
-								}
-								if (Date.now() - startedAt > 15_000) {
-									window.clearInterval(interval);
-									reject(new Error("timed out waiting for paired connection"));
-								}
-							}, 100);
-						});
-					},
-					registry.upsertDaemon,
+				const importedServer = importPairingOfferUrl(rawUrl);
+				pendingPairingServerIdRef.current = importedServer.id;
+				await connectBridge(
+					importedServer.id,
+					daemonRecordToConnectConfig(importedServer),
 				);
+				startEventStream();
+				await new Promise<void>((resolve, reject) => {
+					const startedAt = Date.now();
+					const interval = window.setInterval(() => {
+						const state = workspaceState.getState();
+						if (
+							state.connectionState === "connected" &&
+							state.activeConnectionServerId === importedServer.id
+						) {
+							window.clearInterval(interval);
+							resolve();
+							return;
+						}
+						if (state.connectionState === "failed") {
+							window.clearInterval(interval);
+							reject(
+								new Error(state.lastError ?? "failed to connect paired server"),
+							);
+							return;
+						}
+						if (Date.now() - startedAt > 15_000) {
+							window.clearInterval(interval);
+							reject(new Error("timed out waiting for paired connection"));
+						}
+					}, 100);
+				});
+				registry.upsertDaemon(importedServer);
 				registry.selectDaemon(importedServer.id);
 				uiState.getState().setSelectedServerId(importedServer.id);
 				setPairingUrl("");
@@ -649,11 +634,11 @@ export function AppRoot({
 				}
 			}
 		},
-		[closeServerModal, controller, registry, startEventStream],
+		[closeServerModal, connectBridge, registry, startEventStream],
 	);
 
 	useEffect(() => {
-		if (!daemonRegistryReady || controller == null) {
+		if (!daemonRegistryReady || bridge == null) {
 			return;
 		}
 
@@ -665,7 +650,7 @@ export function AppRoot({
 		processedPairingUrlRef.current = rawUrl;
 		setInlineError(null);
 		void importPairingUrl(rawUrl, { clearLocationHash: true });
-	}, [controller, daemonRegistryReady, importPairingUrl]);
+	}, [bridge, daemonRegistryReady, importPairingUrl]);
 
 	const connectServer = async (
 		server: DaemonRecord,
@@ -684,12 +669,12 @@ export function AppRoot({
 		) {
 			return;
 		}
-		if (controller == null) {
+		if (bridge == null) {
 			return;
 		}
 
 		try {
-			await controller.connect(server.id, toConnectConfig(server));
+			await connectBridge(server.id, daemonRecordToConnectConfig(server));
 			startEventStream();
 		} catch (error: unknown) {
 			const message =

@@ -1,15 +1,11 @@
 mod commands;
-mod state;
 
-use cli_pocket_tauri_app::{deep_link, event_pump};
-use state::AppState;
+use cli_pocket_tauri_app::{install_app_hooks, install_tracing, ClientRuntimeState};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init();
+    install_tracing();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
@@ -30,13 +26,13 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| std::io::Error::other(format!("resolve app data dir: {error}")))?;
-            let (app_state, event_rx) = AppState::new_at(&app_data_dir).map_err(|error| {
-                std::io::Error::other(format!("mobile app state should initialize: {error}"))
-            })?;
+            let (app_state, event_rx) =
+                ClientRuntimeState::new_at(&app_data_dir).map_err(|error| {
+                    std::io::Error::other(format!("mobile app state should initialize: {error}"))
+                })?;
 
             app.manage(app_state);
-            event_pump::start(app.handle().clone(), event_rx);
-            deep_link::install(&app.handle().clone());
+            install_app_hooks(&app.handle().clone(), event_rx);
             Ok(())
         })
         .run(tauri::generate_context!())

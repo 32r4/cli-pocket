@@ -1,7 +1,7 @@
 mod commands;
 mod state;
 
-use cli_pocket_tauri_app::{deep_link, event_pump};
+use cli_pocket_tauri_app::{install_app_hooks, install_tracing};
 use rustls::crypto::aws_lc_rs;
 use state::AppState;
 use tauri::Manager;
@@ -9,10 +9,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_rustls_crypto_provider();
-
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init();
+    install_tracing();
 
     let (app_state, event_rx) = AppState::new().expect("desktop app state should initialize");
 
@@ -41,8 +38,7 @@ pub fn run() {
                     tracing::error!("embedded daemon failed to start: {error}");
                 }
             });
-            event_pump::start(app.handle().clone(), event_rx);
-            deep_link::install(&app.handle().clone());
+            install_app_hooks(&app.handle().clone(), event_rx);
             Ok(())
         })
         .run(tauri::generate_context!())

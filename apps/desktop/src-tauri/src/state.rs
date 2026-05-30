@@ -4,7 +4,7 @@ use cli_pocket_daemon_core::service::{
     build_config_template, dev_config_template, load_or_create_config_with_template,
 };
 use cli_pocket_daemon_core::{Daemon, DaemonConfig};
-use cli_pocket_tauri_app::spawn_session_runtime;
+use cli_pocket_tauri_app::ClientRuntimeState;
 use cli_pocket_tauri_bindings::{FileKvStore, SessionHandle};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,8 +21,7 @@ pub struct EmbeddedDaemonRuntime {
 }
 
 pub struct AppState {
-    pub session: SessionHandle,
-    pub kv: FileKvStore,
+    client: ClientRuntimeState,
     pub daemon: EmbeddedDaemonRuntime,
 }
 
@@ -33,14 +32,11 @@ impl AppState {
             desktop_daemon_template(),
         )
         .map_err(|error| error.to_string())?;
-        let kv = FileKvStore::open_at(desktop_store_dir(&daemon_config))
-            .map_err(|error| error.to_string())?;
-        let (session, event_rx) = spawn_session_runtime();
+        let (client, event_rx) = ClientRuntimeState::new_at(desktop_store_dir(&daemon_config))?;
 
         Ok((
             Self {
-                session,
-                kv,
+                client,
                 daemon: EmbeddedDaemonRuntime {
                     inner: Arc::new(Mutex::new(EmbeddedDaemonState {
                         config: daemon_config,
@@ -50,6 +46,14 @@ impl AppState {
             },
             event_rx,
         ))
+    }
+
+    pub fn session(&self) -> SessionHandle {
+        self.client.session()
+    }
+
+    pub fn kv(&self) -> FileKvStore {
+        self.client.kv()
     }
 }
 
