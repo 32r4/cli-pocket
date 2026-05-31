@@ -1,0 +1,239 @@
+#!/usr/bin/env node
+
+/**
+ * Generate all platform icons from the source SVG
+ *
+ * This script reads frontend/app/public/favicon.svg and generates:
+ * - PNG icons in various sizes for desktop and mobile
+ * - ICO files for Windows
+ *
+ * Uses Playwright to render SVG in a real browser for pixel-perfect consistency
+ * with the web version.
+ *
+ * Usage: node scripts/generate-icons.js
+ */
+
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const rootDir = join(__dirname, '..');
+
+// Source SVG file
+const SOURCE_SVG = join(rootDir, 'frontend/app/public/favicon.svg');
+
+// Target directories
+const DESKTOP_ICONS = join(rootDir, 'apps/desktop/src-tauri/icons');
+const MOBILE_ICONS = join(rootDir, 'apps/mobile/src-tauri/icons');
+
+// Icon sizes to generate
+const SIZES = [
+  { name: '32x32.png', size: 32 },
+  { name: '128x128.png', size: 128 },
+  { name: '128x128@2x.png', size: 256 },
+  { name: 'icon.png', size: 1024 },
+];
+
+// ICO file contains multiple sizes
+const ICO_SIZES = [16, 32, 48, 64, 128, 256];
+
+/**
+ * Generate a PNG from SVG at specified size using a reusable page
+ */
+async function generatePng(page, svgContent, size, outputPath) {
+  console.log(`  Rendering ${size}x${size}...`);
+
+  // Set viewport to exact size needed
+  await page.setViewportSize({
+    width: size,
+    height: size,
+  });
+
+  // Create HTML with SVG embedded
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <style>
+          * { margin: 0; padding: 0; }
+          body {
+            width: ${size}px;
+            height: ${size}px;
+            overflow: hidden;
+          }
+          svg {
+            width: 100%;
+            height: 100%;
+          }
+        </style>
+      </head>
+      <body>${svgContent}</body>
+    </html>
+  `;
+
+  await page.setContent(html);
+  await page.waitForLoadState('networkidle');
+
+  // Wait for fonts and filters to render
+  await page.waitForTimeout(100);
+
+  // Take screenshot
+  const screenshot = await page.screenshot({
+    type: 'png',
+    omitBackground: false,
+  });
+
+  await writeFile(outputPath, screenshot);
+  console.log(`  ✓ Generated ${outputPath} (${size}x${size})`);
+
+  return screenshot;
+}
+
+/**
+ * Generate ICO file from PNG buffers
+ */
+async function generateIco(pngBuffers, outputPath) {
+  // ICO file format structure
+  const icoHeader = Buffer.alloc(6);
+  icoHeader.writeUInt16LE(0, 0); // Reserved (must be 0)
+  icoHeader.writeUInt16LE(1, 2); // Type (1 = ICO)
+  icoHeader.writeUInt16LE(pngBuffers.length, 4); // Number of images
+
+  const iconDirEntries = [];
+  const imageDataBuffers = [];
+  let imageDataOffset = 6 + (pngBuffers.length * 16); // Header + directory entries
+
+  for (let i = 0; i < pngBuffers.length; i++) {
+    const { size, buffer } = pngBuffers[i];
+
+    const entry = Buffer.alloc(16);
+    entry.writeUInt8(size === 256 ? 0 : size, 0); // Width (0 means 256)
+    entry.writeUInt8(size === 256 ? 0 : size, 1); // Height (0 means 256)
+    entry.writeUInt8(0, 2); // Color palette (0 = no palette)
+    entry.writeUInt8(0, 3); // Reserved
+    entry.writeUInt16LE(1, 4); // Color planes
+    entry.writeUInt16LE(32, 6); // Bits per pixel
+    entry.writeUInt32LE(buffer.length, 8); // Image data size
+    entry.writeUInt32LE(imageDataOffset, 12); // Image data offset
+
+    iconDirEntries.push(entry);
+    imageDataBuffers.push(buffer);
+    imageDataOffset += buffer.length;
+  }
+
+  const icoBuffer = Buffer.concat([
+    icoHeader,
+    ...iconDirEntries,
+    ...imageDataBuffers,
+  ]);
+
+  await writeFile(outputPath, icoBuffer);
+  console.log(`  ✓ Generated ${outputPath} (${ICO_SIZES.join(', ')}px)`);
+}
+
+/**
+ * Generate all icons for a target directory
+ */
+async function generateIconsForTarget(page, svgContent, targetDir) {
+  await mkdir(targetDir, { recursive: true });
+
+  // Generate PNG files
+  for (const { name, size } of SIZES) {
+    const outputPath = join(targetDir, name);
+    await generatePng(page, svgContent, size, outputPath);
+  }
+
+  // Generate ICO file - render all sizes first
+  console.log(`  Rendering ICO sizes...`);
+  const icoPngBuffers = [];
+
+  for (const size of ICO_SIZES) {
+    await page.setViewportSize({
+      width: size,
+      height: size,
+    });
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            * { margin: 0; padding: 0; }
+            body {
+              width: ${size}px;
+              height: ${size}px;
+              overflow: hidden;
+            }
+            svg {
+              width: 100%;
+              height: 100%;
+            }
+          </style>
+        </head>
+        <body>${svgContent}</body>
+      </html>
+    `;
+
+    await page.setContent(html);
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(100);
+
+    const screenshot = await page.screenshot({
+      type: 'png',
+      omitBackground: false,
+    });
+
+    icoPngBuffers.push({ size, buffer: screenshot });
+  }
+
+  const icoPath = join(targetDir, 'icon.ico');
+  await generateIco(icoPngBuffers, icoPath);
+}
+
+/**
+ * Main function
+ */
+async function main() {
+  console.log('🎨 Generating icons from SVG using browser rendering...\n');
+  console.log(`Source: ${SOURCE_SVG}\n`);
+
+  // Read source SVG
+  const svgContent = await readFile(SOURCE_SVG, 'utf-8');
+
+  // Launch browser once for all operations
+  console.log('🌐 Launching browser...');
+  const browser = await chromium.launch({
+    headless: true,
+  });
+
+  try {
+    // Create a single page to reuse
+    const page = await browser.newPage();
+
+    // Generate icons for desktop
+    console.log('\n📱 Desktop icons:');
+    await generateIconsForTarget(page, svgContent, DESKTOP_ICONS);
+
+    // Generate icons for mobile
+    console.log('\n📱 Mobile icons:');
+    await generateIconsForTarget(page, svgContent, MOBILE_ICONS);
+
+    await page.close();
+
+    console.log('\n✅ All icons generated successfully!');
+    console.log('\nℹ️  Icons are rendered using Chromium for pixel-perfect consistency with web.');
+    console.log('\nNext steps:');
+    console.log('1. Review the generated icons');
+    console.log('2. Test the apps to ensure icons display correctly');
+    console.log('3. Commit the changes');
+  } finally {
+    await browser.close();
+  }
+}
+
+main().catch((error) => {
+  console.error('❌ Error generating icons:', error);
+  process.exit(1);
+});
