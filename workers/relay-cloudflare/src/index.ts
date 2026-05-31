@@ -742,7 +742,11 @@ export class RelaySessionDurableObject {
 
       const pair = this.pairs.get(decoded.pairId);
       if (!pair) {
-        ws.close(1008, "Unknown pair id");
+        this.send(ws, {
+          kind: "PairClose",
+          pairId: decoded.pairId,
+          reason: { type: "ClientGone" },
+        });
         return;
       }
       const rateError = this.bumpRate(pair, decoded.bytes.length);

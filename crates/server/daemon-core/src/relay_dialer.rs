@@ -275,15 +275,18 @@ where
                         .lock()
                         .await
                         .get(&pair_id)
-                        .map(|bridge| bridge.to_daemon_tx.clone())
-                        .ok_or_else(|| {
-                            crate::DaemonError::Internal(format!(
-                                "received relay bytes for unknown pair {pair_id:?}"
-                            ))
-                        })?;
-                    tx.send(bytes.to_vec()).await.map_err(|_| {
-                        crate::DaemonError::Internal("relay pair receiver dropped".into())
-                    })?;
+                        .map(|bridge| bridge.to_daemon_tx.clone());
+                    match tx {
+                        Some(tx) => {
+                            if tx.send(bytes.to_vec()).await.is_err() {
+                                tracing::debug!(pair_id = ?pair_id, "relay pair receiver dropped; removing stale pair");
+                                pairs.lock().await.remove(&pair_id);
+                            }
+                        }
+                        None => {
+                            tracing::debug!(pair_id = ?pair_id, "received relay data for unknown pair; ignoring");
+                        }
+                    }
                 }
                 RelayWire::Ctrl(RelayCtrl::PairClose { pair_id, .. }) => {
                     pairs.lock().await.remove(&pair_id);

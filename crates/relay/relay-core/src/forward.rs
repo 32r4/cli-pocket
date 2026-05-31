@@ -152,9 +152,19 @@ where
                         }
                     }
                     RelayWire::Data(RelayData::Forward { pair_id, bytes }) => {
-                        let pair = pairs
-                            .get(&pair_id)
-                            .ok_or(crate::RelayError::Protocol("unknown pair id"))?;
+                        let Some(pair) = pairs.get(&pair_id) else {
+                            send_server_msg(
+                                &server_tx,
+                                ServerMsg::Ctrl(Bytes::from(crate::encode_ctrl_frame(
+                                    &RelayCtrl::PairClose {
+                                        pair_id,
+                                        reason: PairCloseReason::ClientGone,
+                                    },
+                                ))),
+                            )
+                            .await?;
+                            continue;
+                        };
                         if pair.server_id != server_id {
                             return Err(crate::RelayError::Protocol("pair routed to wrong server"));
                         }
