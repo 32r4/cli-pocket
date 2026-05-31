@@ -85,7 +85,7 @@ export class WebBridge implements ClientBridge {
 		// Reset event pump state before connecting, as connect() creates a new event receiver
 		this.eventStreamClosed = false;
 		this.eventPumpStarted = false;
-		this.eventQueue = [];
+		this.eventQueue.length = 0;
 		this.eventWaiters = [];
 
 		if (config.kind === "direct") {
