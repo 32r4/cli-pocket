@@ -6,8 +6,9 @@ use tauri::State;
 pub async fn cli_pocket_connect(
     state: State<'_, AppState>,
     config: serde_json::Value,
+    event_channel: String,
 ) -> Result<(), String> {
-    shared_commands::connect(state.session(), state.kv(), config, None).await
+    shared_commands::connect(state.session(), state.kv(), config, event_channel, None).await
 }
 
 #[tauri::command]

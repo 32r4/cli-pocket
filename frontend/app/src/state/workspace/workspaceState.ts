@@ -14,7 +14,10 @@ interface WorkspaceState {
 	lastError: string | null;
 	startConnecting: (serverId: string) => void;
 	markConnected: () => void;
-	markDisconnected: () => void;
+	markDisconnected: (options?: {
+		willRetry?: boolean;
+		reason?: string | null;
+	}) => void;
 	markConnectionFailed: (message: string) => void;
 	syncTerminalList: (terminals: TerminalInfoRecord[]) => void;
 	markTerminalConnecting: (terminalId: string) => void;
@@ -71,13 +74,16 @@ export function createWorkspaceStore() {
 				lastError: null,
 			}),
 		markConnected: () => set({ connectionState: "connected", lastError: null }),
-		markDisconnected: () =>
-			set({
-				connectionState: "idle",
-				activeConnectionServerId: null,
+		markDisconnected: (options) =>
+			set((state) => ({
+				connectionState: options?.willRetry ? "connecting" : "idle",
+				activeConnectionServerId: options?.willRetry
+					? state.activeConnectionServerId
+					: null,
 				activeSessionId: null,
 				terminals: [],
-			}),
+				lastError: options?.reason ?? null,
+			})),
 		markConnectionFailed: (message) =>
 			set({
 				connectionState: "failed",

@@ -50,29 +50,41 @@ export interface CreateTerminalParams {
 	scrollbackBytes?: number;
 }
 
-export interface DaemonRegistryBridge {
+export interface SessionActor {
+	events(): AsyncIterable<unknown>;
+	refreshTerminals(): Promise<void>;
+	openTerminal(terminalId: string): Promise<TerminalSnapshotRecord>;
+	createTerminal(
+		params: CreateTerminalParams,
+	): Promise<TerminalInfoRecord | null>;
+	sendInput(terminalId: string, bytes: Uint8Array): Promise<void>;
+	resize(terminalId: string, cols: number, rows: number): Promise<void>;
+	kill(terminalId: string, signal: string): Promise<void>;
+	close(): Promise<void>;
+}
+
+export interface SessionFactory {
+	connect(config: ConnectConfig): Promise<SessionActor>;
+}
+
+export interface IdentityAdapter {
+	exportIdentity(): Promise<Uint8Array>;
+	importIdentity(blob: Uint8Array): Promise<void>;
+}
+
+export interface RegistryAdapter extends IdentityAdapter {
 	load(): Promise<PersistedDaemonRegistry | null>;
 	save(state: PersistedDaemonRegistry): Promise<void>;
 }
 
-export interface EmbeddedDaemonBridge {
+export interface HostAdapter {
 	localEndpoint(): Promise<string>;
 	pairUrl(): Promise<string>;
 	restart(): Promise<void>;
 }
 
-export interface ClientBridge {
-	connect(config: ConnectConfig): Promise<void>;
-	events(): AsyncIterable<unknown>;
-	listTerminals(): Promise<TerminalInfoRecord[]>;
-	openTerminal(terminalId: string): Promise<TerminalSnapshotRecord>;
-	createTerminal(params: CreateTerminalParams): Promise<void>;
-	sendInput(terminalId: string, bytes: Uint8Array): Promise<void>;
-	resize(terminalId: string, cols: number, rows: number): Promise<void>;
-	kill(terminalId: string, signal: string): Promise<void>;
-	exportIdentity(): Promise<Uint8Array>;
-	importIdentity(blob: Uint8Array): Promise<void>;
-	daemonRegistry: DaemonRegistryBridge;
-	embeddedDaemon: EmbeddedDaemonBridge | null;
-	close(): Promise<void>;
+export interface PlatformServices {
+	sessionFactory: SessionFactory;
+	registry: RegistryAdapter;
+	host: HostAdapter | null;
 }

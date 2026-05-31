@@ -1,4 +1,4 @@
-import type { ClientBridge } from "@/platform/bridge/types";
+import type { PlatformServices } from "@/platform/bridge/types";
 import { TauriBridge } from "@/platform/tauri/TauriBridge";
 import { WebBridge } from "@/platform/web/WebBridge";
 
@@ -38,9 +38,9 @@ export function platformProfile(id: AppPlatformId): AppPlatform {
 
 export const CURRENT_APP_PLATFORM = platformProfile(__APP_PLATFORM__);
 
-export async function createBridgeForPlatform(
+export async function createPlatformServices(
 	platform: AppPlatform,
-): Promise<ClientBridge> {
+): Promise<PlatformServices> {
 	if (platform.bridge === "tauri") {
 		return new TauriBridge({ embeddedDaemon: platform.embeddedDaemon });
 	}

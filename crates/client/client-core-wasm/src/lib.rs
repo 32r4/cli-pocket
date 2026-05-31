@@ -416,7 +416,11 @@ impl CliPocketClient {
 
     #[wasm_bindgen]
     pub fn close(&self) -> Result<(), JsValue> {
-        self.inner.borrow_mut().take();
+        if let Some(session) = self.inner.borrow_mut().take() {
+            spawn_local(async move {
+                session.shutdown().await;
+            });
+        }
         self.events.borrow_mut().take();
         Ok(())
     }
@@ -424,6 +428,11 @@ impl CliPocketClient {
 
 impl CliPocketClient {
     async fn connect_inner(&self, config: JsValue) -> Result<(), JsValue> {
+        let prior_session = self.inner.borrow_mut().take();
+        if let Some(session) = prior_session {
+            session.shutdown().await;
+        }
+        self.events.borrow_mut().take();
         let cfg = parse_connect_config(config)?;
         let resume_token = parse_resume_token(cfg.resume_token_hex.as_deref())?;
         let kv = self.kv().await?;

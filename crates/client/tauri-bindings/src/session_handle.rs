@@ -15,11 +15,18 @@ use tokio::sync::{mpsc, oneshot};
 type SessionStart = (ClientSession, futures_mpsc::Receiver<ClientEvent>);
 type SessionFactory = Box<dyn FnOnce(&LocalSpawner) -> SessionStart + Send>;
 
+#[derive(Clone, Debug)]
+pub struct SessionEvent {
+    pub channel: String,
+    pub payload: ClientEvent,
+}
+
 enum SessionCommand {
     IsConnected {
         reply: oneshot::Sender<bool>,
     },
     Connect {
+        event_channel: String,
         factory: SessionFactory,
         reply: oneshot::Sender<Result<(), String>>,
     },
@@ -71,7 +78,7 @@ pub struct SessionHandle {
 }
 
 impl SessionHandle {
-    pub fn spawn(event_tx: mpsc::Sender<ClientEvent>) -> Self {
+    pub fn spawn(event_tx: mpsc::Sender<SessionEvent>) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel::<SessionCommand>(32);
 
         thread::Builder::new()
@@ -103,7 +110,11 @@ impl SessionHandle {
         reply_rx.await.unwrap_or(false)
     }
 
-    pub async fn connect<T, C, R, K, F>(&self, builder_factory: F) -> Result<(), String>
+    pub async fn connect<T, C, R, K, F>(
+        &self,
+        event_channel: String,
+        builder_factory: F,
+    ) -> Result<(), String>
     where
         T: Transport + 'static,
         C: Clock + 'static,
@@ -119,6 +130,7 @@ impl SessionHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
             .send(SessionCommand::Connect {
+                event_channel,
                 factory,
                 reply: reply_tx,
             })
@@ -239,17 +251,19 @@ impl SessionHandle {
 }
 
 struct ActorState {
+    event_channel: Option<String>,
     session: Option<ClientSession>,
     events_rx: Option<futures_mpsc::Receiver<ClientEvent>>,
 }
 
 async fn actor_loop(
     mut cmd_rx: mpsc::Receiver<SessionCommand>,
-    event_tx: mpsc::Sender<ClientEvent>,
+    event_tx: mpsc::Sender<SessionEvent>,
 ) {
     use futures_util::StreamExt;
 
     let mut state = ActorState {
+        event_channel: None,
         session: None,
         events_rx: None,
     };
@@ -271,8 +285,15 @@ async fn actor_loop(
 
                 event = events_rx.next() => {
                     if let Some(event) = event {
-                        let _ = event_tx.send(event).await;
+                        let Some(channel) = state.event_channel.clone() else {
+                            continue;
+                        };
+                        let _ = event_tx.send(SessionEvent {
+                            channel,
+                            payload: event,
+                        }).await;
                     } else {
+                        state.event_channel = None;
                         state.session = None;
                         state.events_rx = None;
                     }
@@ -298,10 +319,16 @@ async fn handle_command(
         SessionCommand::IsConnected { reply } => {
             let _ = reply.send(state.session.is_some());
         }
-        SessionCommand::Connect { factory, reply } => {
+        SessionCommand::Connect {
+            event_channel,
+            factory,
+            reply,
+        } => {
+            state.event_channel = None;
             state.session = None;
             state.events_rx = None;
 
+            state.event_channel = Some(event_channel);
             let (session, events_rx) = factory(spawner);
             state.session = Some(session);
             state.events_rx = Some(events_rx);
@@ -380,6 +407,7 @@ async fn handle_command(
             let _ = reply.send(result);
         }
         SessionCommand::Shutdown { reply } => {
+            state.event_channel = None;
             state.session = None;
             state.events_rx = None;
             let _ = reply.send(());

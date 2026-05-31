@@ -1,14 +1,14 @@
-import type { ClientBridge } from "@/platform/bridge/types";
+import type { IdentityAdapter } from "@/platform/bridge/types";
 
-export async function exportIdentity(client: ClientBridge) {
-	const bytes = await client.exportIdentity();
+export async function exportIdentity(identity: IdentityAdapter) {
+	const bytes = await identity.exportIdentity();
 	const copy = new Uint8Array(bytes.byteLength);
 	copy.set(bytes);
 	const blob = new Blob([copy.buffer], { type: "application/octet-stream" });
 	return URL.createObjectURL(blob);
 }
 
-export async function importIdentity(client: ClientBridge, file: File) {
+export async function importIdentity(identity: IdentityAdapter, file: File) {
 	const bytes = new Uint8Array(await file.arrayBuffer());
-	await client.importIdentity(bytes);
+	await identity.importIdentity(bytes);
 }

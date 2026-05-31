@@ -3,11 +3,14 @@ import {
 	type PersistedDaemonRegistry,
 	parsePersistedDaemonRegistry,
 } from "@/state/daemon-registry/daemonRegistry";
+import { AsyncValueQueue } from "../bridge/asyncValueQueue";
+import { findCreatedTerminal } from "../bridge/terminalDiff";
 import type {
-	ClientBridge,
 	ConnectConfig,
 	CreateTerminalParams,
-	DaemonRegistryBridge,
+	PlatformServices,
+	RegistryAdapter,
+	SessionActor,
 	TerminalInfoRecord,
 	TerminalSnapshotRecord,
 } from "../bridge/types";
@@ -58,82 +61,46 @@ function saveDaemonRegistryToLocalStorage(state: PersistedDaemonRegistry) {
 	} catch {}
 }
 
-export class WebBridge implements ClientBridge {
-	private readonly eventQueue: unknown[] = [];
-	private eventWaiters: Array<{
-		resolve: (result: IteratorResult<unknown>) => void;
-		reject: (error: unknown) => void;
-	}> = [];
-	private eventPumpStarted = false;
-	private eventStreamClosed = false;
-
-	private constructor(private readonly client: CliPocketClient) {}
-
-	readonly daemonRegistry: DaemonRegistryBridge = {
-		load: async () => loadDaemonRegistryFromLocalStorage(),
-		save: async (state) => {
-			saveDaemonRegistryToLocalStorage(state);
-		},
+function terminalListEvent(terminals: TerminalInfoRecord[]) {
+	return {
+		kind: "TerminalList",
+		terminals,
 	};
+}
 
-	readonly embeddedDaemon = null;
+class WebSessionActor implements SessionActor {
+	private readonly queue = new AsyncValueQueue<unknown>();
+	private closed = false;
+	private pumpStarted = false;
 
-	static async create() {
-		await ensureWasmInitialized();
-		return new WebBridge(new CliPocketClient());
-	}
-
-	async connect(config: ConnectConfig) {
-		// Reset event pump state before connecting, as connect() creates a new event receiver
-		this.eventStreamClosed = false;
-		this.eventPumpStarted = false;
-		this.eventQueue.length = 0;
-		this.eventWaiters = [];
-
-		if (config.kind === "direct") {
-			await this.client.connect(
-				JSON.stringify({
-					kind: "direct",
-					endpointUrl: config.endpointUrl,
-					resumeTokenHex: config.resumeTokenHex ?? null,
-				}),
-			);
-			return;
-		}
-
-		await this.client.connect(
-			JSON.stringify({
-				kind: "relay",
-				relayUrl: config.relayUrl,
-				serverId: config.serverId,
-				pskHex: config.pskHex,
-				serverPublicHex: config.serverPublicHex,
-				resumeTokenHex: config.resumeTokenHex ?? null,
-			}),
-		);
-	}
+	constructor(private readonly client: CliPocketClient) {}
 
 	events(): AsyncIterable<unknown> {
-		this.startEventPump();
+		if (!this.pumpStarted) {
+			this.pumpStarted = true;
+			void this.pumpEvents();
+		}
 
 		return {
 			[Symbol.asyncIterator]: () => ({
-				next: async () => {
-					const queued = this.eventQueue.shift();
-					if (queued !== undefined) {
-						return { value: queued, done: false };
-					}
-					if (this.eventStreamClosed) {
-						return { value: undefined, done: true };
-					}
-
-					return await this.waitForNextEvent();
-				},
+				next: async () => await this.queue.next(),
 			}),
 		};
 	}
 
+	async refreshTerminals() {
+		const terminals = await this.loadTerminals();
+		this.queue.push(terminalListEvent(terminals));
+	}
+
+	async openTerminal(terminalId: string): Promise<TerminalSnapshotRecord> {
+		return (await this.client.open_terminal(
+			terminalId,
+		)) as TerminalSnapshotRecord;
+	}
+
 	async createTerminal(params: CreateTerminalParams) {
+		const before = await this.loadTerminals();
 		await this.client.create_terminal(
 			JSON.stringify({
 				cols: params.cols,
@@ -144,16 +111,9 @@ export class WebBridge implements ClientBridge {
 				scrollbackBytes: params.scrollbackBytes ?? null,
 			}),
 		);
-	}
-
-	async listTerminals(): Promise<TerminalInfoRecord[]> {
-		return (await this.client.list_terminals()) as TerminalInfoRecord[];
-	}
-
-	async openTerminal(terminalId: string): Promise<TerminalSnapshotRecord> {
-		return (await this.client.open_terminal(
-			terminalId,
-		)) as TerminalSnapshotRecord;
+		const after = await this.loadTerminals();
+		this.queue.push(terminalListEvent(after));
+		return findCreatedTerminal(before, after);
 	}
 
 	async sendInput(terminalId: string, bytes: Uint8Array) {
@@ -168,76 +128,95 @@ export class WebBridge implements ClientBridge {
 		await this.client.kill(terminalId);
 	}
 
-	async exportIdentity(): Promise<Uint8Array> {
-		return new TextEncoder().encode(this.client.export_identity());
-	}
-
-	async importIdentity(blob: Uint8Array) {
-		await this.client.import_identity(new TextDecoder().decode(blob));
-	}
-
 	async close() {
-		this.eventStreamClosed = true;
-		for (const waiter of this.eventWaiters) {
-			waiter.resolve({ value: undefined, done: true });
-		}
-		this.eventWaiters = [];
+		this.closed = true;
+		this.queue.close();
 		this.client.close();
 	}
 
-	private waitForNextEvent() {
-		return new Promise<IteratorResult<unknown>>((resolve, reject) => {
-			this.eventWaiters = [...this.eventWaiters, { resolve, reject }];
-		});
-	}
-
-	private startEventPump() {
-		if (this.eventPumpStarted) {
-			return;
-		}
-
-		this.eventPumpStarted = true;
-		void this.pumpEvents();
+	private async loadTerminals() {
+		return (await this.client.list_terminals()) as TerminalInfoRecord[];
 	}
 
 	private async pumpEvents() {
 		try {
-			while (!this.eventStreamClosed) {
-				const value = await this.client.next_event();
-				if (value == null) {
-					this.eventStreamClosed = true;
-					break;
+			while (!this.closed) {
+				const event = await this.client.next_event();
+				if (event == null) {
+					this.queue.close();
+					return;
 				}
-				this.pushEvent(value);
+				this.queue.push(event);
 			}
-		} catch (error) {
-			this.eventStreamClosed = true;
-			this.rejectWaiters(error);
-			return;
+		} catch (error: unknown) {
+			if (this.closed) {
+				return;
+			}
+			this.queue.fail(error);
 		}
+	}
+}
 
-		for (const waiter of this.eventWaiters) {
-			waiter.resolve({ value: undefined, done: true });
-		}
-		this.eventWaiters = [];
+export class WebBridge implements PlatformServices {
+	readonly sessionFactory = {
+		connect: async (config: ConnectConfig) => {
+			const client = new CliPocketClient();
+			if (config.kind === "direct") {
+				await client.connect(
+					JSON.stringify({
+						kind: "direct",
+						endpointUrl: config.endpointUrl,
+						resumeTokenHex: config.resumeTokenHex ?? null,
+					}),
+				);
+			} else {
+				await client.connect(
+					JSON.stringify({
+						kind: "relay",
+						relayUrl: config.relayUrl,
+						serverId: config.serverId,
+						pskHex: config.pskHex,
+						serverPublicHex: config.serverPublicHex,
+						resumeTokenHex: config.resumeTokenHex ?? null,
+					}),
+				);
+			}
+
+			return new WebSessionActor(client);
+		},
+	};
+
+	readonly registry: RegistryAdapter = {
+		load: async () => loadDaemonRegistryFromLocalStorage(),
+		save: async (state) => {
+			saveDaemonRegistryToLocalStorage(state);
+		},
+		exportIdentity: async () => await this.exportIdentity(),
+		importIdentity: async (blob) => await this.importIdentity(blob),
+	};
+
+	readonly host = null;
+
+	static async create() {
+		await ensureWasmInitialized();
+		return new WebBridge();
 	}
 
-	private pushEvent(value: unknown) {
-		const waiter = this.eventWaiters.shift();
-		if (waiter != null) {
-			waiter.resolve({ value, done: false });
-			return;
+	private async exportIdentity(): Promise<Uint8Array> {
+		const client = new CliPocketClient();
+		try {
+			return new TextEncoder().encode(client.export_identity());
+		} finally {
+			client.close();
 		}
-
-		this.eventQueue.push(value);
 	}
 
-	private rejectWaiters(error: unknown) {
-		const reason =
-			error instanceof Error ? error : new Error("event stream failed");
-		for (const waiter of this.eventWaiters) {
-			waiter.reject(reason);
+	private async importIdentity(blob: Uint8Array) {
+		const client = new CliPocketClient();
+		try {
+			await client.import_identity(new TextDecoder().decode(blob));
+		} finally {
+			client.close();
 		}
-		this.eventWaiters = [];
 	}
 }

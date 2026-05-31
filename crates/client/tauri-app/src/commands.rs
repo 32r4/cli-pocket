@@ -61,6 +61,7 @@ pub async fn connect(
     session: SessionHandle,
     kv: FileKvStore,
     config: serde_json::Value,
+    event_channel: String,
     direct_ws_subprotocol: Option<&'static str>,
 ) -> Result<(), String> {
     let config: ConnectArgs = serde_json::from_value(config).map_err(|error| error.to_string())?;
@@ -72,7 +73,7 @@ pub async fn connect(
     let ws_subprotocol = effective_ws_subprotocol(&endpoint, direct_ws_subprotocol);
 
     session
-        .connect(move |spawner| {
+        .connect(event_channel, move |spawner| {
             SessionBuilder::new(
                 identity,
                 SessionConfig {

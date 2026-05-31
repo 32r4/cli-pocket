@@ -1,16 +1,15 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use cli_pocket_client_core::ClientEvent;
+use cli_pocket_tauri_bindings::SessionEvent;
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
-const EVENT_CHANNEL: &str = "cli_pocket:event";
-
-pub fn start(app: AppHandle, mut event_rx: mpsc::Receiver<ClientEvent>) {
+pub fn start(app: AppHandle, mut event_rx: mpsc::Receiver<SessionEvent>) {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = event_rx.recv().await {
-            if let Err(error) = app.emit(EVENT_CHANNEL, serialize_event(&event)) {
-                tracing::warn!("failed to emit {EVENT_CHANNEL}: {error}");
+            if let Err(error) = app.emit(&event.channel, serialize_event(&event.payload)) {
+                tracing::warn!("failed to emit {}: {error}", event.channel);
             }
         }
     });

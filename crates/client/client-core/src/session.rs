@@ -10,6 +10,7 @@ use futures_util::{
     future::{Either, LocalBoxFuture},
     FutureExt, SinkExt, StreamExt,
 };
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
@@ -82,6 +83,7 @@ where
 pub struct ClientSession {
     terminal: Rc<RefCell<Option<TerminalHandle>>>,
     session_cmd_tx: mpsc::Sender<SessionCommand>,
+    stop_requested: Rc<Cell<bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +101,7 @@ enum SessionCommand {
         terminal: TerminalId,
         reply: UnitReply,
     },
+    Shutdown,
 }
 
 impl<T, C, R, K, S> SessionBuilder<T, C, R, K, S>
@@ -135,9 +138,11 @@ where
         let (cmd_tx, cmd_rx) = mpsc::channel::<TerminalCmd>(64);
         let (session_cmd_tx, session_cmd_rx) = mpsc::channel::<SessionCommand>(64);
         let terminal = Rc::new(RefCell::new(None));
+        let stop_requested = Rc::new(Cell::new(false));
         let session = ClientSession {
             terminal: Rc::clone(&terminal),
             session_cmd_tx,
+            stop_requested: Rc::clone(&stop_requested),
         };
 
         self.spawner.spawn(
@@ -153,6 +158,7 @@ where
                 cmd_rx,
                 session_cmd_rx,
                 terminal,
+                stop_requested,
             )
             .boxed_local(),
         );
@@ -216,6 +222,15 @@ impl ClientSession {
 
         reply_rx.await.map_err(|_| ClientError::Closed)?
     }
+
+    pub async fn shutdown(&self) {
+        self.stop_requested.set(true);
+        let _ = self
+            .session_cmd_tx
+            .clone()
+            .send(SessionCommand::Shutdown)
+            .await;
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -231,6 +246,7 @@ async fn run_session_loop<T, C, R, K>(
     mut cmd_rx: mpsc::Receiver<TerminalCmd>,
     mut session_cmd_rx: mpsc::Receiver<SessionCommand>,
     terminal: Rc<RefCell<Option<TerminalHandle>>>,
+    stop_requested: Rc<Cell<bool>>,
 ) where
     T: Transport + 'static,
     C: Clock + 'static,
@@ -243,11 +259,18 @@ async fn run_session_loop<T, C, R, K>(
     let mut pending_session_cmds = VecDeque::<SessionCommand>::new();
 
     loop {
+        if stop_requested.get() {
+            return;
+        }
+
         let _ = events_tx.clone().send(ClientEvent::Connecting).await;
         let mut reached_connected = false;
         let mut transport = match transport_factory().await {
             Ok(transport) => transport,
             Err(err) => {
+                if stop_requested.get() {
+                    return;
+                }
                 let _ = events_tx
                     .clone()
                     .send(ClientEvent::Disconnected {
@@ -280,6 +303,11 @@ async fn run_session_loop<T, C, R, K>(
         )
         .await;
 
+        if stop_requested.get() {
+            *terminal.borrow_mut() = None;
+            return;
+        }
+
         *terminal.borrow_mut() = None;
         if reached_connected {
             delay = start;
@@ -310,6 +338,9 @@ async fn run_session_loop<T, C, R, K>(
             }
         }
 
+        if stop_requested.get() {
+            return;
+        }
         sleep_backoff(&clock, &rng, delay).await;
         delay = crate::reconnect::next_delay(delay, max, mul);
     }
@@ -452,6 +483,9 @@ where
                         let Some(cmd) = cmd else {
                             return Ok(());
                         };
+                        if matches!(cmd, SessionCommand::Shutdown) {
+                            return Ok(());
+                        }
                         let frame = frame_for_session_command(
                             &mut runtime,
                             state.terminal,
@@ -837,6 +871,7 @@ fn frame_for_session_command(
                 terminal,
             })
         }
+        SessionCommand::Shutdown => unreachable!("shutdown commands are handled before framing"),
     }
 }
 

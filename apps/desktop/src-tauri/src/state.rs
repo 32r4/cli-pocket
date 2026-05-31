@@ -1,10 +1,10 @@
-use cli_pocket_client_core::ClientEvent;
 use cli_pocket_daemon_core::config::{default_config_path, workspace_root};
 use cli_pocket_daemon_core::service::{
     build_config_template, dev_config_template, load_or_create_config_with_template,
 };
 use cli_pocket_daemon_core::{Daemon, DaemonConfig};
 use cli_pocket_tauri_app::ManagedAppState;
+use cli_pocket_tauri_bindings::SessionEvent;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -22,7 +22,7 @@ pub struct EmbeddedDaemonRuntime {
 
 pub type AppState = ManagedAppState<EmbeddedDaemonRuntime>;
 
-pub fn new_app_state() -> Result<(AppState, mpsc::Receiver<ClientEvent>), String> {
+pub fn new_app_state() -> Result<(AppState, mpsc::Receiver<SessionEvent>), String> {
     let daemon_config = load_or_create_config_with_template(
         desktop_daemon_config_path(),
         desktop_daemon_template(),

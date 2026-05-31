@@ -4,13 +4,12 @@ pub mod event_pump;
 
 use std::path::{Path, PathBuf};
 
-use cli_pocket_client_core::ClientEvent;
-use cli_pocket_tauri_bindings::{FileKvStore, SessionHandle};
+use cli_pocket_tauri_bindings::{FileKvStore, SessionEvent, SessionHandle};
 use tauri::{App, AppHandle, Manager, Runtime};
 use tokio::sync::mpsc;
 
-pub fn spawn_session_runtime() -> (SessionHandle, mpsc::Receiver<ClientEvent>) {
-    let (event_tx, event_rx) = mpsc::channel::<ClientEvent>(64);
+pub fn spawn_session_runtime() -> (SessionHandle, mpsc::Receiver<SessionEvent>) {
+    let (event_tx, event_rx) = mpsc::channel::<SessionEvent>(64);
     let session = SessionHandle::spawn(event_tx);
     (session, event_rx)
 }
@@ -21,7 +20,7 @@ pub struct ClientRuntimeState {
 }
 
 impl ClientRuntimeState {
-    pub fn new_at(data_dir: &Path) -> Result<(Self, mpsc::Receiver<ClientEvent>), String> {
+    pub fn new_at(data_dir: &Path) -> Result<(Self, mpsc::Receiver<SessionEvent>), String> {
         let kv = FileKvStore::open_at(data_dir).map_err(|error| error.to_string())?;
         let (session, event_rx) = spawn_session_runtime();
 
@@ -46,7 +45,7 @@ impl<D> ManagedAppState<D> {
     pub fn new_at(
         data_dir: &Path,
         daemon: D,
-    ) -> Result<(Self, mpsc::Receiver<ClientEvent>), String> {
+    ) -> Result<(Self, mpsc::Receiver<SessionEvent>), String> {
         let (client, event_rx) = ClientRuntimeState::new_at(data_dir)?;
 
         Ok((Self { client, daemon }, event_rx))
@@ -77,7 +76,7 @@ pub fn install_tracing() {
         .try_init();
 }
 
-pub fn install_app_hooks(app: &AppHandle, event_rx: mpsc::Receiver<ClientEvent>) {
+pub fn install_app_hooks(app: &AppHandle, event_rx: mpsc::Receiver<SessionEvent>) {
     event_pump::start(app.clone(), event_rx);
     deep_link::install(app);
 }

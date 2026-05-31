@@ -8,8 +8,16 @@ const MOBILE_WS_SUBPROTOCOL: Option<&str> = Some("cli-pocket-server/v1");
 pub async fn cli_pocket_connect(
     state: State<'_, AppState>,
     config: serde_json::Value,
+    event_channel: String,
 ) -> Result<(), String> {
-    shared_commands::connect(state.session(), state.kv(), config, MOBILE_WS_SUBPROTOCOL).await
+    shared_commands::connect(
+        state.session(),
+        state.kv(),
+        config,
+        event_channel,
+        MOBILE_WS_SUBPROTOCOL,
+    )
+    .await
 }
 
 #[tauri::command]
