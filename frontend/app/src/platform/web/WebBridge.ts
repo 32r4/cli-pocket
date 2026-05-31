@@ -82,6 +82,12 @@ export class WebBridge implements ClientBridge {
 	}
 
 	async connect(config: ConnectConfig) {
+		// Reset event pump state before connecting, as connect() creates a new event receiver
+		this.eventStreamClosed = false;
+		this.eventPumpStarted = false;
+		this.eventQueue = [];
+		this.eventWaiters = [];
+
 		if (config.kind === "direct") {
 			await this.client.connect(
 				JSON.stringify({
