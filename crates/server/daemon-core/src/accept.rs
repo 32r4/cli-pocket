@@ -68,7 +68,21 @@ where
             Ok(())
         }
         Err(error) => {
-            tracing::error!(target = "cli_pocket_daemon::accept", %label, %error, "connection ended with error");
+            let is_expected = match &error {
+                crate::DaemonError::Transport(transport_err) => {
+                    transport_err.is_expected_disconnect()
+                }
+                crate::DaemonError::Internal(msg) => {
+                    msg.contains("transport closed during frame recv")
+                }
+                _ => false,
+            };
+
+            if is_expected {
+                tracing::debug!(target = "cli_pocket_daemon::accept", %label, %error, "connection closed by client");
+            } else {
+                tracing::error!(target = "cli_pocket_daemon::accept", %label, %error, "connection ended with error");
+            }
             Err(error)
         }
     }

@@ -195,7 +195,7 @@ export function AppRoot({
 		null;
 	const hasPendingPairingUrl = currentPairingUrlFromLocation() != null;
 	const startEventStream = useCallback(() => {
-		setEventStreamStarted((started) => started || true);
+		setEventStreamStarted(true);
 	}, []);
 	const connectBridge = useCallback(
 		async (serverId: string, config: ConnectConfig) => {
@@ -212,6 +212,8 @@ export function AppRoot({
 	useEffect(() => {
 		let active = true;
 		let activeInstance: ClientBridge | null = null;
+
+		setEventStreamStarted(false);
 
 		void bridgeFactory(platform)
 			.then((instance) => {

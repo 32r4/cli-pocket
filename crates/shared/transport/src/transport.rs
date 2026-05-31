@@ -4,10 +4,23 @@ use async_trait::async_trait;
 pub enum TransportError {
     #[error("connection closed")]
     Closed,
+    #[error("connection reset by peer")]
+    ConnectionReset,
+    #[error("broken pipe")]
+    BrokenPipe,
     #[error("io: {0}")]
     Io(String),
     #[error("websocket: {0}")]
     WebSocket(String),
+}
+
+impl TransportError {
+    pub fn is_expected_disconnect(&self) -> bool {
+        matches!(
+            self,
+            TransportError::Closed | TransportError::ConnectionReset | TransportError::BrokenPipe
+        )
+    }
 }
 
 /// Bidirectional binary-framed transport. Every send is one logical message;

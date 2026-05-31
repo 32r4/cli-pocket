@@ -1,9 +1,34 @@
 use crate::transport::{Transport, TransportError};
 use async_trait::async_trait;
 use futures_util::{sink::SinkExt, stream::StreamExt};
+use std::io::ErrorKind;
 use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+fn map_ws_error(err: WsError) -> TransportError {
+    match err {
+        WsError::ConnectionClosed | WsError::AlreadyClosed => TransportError::Closed,
+        WsError::Io(io_err) => match io_err.kind() {
+            ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::ConnectionRefused => TransportError::ConnectionReset,
+            ErrorKind::BrokenPipe => TransportError::BrokenPipe,
+            _ => TransportError::Io(io_err.to_string()),
+        },
+        WsError::Protocol(_) => {
+            let msg = err.to_string();
+            if msg.contains("Connection reset without closing handshake")
+                || msg.contains("Connection reset")
+            {
+                TransportError::ConnectionReset
+            } else {
+                TransportError::WebSocket(msg)
+            }
+        }
+        _ => TransportError::WebSocket(err.to_string()),
+    }
+}
 
 pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -19,7 +44,7 @@ impl TokioWsTransport {
     pub async fn connect(url: &str) -> Result<Self, TransportError> {
         let (ws, _) = tokio_tungstenite::connect_async(url)
             .await
-            .map_err(|e| TransportError::WebSocket(e.to_string()))?;
+            .map_err(map_ws_error)?;
         Ok(Self::new(ws))
     }
 }
@@ -30,14 +55,14 @@ impl Transport for TokioWsTransport {
         self.ws
             .send(Message::Binary(bytes))
             .await
-            .map_err(|e| TransportError::WebSocket(e.to_string()))
+            .map_err(map_ws_error)
     }
 
     async fn recv(&mut self) -> Result<Option<Vec<u8>>, TransportError> {
         loop {
             match self.ws.next().await {
                 None | Some(Ok(Message::Close(_))) => return Ok(None),
-                Some(Err(e)) => return Err(TransportError::WebSocket(e.to_string())),
+                Some(Err(e)) => return Err(map_ws_error(e)),
                 Some(Ok(Message::Binary(bytes))) => return Ok(Some(bytes)),
                 Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {}
                 Some(Ok(Message::Text(_))) => {
@@ -50,10 +75,7 @@ impl Transport for TokioWsTransport {
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
-        self.ws
-            .close(None)
-            .await
-            .map_err(|e| TransportError::WebSocket(e.to_string()))
+        self.ws.close(None).await.map_err(map_ws_error)
     }
 }
 
