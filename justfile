@@ -72,13 +72,16 @@ dev-relay:
 
 dev-desktop:
     just _frontend-install-if-missing
+    just _ensure-wasm-pkg
     cd apps/desktop; cargo tauri dev
 
 dev-mobile-android:
     just mobile-android-init
+    just _ensure-wasm-pkg
     cd apps/mobile; cargo tauri android dev
 
 dev-mobile-ios:
+    just _ensure-wasm-pkg
     cd apps/mobile; cargo tauri ios dev
 
 dev-web:
@@ -132,6 +135,15 @@ _frontend-install-if-missing:
 [unix]
 _frontend-install-if-missing:
     test -d frontend/app/node_modules || npm --prefix frontend/app ci
+
+# Ensures WASM package is built (needed for Vite to resolve imports even in desktop/mobile mode)
+[windows]
+_ensure-wasm-pkg:
+    if (-not (Test-Path 'crates/client/client-core-wasm/pkg/package.json')) { Push-Location crates/client/client-core-wasm; wasm-pack build --target web --dev; Pop-Location }
+
+[unix]
+_ensure-wasm-pkg:
+    test -f crates/client/client-core-wasm/pkg/package.json || (cd crates/client/client-core-wasm && wasm-pack build --target web --dev)
 
 mobile-android-init:
     cd apps/mobile; cargo tauri android init --ci
