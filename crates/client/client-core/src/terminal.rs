@@ -54,10 +54,6 @@ impl TerminalHandle {
         *self.stream.borrow()
     }
 
-    pub(crate) fn set_stream_id(&self, stream: StreamId) {
-        *self.stream.borrow_mut() = stream;
-    }
-
     pub async fn write_input(&self, bytes: Bytes) -> crate::ClientResult<()> {
         self.cmd_tx
             .clone()

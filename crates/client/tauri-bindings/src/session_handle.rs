@@ -4,8 +4,10 @@
 use bytes::Bytes;
 use cli_pocket_client_core::session::SessionBuilder;
 use cli_pocket_client_core::session::SessionSpawner;
-use cli_pocket_client_core::{ClientEvent, ClientSession, Clock, KeyValueStore, Rng, Transport};
-use cli_pocket_proto::{TerminalCreateParams, TerminalId};
+use cli_pocket_client_core::{
+    ClientEvent, ClientSession, Clock, KeyValueStore, Rng, TerminalSnapshot, Transport,
+};
+use cli_pocket_proto::{TerminalCreateParams, TerminalId, TerminalInfo};
 use futures_channel::mpsc as futures_mpsc;
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
@@ -24,6 +26,13 @@ enum SessionCommand {
     CreateTerminal {
         params: TerminalCreateParams,
         reply: oneshot::Sender<Result<(), String>>,
+    },
+    OpenTerminal {
+        terminal_id: TerminalId,
+        reply: oneshot::Sender<Result<TerminalSnapshot, String>>,
+    },
+    ListTerminals {
+        reply: oneshot::Sender<Result<Vec<TerminalInfo>, String>>,
     },
     SendInput {
         terminal_id: TerminalId,
@@ -128,6 +137,33 @@ impl SessionHandle {
                 params,
                 reply: reply_tx,
             })
+            .await
+            .map_err(|_| "actor closed".to_owned())?;
+
+        reply_rx
+            .await
+            .map_err(|_| "actor dropped reply".to_owned())?
+    }
+
+    pub async fn open_terminal(&self, terminal_id: TerminalId) -> Result<TerminalSnapshot, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SessionCommand::OpenTerminal {
+                terminal_id,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| "actor closed".to_owned())?;
+
+        reply_rx
+            .await
+            .map_err(|_| "actor dropped reply".to_owned())?
+    }
+
+    pub async fn list_terminals(&self) -> Result<Vec<TerminalInfo>, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SessionCommand::ListTerminals { reply: reply_tx })
             .await
             .map_err(|_| "actor closed".to_owned())?;
 
@@ -282,6 +318,26 @@ async fn handle_command(
             };
             let _ = reply.send(result);
         }
+        SessionCommand::OpenTerminal { terminal_id, reply } => {
+            let result = match &state.session {
+                Some(session) => session
+                    .open_terminal(terminal_id)
+                    .await
+                    .map_err(|error| error.to_string()),
+                None => Err("not connected".to_owned()),
+            };
+            let _ = reply.send(result);
+        }
+        SessionCommand::ListTerminals { reply } => {
+            let result = match &state.session {
+                Some(session) => session
+                    .list_terminals()
+                    .await
+                    .map_err(|error| error.to_string()),
+                None => Err("not connected".to_owned()),
+            };
+            let _ = reply.send(result);
+        }
         SessionCommand::SendInput {
             terminal_id,
             bytes,
@@ -314,11 +370,13 @@ async fn handle_command(
             let _ = reply.send(result);
         }
         SessionCommand::Kill { terminal_id, reply } => {
-            let result =
-                with_active_terminal(state.session.as_ref(), terminal_id, |handle| async move {
-                    handle.kill().await.map_err(|error| error.to_string())
-                })
-                .await;
+            let result = match state.session.as_ref() {
+                Some(session) => session
+                    .kill_terminal(terminal_id)
+                    .await
+                    .map_err(|error| error.to_string()),
+                None => Err("not connected".to_owned()),
+            };
             let _ = reply.send(result);
         }
         SessionCommand::Shutdown { reply } => {
@@ -345,11 +403,9 @@ where
         .terminal()
         .await
         .ok_or_else(|| "no active terminal".to_owned())?;
-
     if handle.terminal_id() != requested_terminal_id {
         return Err(format!(
-            "terminal_id does not match active terminal {}",
-            handle.terminal_id().0
+            "terminal {requested_terminal_id:?} is not the active terminal"
         ));
     }
 

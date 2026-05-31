@@ -59,6 +59,18 @@ pub enum FrameBody {
         error: ProtocolError,
     },
 
+    TerminalDetach {
+        request_id: u32,
+        stream: StreamId,
+    },
+    TerminalDetachOk {
+        request_id: u32,
+    },
+    TerminalDetachErr {
+        request_id: u32,
+        error: ProtocolError,
+    },
+
     TerminalKill {
         request_id: u32,
         terminal: TerminalId,

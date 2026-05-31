@@ -18,7 +18,26 @@ export type ConnectConfig =
 export interface TerminalSummary {
 	id: string;
 	title: string;
-	status: "connecting" | "ready" | "closed";
+	status: "idle" | "connecting" | "ready" | "error";
+	cols: number;
+	rows: number;
+	createdAtUnixMs: number;
+	attachedClients: number;
+	error: string | null;
+}
+
+export interface TerminalInfoRecord {
+	terminal: string;
+	cols: number;
+	rows: number;
+	created_at_unix_ms: number;
+	label: string | null;
+	attached_clients: number;
+}
+
+export interface TerminalSnapshotRecord {
+	info: TerminalInfoRecord;
+	snapshot_bytes_b64: string;
 }
 
 export interface CreateTerminalParams {
@@ -45,6 +64,8 @@ export interface EmbeddedDaemonBridge {
 export interface ClientBridge {
 	connect(config: ConnectConfig): Promise<void>;
 	events(): AsyncIterable<unknown>;
+	listTerminals(): Promise<TerminalInfoRecord[]>;
+	openTerminal(terminalId: string): Promise<TerminalSnapshotRecord>;
 	createTerminal(params: CreateTerminalParams): Promise<void>;
 	sendInput(terminalId: string, bytes: Uint8Array): Promise<void>;
 	resize(terminalId: string, cols: number, rows: number): Promise<void>;

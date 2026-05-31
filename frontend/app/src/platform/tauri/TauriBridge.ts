@@ -7,6 +7,8 @@ import type {
 	CreateTerminalParams,
 	DaemonRegistryBridge,
 	EmbeddedDaemonBridge,
+	TerminalInfoRecord,
+	TerminalSnapshotRecord,
 } from "../bridge/types";
 
 const EVENT_CHANNEL = "cli_pocket:event";
@@ -64,6 +66,16 @@ export class TauriBridge implements ClientBridge {
 
 	async createTerminal(params: CreateTerminalParams) {
 		await invoke("cli_pocket_create_terminal", { params });
+	}
+
+	async listTerminals() {
+		return await invoke<TerminalInfoRecord[]>("cli_pocket_list_terminals");
+	}
+
+	async openTerminal(terminalId: string) {
+		return await invoke<TerminalSnapshotRecord>("cli_pocket_open_terminal", {
+			terminalId,
+		});
 	}
 
 	async sendInput(terminalId: string, bytes: Uint8Array) {

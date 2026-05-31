@@ -217,6 +217,18 @@ async fn run_connection_post_handshake<T: Transport>(
                     .await?;
             }
 
+            FrameBody::TerminalDetach { request_id, stream } => {
+                let resp = if streams.map.remove(&stream).is_some() {
+                    Frame::body(FrameBody::TerminalDetachOk { request_id })
+                } else {
+                    Frame::body(FrameBody::TerminalDetachErr {
+                        request_id,
+                        error: ProtocolError::Other("unknown stream".to_owned()),
+                    })
+                };
+                chan.send_frame(&resp).await?;
+            }
+
             FrameBody::TerminalKill {
                 request_id,
                 terminal,

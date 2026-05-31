@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { importPairingOfferUrl } from "@/features/pairing/pairingOffer";
-import { XTermView } from "@/features/terminals/XTermView";
-import type { ClientBridge, ConnectConfig } from "@/platform/bridge/types";
+import { TerminalViewport } from "@/features/terminals/TerminalViewport";
+import { TerminalController } from "@/features/terminals/terminalController";
+import type {
+	ClientBridge,
+	ConnectConfig,
+	TerminalInfoRecord,
+	TerminalSnapshotRecord,
+} from "@/platform/bridge/types";
 import {
 	type AppPlatform,
 	createBridgeForPlatform,
@@ -28,6 +34,7 @@ import { Shell } from "./shell/Shell";
 const daemonRegistry = createDaemonRegistryStore();
 const uiState = createUiStateStore();
 const workspaceState = createWorkspaceStore();
+const TERMINAL_LIST_POLL_MS = 2_000;
 
 interface AppRootProps {
 	platform: AppPlatform;
@@ -60,6 +67,70 @@ function endpointLabel(server: DaemonRecord) {
 
 function themeLabel(theme: ThemeName) {
 	return theme === "light" ? "Light" : "Dark";
+}
+
+function parseTerminalInfo(value: unknown): TerminalInfoRecord | null {
+	if (typeof value !== "object" || value === null) {
+		return null;
+	}
+
+	const terminal =
+		"terminal" in value && typeof value.terminal === "string"
+			? value.terminal
+			: null;
+	if (terminal == null) {
+		return null;
+	}
+
+	return {
+		terminal,
+		cols: "cols" in value && typeof value.cols === "number" ? value.cols : 120,
+		rows: "rows" in value && typeof value.rows === "number" ? value.rows : 32,
+		created_at_unix_ms:
+			"created_at_unix_ms" in value &&
+			typeof value.created_at_unix_ms === "number"
+				? value.created_at_unix_ms
+				: 0,
+		label:
+			"label" in value && typeof value.label === "string" ? value.label : null,
+		attached_clients:
+			"attached_clients" in value && typeof value.attached_clients === "number"
+				? value.attached_clients
+				: 0,
+	};
+}
+
+function decodeBase64Bytes(value: string) {
+	const binary = window.atob(value);
+	const bytes = new Uint8Array(binary.length);
+	for (let index = 0; index < binary.length; index += 1) {
+		bytes[index] = binary.charCodeAt(index);
+	}
+	return new TextDecoder().decode(bytes);
+}
+
+function parseTerminalSnapshot(value: unknown): TerminalSnapshotRecord | null {
+	if (typeof value !== "object" || value === null) {
+		return null;
+	}
+
+	const info =
+		"info" in value && typeof value.info === "object" && value.info !== null
+			? parseTerminalInfo(value.info)
+			: null;
+	const snapshotBytes =
+		"snapshot_bytes_b64" in value &&
+		typeof value.snapshot_bytes_b64 === "string"
+			? value.snapshot_bytes_b64
+			: null;
+	if (info == null || snapshotBytes == null) {
+		return null;
+	}
+
+	return {
+		info,
+		snapshot_bytes_b64: snapshotBytes,
+	};
 }
 
 function BackIcon() {
@@ -183,8 +254,8 @@ export function AppRoot({
 	);
 	const autoConnectServerIdRef = useRef<string | null>(null);
 	const pendingPairingServerIdRef = useRef<string | null>(null);
-	const pendingInitialTerminalRef = useRef<string | null>(null);
 	const processedPairingUrlRef = useRef<string | null>(null);
+	const terminalControllerRef = useRef<TerminalController | null>(null);
 
 	const selectedServer =
 		registry.daemons.find((daemon) => daemon.id === ui.selectedServerId) ??
@@ -198,9 +269,7 @@ export function AppRoot({
 	const activeSession =
 		workspace.terminals.find(
 			(terminal) => terminal.id === workspace.activeSessionId,
-		) ??
-		workspace.terminals[0] ??
-		null;
+		) ?? null;
 	const hasPendingPairingUrl = currentPairingUrlFromLocation() != null;
 	const startEventStream = useCallback(() => {
 		setEventStreamStarted(true);
@@ -212,10 +281,32 @@ export function AppRoot({
 			}
 
 			workspaceState.getState().startConnecting(serverId);
+			terminalControllerRef.current?.reset();
 			await bridge.connect(config);
 		},
 		[bridge],
 	);
+
+	if (terminalControllerRef.current == null) {
+		terminalControllerRef.current = new TerminalController({
+			onInput: (terminalId, data) => {
+				void sendInputToTerminal(terminalId, data);
+			},
+			onResize: (terminalId, cols, rows) => {
+				void resizeTerminalById(terminalId, cols, rows);
+			},
+		});
+	} else {
+		terminalControllerRef.current.setHandlers({
+			onInput: (terminalId, data) => {
+				void sendInputToTerminal(terminalId, data);
+			},
+			onResize: (terminalId, cols, rows) => {
+				void resizeTerminalById(terminalId, cols, rows);
+			},
+		});
+	}
+	const terminalController = terminalControllerRef.current;
 
 	useEffect(() => {
 		let active = true;
@@ -475,26 +566,6 @@ export function AppRoot({
 								);
 						}
 						workspaceState.getState().markConnected();
-						const activeServerId =
-							workspaceState.getState().activeConnectionServerId;
-						if (
-							activeServerId != null &&
-							workspaceState.getState().terminals.length === 0 &&
-							pendingInitialTerminalRef.current !== activeServerId
-						) {
-							pendingInitialTerminalRef.current = activeServerId;
-							void bridge
-								.createTerminal({ cols: 120, rows: 32 })
-								.catch((error: unknown) => {
-									pendingInitialTerminalRef.current = null;
-									const message =
-										error instanceof Error
-											? error.message
-											: "failed to create terminal";
-									workspaceState.getState().markConnectionFailed(message);
-									setInlineError(message);
-								});
-						}
 						continue;
 					}
 					if (kind === "Disconnected") {
@@ -502,8 +573,8 @@ export function AppRoot({
 							"reason" in event && typeof event.reason === "string"
 								? event.reason
 								: "connection closed";
-						pendingInitialTerminalRef.current = null;
 						workspaceState.getState().markDisconnected();
+						terminalControllerRef.current?.reset();
 						setInlineError(reason);
 						continue;
 					}
@@ -514,23 +585,29 @@ export function AppRoot({
 							event.info !== null
 								? event.info
 								: null;
+						const parsed = parseTerminalInfo(info);
+						if (parsed != null) {
+							workspaceState.getState().markTerminalReady(parsed);
+							workspaceState.getState().setActiveSessionId(parsed.terminal);
+						}
+						continue;
+					}
+					if (kind === "TerminalOutput") {
 						const terminalId =
-							info != null &&
-							"terminal" in info &&
-							typeof info.terminal === "string"
-								? info.terminal
-								: `terminal-${workspaceState.getState().terminals.length + 1}`;
-						const label =
-							info != null && "label" in info && typeof info.label === "string"
-								? info.label
-								: `Terminal ${workspaceState.getState().terminals.length + 1}`;
-
-						workspaceState.getState().openTerminal({
-							id: terminalId,
-							title: label,
-							status: "ready",
-						});
-						pendingInitialTerminalRef.current = null;
+							"terminal_id" in event && typeof event.terminal_id === "string"
+								? event.terminal_id
+								: null;
+						const bytesB64 =
+							"bytes_b64" in event && typeof event.bytes_b64 === "string"
+								? event.bytes_b64
+								: null;
+						if (terminalId !== null && bytesB64 !== null) {
+							const chunk = decodeBase64Bytes(bytesB64);
+							terminalControllerRef.current?.appendActiveOutput(
+								terminalId,
+								chunk,
+							);
+						}
 						continue;
 					}
 					if (kind === "TerminalExited") {
@@ -539,7 +616,8 @@ export function AppRoot({
 								? event.terminal_id
 								: null;
 						if (terminalId !== null) {
-							workspaceState.getState().markTerminalClosed(terminalId);
+							workspaceState.getState().removeTerminal(terminalId);
+							terminalControllerRef.current?.removeTerminal(terminalId);
 						}
 						continue;
 					}
@@ -548,7 +626,6 @@ export function AppRoot({
 							"message" in event && typeof event.message === "string"
 								? event.message
 								: "runtime error";
-						pendingInitialTerminalRef.current = null;
 						workspaceState.getState().markConnectionFailed(message);
 						setInlineError(message);
 					}
@@ -559,7 +636,6 @@ export function AppRoot({
 				}
 				const message =
 					error instanceof Error ? error.message : "event stream failed";
-				pendingInitialTerminalRef.current = null;
 				workspaceState.getState().markConnectionFailed(message);
 				setInlineError(message);
 			}
@@ -569,6 +645,43 @@ export function AppRoot({
 			cancelled = true;
 		};
 	}, [bridge, eventStreamStarted]);
+
+	useEffect(() => {
+		if (
+			bridge == null ||
+			workspace.connectionState !== "connected" ||
+			!eventStreamStarted
+		) {
+			return;
+		}
+
+		let cancelled = false;
+		const poll = async () => {
+			try {
+				const terminals = await bridge.listTerminals();
+				if (!cancelled) {
+					workspaceState.getState().syncTerminalList(terminals);
+				}
+			} catch (error: unknown) {
+				if (!cancelled) {
+					setInlineError(
+						error instanceof Error ? error.message : "failed to list terminals",
+					);
+				}
+			}
+		};
+
+		void poll();
+		const interval = window.setInterval(
+			() => void poll(),
+			TERMINAL_LIST_POLL_MS,
+		);
+
+		return () => {
+			cancelled = true;
+			window.clearInterval(interval);
+		};
+	}, [bridge, eventStreamStarted, workspace.connectionState]);
 
 	useEffect(() => {
 		const pendingServerId = pendingPairingServerIdRef.current;
@@ -704,24 +817,105 @@ export function AppRoot({
 			return;
 		}
 
-		const nextIndex = workspace.terminals.length + 1;
-		const tempId = `pending-terminal-${nextIndex}`;
-		workspaceState.getState().openTerminal({
-			id: tempId,
-			title: `Terminal ${nextIndex}`,
-			status: "connecting",
-		});
-
 		try {
 			await bridge.createTerminal({ cols: 120, rows: 36 });
-			workspaceState.getState().markTerminalReady(tempId);
+			const terminals = await bridge.listTerminals();
+			workspaceState.getState().syncTerminalList(terminals);
 		} catch (error: unknown) {
 			const message =
 				error instanceof Error ? error.message : "failed to create terminal";
-			workspaceState.getState().markTerminalClosed(tempId);
 			setInlineError(message);
 		}
 	};
+
+	const selectTerminal = async (terminalId: string) => {
+		workspaceState.getState().setActiveSessionId(terminalId);
+		terminalControllerRef.current?.setActiveTerminal(terminalId);
+		if (bridge == null) {
+			return;
+		}
+
+		workspaceState.getState().markTerminalConnecting(terminalId);
+		try {
+			const snapshot = await Promise.race([
+				bridge.openTerminal(terminalId),
+				new Promise<never>((_, reject) => {
+					window.setTimeout(
+						() => reject(new Error("terminal open timed out")),
+						5_000,
+					);
+				}),
+			]);
+			const parsed = parseTerminalSnapshot(snapshot);
+			if (parsed == null) {
+				throw new Error("invalid terminal snapshot");
+			}
+			workspaceState.getState().markTerminalReady(parsed.info);
+			terminalControllerRef.current?.renderSnapshot(
+				terminalId,
+				decodeBase64Bytes(parsed.snapshot_bytes_b64),
+			);
+		} catch (error: unknown) {
+			const message =
+				error instanceof Error ? error.message : "failed to open terminal";
+			workspaceState.getState().markTerminalError(terminalId, message);
+			setInlineError(message);
+		}
+	};
+
+	const killTerminal = async (terminalId: string) => {
+		if (bridge == null) {
+			return;
+		}
+
+		try {
+			await bridge.kill(terminalId, "TERM");
+		} catch (error: unknown) {
+			const message =
+				error instanceof Error ? error.message : "failed to kill terminal";
+			setInlineError(message);
+		}
+	};
+	const sendInputToTerminal = async (terminalId: string, data: string) => {
+		if (bridge == null) {
+			return;
+		}
+
+		try {
+			await bridge.sendInput(terminalId, new TextEncoder().encode(data));
+		} catch (error: unknown) {
+			const message =
+				error instanceof Error ? error.message : "failed to send input";
+			setInlineError(message);
+		}
+	};
+
+	const resizeTerminalById = async (
+		terminalId: string,
+		cols: number,
+		rows: number,
+	) => {
+		if (bridge == null) {
+			return;
+		}
+
+		workspaceState.getState().updateTerminalSize(terminalId, cols, rows);
+		try {
+			await bridge.resize(terminalId, cols, rows);
+		} catch (error: unknown) {
+			const message =
+				error instanceof Error ? error.message : "failed to resize terminal";
+			setInlineError(message);
+		}
+	};
+
+	useEffect(() => {
+		terminalControllerRef.current?.setTheme(ui.theme);
+	}, [ui.theme]);
+
+	useEffect(() => {
+		terminalControllerRef.current?.setActiveTerminal(activeSession?.id ?? null);
+	}, [activeSession?.id]);
 
 	const generateLocalPairUrl = () => {
 		if (bridge?.embeddedDaemon == null) {
@@ -951,17 +1145,32 @@ export function AppRoot({
 					<section className="workspace-panel" aria-label="Terminal workspace">
 						<div className="terminal-tabs" role="tablist" aria-label="Sessions">
 							{workspace.terminals.map((terminal) => (
-								<button
+								<div
 									className="terminal-tab"
-									type="button"
 									key={terminal.id}
 									data-active={terminal.id === activeSession?.id}
-									onClick={() =>
-										workspaceState.getState().setActiveSessionId(terminal.id)
-									}
 								>
-									{terminal.title}
-								</button>
+									<button
+										className="terminal-tab__button"
+										type="button"
+										onClick={() => void selectTerminal(terminal.id)}
+									>
+										<span className="terminal-tab__label">
+											{terminal.title}
+										</span>
+									</button>
+									<button
+										className="terminal-tab__close"
+										type="button"
+										aria-label={`Kill ${terminal.title}`}
+										onClick={(event) => {
+											event.stopPropagation();
+											void killTerminal(terminal.id);
+										}}
+									>
+										x
+									</button>
+								</div>
 							))}
 							<button
 								className="terminal-tab terminal-tab--add"
@@ -972,14 +1181,25 @@ export function AppRoot({
 							</button>
 						</div>
 						<div className="terminal-stage">
-							<XTermView
-								title={activeSession?.title ?? "Terminal"}
-								theme={ui.theme}
-							/>
+							{activeSession == null ? (
+								<div className="xterm-server">Select a terminal</div>
+							) : activeSession.status === "connecting" ? (
+								<div className="xterm-server">Connecting terminal...</div>
+							) : activeSession.status === "error" ? (
+								<div className="xterm-server">
+									{activeSession.error ?? "Terminal attach failed"}
+								</div>
+							) : (
+								<TerminalViewport controller={terminalController} />
+							)}
 						</div>
 						<footer className="terminal-footer">
 							<span>{activeSession?.title ?? "No terminal"}</span>
-							<span>120x36</span>
+							<span>
+								{activeSession == null
+									? "--"
+									: `${activeSession.cols}x${activeSession.rows}`}
+							</span>
 							<span>{activeSession?.status ?? workspace.connectionState}</span>
 						</footer>
 					</section>

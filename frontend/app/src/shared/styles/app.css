@@ -129,6 +129,7 @@ body {
 	background: var(--app-background);
 	color: var(--text-strong);
 	background-attachment: fixed;
+	overflow: hidden;
 }
 
 button,
@@ -198,13 +199,19 @@ strong {
 }
 
 #root {
+	height: 100vh;
 	min-height: 100vh;
+	overflow: hidden;
 }
 
 .app-shell {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
 	position: relative;
+	height: 100vh;
 	min-height: 100vh;
 	padding: 0;
+	overflow: hidden;
 }
 
 .app-shell::before {
@@ -321,12 +328,15 @@ strong {
 
 .app-shell__main {
 	padding: 0;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .connect-panel,
 .connection-status-panel,
 .workspace-panel {
-	min-height: calc(100vh - 8.5rem);
+	height: 100%;
+	min-height: 0;
 	padding: 0;
 }
 
@@ -350,7 +360,8 @@ strong {
 	justify-items: center;
 	gap: 1rem;
 	max-width: 24rem;
-	min-height: calc(100vh - 8.5rem);
+	height: 100%;
+	min-height: 0;
 	margin: 0 auto;
 }
 
@@ -460,6 +471,7 @@ strong {
 .workspace-panel {
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr) auto;
+	min-width: 0;
 	overflow: hidden;
 	border-bottom: 1px solid var(--line);
 	box-shadow: var(--shadow-panel);
@@ -475,10 +487,40 @@ strong {
 
 .terminal-tab {
 	flex: 0 0 auto;
-	padding-inline: 1rem;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.75rem;
 	background: var(--surface-panel);
 	border: 1px solid transparent;
 	box-shadow: var(--shadow-inset);
+}
+
+.terminal-tab__button {
+	padding-inline: 1rem;
+}
+
+.terminal-tab__label {
+	max-width: 14rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.terminal-tab__close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.25rem;
+	height: 1.25rem;
+	border-radius: 999px;
+	color: var(--text-soft);
+}
+
+.terminal-tab__close:hover,
+.terminal-tab__close:focus-visible {
+	background: var(--surface-hover);
+	color: var(--danger);
+	outline: none;
 }
 
 .terminal-tab[data-active="true"] {
@@ -493,19 +535,38 @@ strong {
 }
 
 .terminal-stage {
+	display: flex;
+	min-height: 0;
 	padding: 1rem 0;
-	min-height: 24rem;
 	background: var(--surface-terminal-stage);
 }
 
-.xterm-server {
-	min-height: 100%;
-	padding: 1rem;
+.xterm-server,
+.xterm-shell {
+	display: flex;
+	flex: 1 1 auto;
+	min-height: 0;
 	background: var(--surface-terminal);
 	border-block: 1px solid var(--surface-terminal-rim);
+}
+
+.xterm-server,
+.xterm-shell,
+.xterm-host {
 	color: var(--terminal-fg);
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-	white-space: pre-wrap;
+}
+
+.xterm-server,
+.xterm-shell {
+	padding: 1rem;
+}
+
+.xterm-host {
+	flex: 1 1 auto;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
 }
 
 .terminal-footer {
@@ -684,11 +745,13 @@ strong {
 	.connect-panel,
 	.connection-status-panel,
 	.workspace-panel {
-		min-height: calc(100vh - 10rem);
+		height: 100%;
+		min-height: 0;
 	}
 
 	.empty-hosts-panel {
-		min-height: calc(100vh - 10rem);
+		height: 100%;
+		min-height: 0;
 	}
 
 	.control-overlay {

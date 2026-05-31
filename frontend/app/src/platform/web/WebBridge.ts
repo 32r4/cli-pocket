@@ -8,6 +8,8 @@ import type {
 	ConnectConfig,
 	CreateTerminalParams,
 	DaemonRegistryBridge,
+	TerminalInfoRecord,
+	TerminalSnapshotRecord,
 } from "../bridge/types";
 
 const STORAGE_KEY = "cli-pocket/daemon-registry/v1";
@@ -144,16 +146,26 @@ export class WebBridge implements ClientBridge {
 		);
 	}
 
-	async sendInput(_terminalId: string, bytes: Uint8Array) {
-		await this.client.send_input(bytes);
+	async listTerminals(): Promise<TerminalInfoRecord[]> {
+		return (await this.client.list_terminals()) as TerminalInfoRecord[];
 	}
 
-	async resize(_terminalId: string, cols: number, rows: number) {
-		await this.client.resize(cols, rows);
+	async openTerminal(terminalId: string): Promise<TerminalSnapshotRecord> {
+		return (await this.client.open_terminal(
+			terminalId,
+		)) as TerminalSnapshotRecord;
 	}
 
-	async kill(_terminalId: string, _signal: string) {
-		await this.client.kill();
+	async sendInput(terminalId: string, bytes: Uint8Array) {
+		await this.client.send_input(terminalId, bytes);
+	}
+
+	async resize(terminalId: string, cols: number, rows: number) {
+		await this.client.resize(terminalId, cols, rows);
+	}
+
+	async kill(terminalId: string, _signal: string) {
+		await this.client.kill(terminalId);
 	}
 
 	async exportIdentity(): Promise<Uint8Array> {

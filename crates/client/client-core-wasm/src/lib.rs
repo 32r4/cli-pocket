@@ -17,9 +17,9 @@ use bytes::Bytes;
 use cli_pocket_client_core::session::SessionSpawner;
 use cli_pocket_client_core::{
     ClientEvent, ClientIdentity, ClientResult, ClientSession, KeyValueStore, SessionBuilder,
-    SessionConfig, SessionEndpoint,
+    SessionConfig, SessionEndpoint, TerminalSnapshot,
 };
-use cli_pocket_proto::{ResumeToken, TerminalCreateParams};
+use cli_pocket_proto::{ResumeToken, TerminalCreateParams, TerminalId, TerminalInfo};
 use futures_channel::mpsc;
 use futures_util::{future::LocalBoxFuture, StreamExt};
 use js_sys::Promise;
@@ -322,48 +322,53 @@ impl CliPocketClient {
         })
     }
 
-    /// Send raw keystroke bytes to the active terminal.
+    #[wasm_bindgen]
+    pub fn open_terminal(&self, terminal_id: String) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            let value = client.open_terminal_inner(terminal_id).await?;
+            Ok(value)
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn list_terminals(&self) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            let value = client.list_terminals_inner().await?;
+            Ok(value)
+        })
+    }
+
+    /// Send raw keystroke bytes to a terminal that is already attached.
     ///
     /// `data` is a `Uint8Array` on the JS side; wasm-bindgen copies it into a
     /// `Vec<u8>` before the await point so the caller does not need to keep
     /// the original buffer alive.
     ///
-    /// Note: the `terminal_id` parameter is accepted for future multi-terminal
-    /// support but currently ignored — only the single active terminal is
-    /// addressed (the protocol only supports one at a time).
     #[wasm_bindgen]
-    pub fn send_input(&self, data: Vec<u8>) -> Promise {
+    pub fn send_input(&self, terminal_id: String, data: Vec<u8>) -> Promise {
         let client = self.clone();
         future_to_promise(async move {
-            client.send_input_inner(data).await?;
+            client.send_input_inner(terminal_id, data).await?;
             Ok(JsValue::UNDEFINED)
         })
     }
 
-    /// Resize the active terminal.
-    ///
-    /// Note: the active terminal is always targeted (single-terminal protocol
-    /// v1); a `terminal_id` parameter will be added when multi-terminal is
-    /// supported.
     #[wasm_bindgen]
-    pub fn resize(&self, cols: u16, rows: u16) -> Promise {
+    pub fn resize(&self, terminal_id: String, cols: u16, rows: u16) -> Promise {
         let client = self.clone();
         future_to_promise(async move {
-            client.resize_inner(cols, rows).await?;
+            client.resize_inner(terminal_id, cols, rows).await?;
             Ok(JsValue::UNDEFINED)
         })
     }
 
-    /// Kill the active terminal.
-    ///
-    /// Note: the active terminal is always targeted (single-terminal protocol
-    /// v1); a `terminal_id` parameter will be added when multi-terminal is
-    /// supported.
     #[wasm_bindgen]
-    pub fn kill(&self) -> Promise {
+    pub fn kill(&self, terminal_id: String) -> Promise {
         let client = self.clone();
         future_to_promise(async move {
-            client.kill_inner().await?;
+            client.kill_inner(terminal_id).await?;
             Ok(JsValue::UNDEFINED)
         })
     }
@@ -474,7 +479,41 @@ impl CliPocketClient {
         session.create_terminal(params).await.map_err(js_error)
     }
 
-    async fn send_input_inner(&self, data: Vec<u8>) -> Result<(), JsValue> {
+    async fn open_terminal_inner(&self, terminal_id: String) -> Result<JsValue, JsValue> {
+        let session = self
+            .inner
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let snapshot = session
+            .open_terminal(parse_terminal_id(&terminal_id)?)
+            .await
+            .map_err(js_error)?;
+
+        terminal_snapshot_to_js(&snapshot)
+    }
+
+    async fn list_terminals_inner(&self) -> Result<JsValue, JsValue> {
+        let session = self
+            .inner
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let terminals = session.list_terminals().await.map_err(js_error)?;
+        let values = terminals
+            .iter()
+            .map(terminal_info_to_json_value)
+            .collect::<Vec<_>>();
+        values
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsValue::from_str(&format!("serialize terminals: {e}")))
+    }
+
+    async fn send_input_inner(&self, terminal_id: String, data: Vec<u8>) -> Result<(), JsValue> {
         let session = self
             .inner
             .borrow()
@@ -486,6 +525,9 @@ impl CliPocketClient {
             .terminal()
             .await
             .ok_or_else(|| JsValue::from_str("no active terminal"))?;
+        if handle.terminal_id() != parse_terminal_id(&terminal_id)? {
+            return Err(JsValue::from_str("terminal is not active"));
+        }
 
         handle
             .write_input(Bytes::from(data))
@@ -493,7 +535,7 @@ impl CliPocketClient {
             .map_err(js_error)
     }
 
-    async fn resize_inner(&self, cols: u16, rows: u16) -> Result<(), JsValue> {
+    async fn resize_inner(&self, terminal_id: String, cols: u16, rows: u16) -> Result<(), JsValue> {
         let session = self
             .inner
             .borrow()
@@ -505,11 +547,14 @@ impl CliPocketClient {
             .terminal()
             .await
             .ok_or_else(|| JsValue::from_str("no active terminal"))?;
+        if handle.terminal_id() != parse_terminal_id(&terminal_id)? {
+            return Err(JsValue::from_str("terminal is not active"));
+        }
 
         handle.resize(cols, rows).await.map_err(js_error)
     }
 
-    async fn kill_inner(&self) -> Result<(), JsValue> {
+    async fn kill_inner(&self, terminal_id: String) -> Result<(), JsValue> {
         let session = self
             .inner
             .borrow()
@@ -517,12 +562,10 @@ impl CliPocketClient {
             .ok_or_else(|| JsValue::from_str("not connected"))?
             .clone();
 
-        let handle = session
-            .terminal()
+        session
+            .kill_terminal(parse_terminal_id(&terminal_id)?)
             .await
-            .ok_or_else(|| JsValue::from_str("no active terminal"))?;
-
-        handle.kill().await.map_err(js_error)
+            .map_err(js_error)
     }
 
     async fn next_event_inner(&self) -> Result<JsValue, JsValue> {
@@ -668,6 +711,12 @@ fn parse_resume_token(value: Option<&str>) -> Result<Option<ResumeToken>, JsValu
         .map_err(|e| JsValue::from_str(&format!("resume_token_hex: {e}")))
 }
 
+fn parse_terminal_id(value: &str) -> Result<TerminalId, JsValue> {
+    uuid::Uuid::parse_str(value)
+        .map(TerminalId)
+        .map_err(|e| JsValue::from_str(&format!("terminal_id: {e}")))
+}
+
 fn event_to_js(event: &ClientEvent) -> Result<JsValue, JsValue> {
     let value = event_to_json_value(event);
 
@@ -696,14 +745,7 @@ fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
         }
         ClientEvent::TerminalCreated(info) => serde_json::json!({
             "kind": "TerminalCreated",
-            "info": {
-                "terminal": info.terminal.0.to_string(),
-                "cols": info.cols,
-                "rows": info.rows,
-                "created_at_unix_ms": info.created_at_unix_ms,
-                "label": info.label,
-                "attached_clients": info.attached_clients,
-            },
+            "info": terminal_info_to_json_value(info),
         }),
         ClientEvent::TerminalOutput {
             terminal_id,
@@ -728,6 +770,26 @@ fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
             serde_json::json!({ "kind": "Error", "message": message })
         }
     }
+}
+
+fn terminal_info_to_json_value(info: &TerminalInfo) -> serde_json::Value {
+    serde_json::json!({
+        "terminal": info.terminal.0.to_string(),
+        "cols": info.cols,
+        "rows": info.rows,
+        "created_at_unix_ms": info.created_at_unix_ms,
+        "label": info.label,
+        "attached_clients": info.attached_clients,
+    })
+}
+
+fn terminal_snapshot_to_js(snapshot: &TerminalSnapshot) -> Result<JsValue, JsValue> {
+    serde_json::json!({
+        "info": terminal_info_to_json_value(&snapshot.info),
+        "snapshot_bytes_b64": BASE64.encode(&snapshot.bytes),
+    })
+    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+    .map_err(|e| JsValue::from_str(&format!("serialize terminal snapshot: {e}")))
 }
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {

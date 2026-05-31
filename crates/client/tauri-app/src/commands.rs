@@ -1,8 +1,9 @@
+use base64::Engine as _;
 use bytes::Bytes;
 use cli_pocket_client_core::{
-    ClientIdentity, KeyValueStore, SessionBuilder, SessionConfig, SessionEndpoint,
+    ClientIdentity, KeyValueStore, SessionBuilder, SessionConfig, SessionEndpoint, TerminalSnapshot,
 };
-use cli_pocket_proto::{ResumeToken, TerminalCreateParams, TerminalId};
+use cli_pocket_proto::{ResumeToken, TerminalCreateParams, TerminalId, TerminalInfo};
 use cli_pocket_tauri_bindings::{
     FileKvStore, OsRandom, SessionHandle, TokioClock, TokioWsTransport,
 };
@@ -113,6 +114,26 @@ pub async fn create_terminal(
             scrollback_bytes: params.scrollback_bytes,
         })
         .await
+}
+
+pub async fn open_terminal(
+    session: SessionHandle,
+    terminal_id: String,
+) -> Result<serde_json::Value, String> {
+    let terminal_id = parse_terminal_id(&terminal_id)?;
+    session
+        .open_terminal(terminal_id)
+        .await
+        .map(|snapshot| serialize_terminal_snapshot(&snapshot))
+}
+
+pub async fn list_terminals(session: SessionHandle) -> Result<Vec<serde_json::Value>, String> {
+    session.list_terminals().await.map(|terminals| {
+        terminals
+            .iter()
+            .map(serialize_terminal_info)
+            .collect::<Vec<_>>()
+    })
 }
 
 pub async fn send_input(
@@ -258,6 +279,24 @@ fn validate_signal(signal: Option<&str>) -> Result<(), String> {
         "TERM" | "HUP" | "KILL" => Ok(()),
         _ => Err(format!("unsupported signal: {signal}")),
     }
+}
+
+fn serialize_terminal_info(info: &TerminalInfo) -> serde_json::Value {
+    serde_json::json!({
+        "terminal": info.terminal.0.to_string(),
+        "cols": info.cols,
+        "rows": info.rows,
+        "created_at_unix_ms": info.created_at_unix_ms,
+        "label": info.label,
+        "attached_clients": info.attached_clients,
+    })
+}
+
+fn serialize_terminal_snapshot(snapshot: &TerminalSnapshot) -> serde_json::Value {
+    serde_json::json!({
+        "info": serialize_terminal_info(&snapshot.info),
+        "snapshot_bytes_b64": base64::engine::general_purpose::STANDARD.encode(&snapshot.bytes),
+    })
 }
 
 async fn load_identity(kv: FileKvStore) -> Result<ClientIdentity, String> {
