@@ -561,14 +561,6 @@ export function AppRoot({
 	}, [bridge, eventStreamStarted]);
 
 	useEffect(() => {
-		if (bridge == null) {
-			return;
-		}
-
-		startEventStream();
-	}, [bridge, startEventStream]);
-
-	useEffect(() => {
 		const pendingServerId = pendingPairingServerIdRef.current;
 		if (pendingServerId == null) {
 			return;

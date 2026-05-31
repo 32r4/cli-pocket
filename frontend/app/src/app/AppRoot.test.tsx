@@ -185,7 +185,7 @@ afterEach(() => {
 });
 
 describe("AppRoot", () => {
-	it("starts the bridge event stream as soon as the bridge is ready", async () => {
+	it("does not consume bridge events before a connection starts", async () => {
 		const bridge = createFakeBridge(EMPTY_REGISTRY);
 		const AppRoot = await loadAppRoot();
 
@@ -194,7 +194,7 @@ describe("AppRoot", () => {
 		);
 
 		await screen.findByRole("button", { name: "Direct connection" });
-		await waitFor(() => expect(bridge.events).toHaveBeenCalledTimes(1));
+		expect(bridge.events).not.toHaveBeenCalled();
 		expect(bridge.connect).not.toHaveBeenCalled();
 	});
 
