@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientBridge, ConnectConfig } from "@/platform/bridge/types";
@@ -6,7 +7,7 @@ import type { AppPlatform } from "@/platform/runtime/platform";
 import type { PersistedDaemonRegistry } from "@/state/daemon-registry/daemonRegistry";
 
 vi.mock("@/features/terminals/XTermView", () => ({
-	XTermView: ({ title }: { title: string }) => (
+	XTermView: ({ title }: { title: string; theme: string }) => (
 		<div data-testid="xterm-view">{title}</div>
 	),
 }));
@@ -175,6 +176,7 @@ async function loadAppRoot() {
 beforeEach(() => {
 	window.localStorage.clear();
 	window.history.replaceState(null, "", "/");
+	document.documentElement.removeAttribute("data-theme");
 	vi.resetModules();
 });
 
@@ -182,6 +184,7 @@ afterEach(() => {
 	cleanup();
 	window.localStorage.clear();
 	window.history.replaceState(null, "", "/");
+	document.documentElement.removeAttribute("data-theme");
 });
 
 describe("AppRoot", () => {
@@ -304,6 +307,28 @@ describe("AppRoot", () => {
 			expect(screen.getByRole("alert")).toHaveTextContent("lost"),
 		);
 		expect(bridge.events).toHaveBeenCalledTimes(1);
+	});
+
+	it("switches to the light theme and persists the choice", async () => {
+		const user = userEvent.setup();
+		const bridge = createFakeBridge(EMPTY_REGISTRY);
+		const AppRoot = await loadAppRoot();
+
+		render(
+			<AppRoot platform={WEB_PLATFORM} bridgeFactory={async () => bridge} />,
+		);
+
+		await screen.findByRole("button", { name: "Direct connection" });
+		await user.click(
+			screen.getByRole("button", { name: "Open control overlay" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Use light theme" }));
+
+		expect(
+			screen.getByRole("button", { name: "Use light theme" }),
+		).toHaveAttribute("data-active", "true");
+		expect(document.documentElement.dataset.theme).toBe("light");
+		expect(window.localStorage.getItem("cli-pocket-theme")).toBe("light");
 	});
 
 	it("keeps the live bridge when a stale StrictMode mount resolves late", async () => {

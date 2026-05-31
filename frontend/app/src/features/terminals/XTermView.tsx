@@ -1,13 +1,32 @@
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
+import type { ThemeName } from "@/state/ui/uiState";
 
-export function XTermView({ title }: { title: string }) {
+function readThemeToken(name: string) {
+	if (typeof window === "undefined") {
+		return "";
+	}
+
+	return getComputedStyle(document.documentElement)
+		.getPropertyValue(name)
+		.trim();
+}
+
+export function XTermView({
+	title,
+	theme,
+}: {
+	title: string;
+	theme: ThemeName;
+}) {
 	const serverRef = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
 		if (serverRef.current === null) {
 			return;
 		}
+
+		serverRef.current.dataset.theme = theme;
 
 		if (import.meta.env.VITEST) {
 			serverRef.current.textContent = `${title}\r\ncli-pocket`;
@@ -27,9 +46,17 @@ export function XTermView({ title }: { title: string }) {
 					return;
 				}
 
+				const terminalTheme = {
+					background: readThemeToken("--surface-terminal"),
+					foreground: readThemeToken("--terminal-fg"),
+					cursor: readThemeToken("--terminal-cursor"),
+					selectionBackground: readThemeToken("--terminal-selection-bg"),
+				};
+
 				terminal = new Terminal({
 					cols: 120,
 					rows: 32,
+					theme: terminalTheme,
 				});
 
 				terminal.open(serverRef.current);
@@ -45,7 +72,7 @@ export function XTermView({ title }: { title: string }) {
 			cancelled = true;
 			terminal?.dispose();
 		};
-	}, [title]);
+	}, [theme, title]);
 
 	return <div ref={serverRef} className="xterm-server" />;
 }

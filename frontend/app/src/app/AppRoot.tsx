@@ -17,7 +17,11 @@ import {
 	type DaemonRecord,
 	daemonRecordToConnectConfig,
 } from "@/state/daemon-registry/types";
-import { createUiStateStore, type OverlaySection } from "@/state/ui/uiState";
+import {
+	createUiStateStore,
+	type OverlaySection,
+	type ThemeName,
+} from "@/state/ui/uiState";
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { Shell } from "./shell/Shell";
 
@@ -52,6 +56,10 @@ function serverBadge(server: DaemonRecord) {
 
 function endpointLabel(server: DaemonRecord) {
 	return server.kind === "direct" ? server.endpointUrl : server.relayUrl;
+}
+
+function themeLabel(theme: ThemeName) {
+	return theme === "light" ? "Light" : "Dark";
 }
 
 function BackIcon() {
@@ -809,10 +817,33 @@ export function AppRoot({
 						</div>
 					</div>
 				) : null}
+				<fieldset className="field-stack theme-fieldset">
+					<legend className="sr-only">Theme preference</legend>
+					<div className="action-row">
+						<button
+							type="button"
+							data-active={ui.theme === "dark"}
+							className="theme-toggle"
+							aria-label="Use dark theme"
+							onClick={() => ui.setTheme("dark")}
+						>
+							Dark
+						</button>
+						<button
+							type="button"
+							data-active={ui.theme === "light"}
+							className="theme-toggle"
+							aria-label="Use light theme"
+							onClick={() => ui.setTheme("light")}
+						>
+							Light
+						</button>
+					</div>
+				</fieldset>
 				<div className="detail-grid">
 					<div>
 						<span>Theme</span>
-						<strong>Dark</strong>
+						<strong>{themeLabel(ui.theme)}</strong>
 					</div>
 					<div>
 						<span>Shell</span>
@@ -941,7 +972,10 @@ export function AppRoot({
 							</button>
 						</div>
 						<div className="terminal-stage">
-							<XTermView title={activeSession?.title ?? "Terminal"} />
+							<XTermView
+								title={activeSession?.title ?? "Terminal"}
+								theme={ui.theme}
+							/>
 						</div>
 						<footer className="terminal-footer">
 							<span>{activeSession?.title ?? "No terminal"}</span>

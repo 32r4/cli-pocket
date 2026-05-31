@@ -1,15 +1,122 @@
 :root {
-	color-scheme: dark;
 	font-family: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-	background: #08111f;
-	color: #eff6ff;
-	--bg: #08111f;
-	--line: rgba(160, 184, 213, 0.24);
-	--line-strong: rgba(160, 184, 213, 0.42);
-	--text-soft: #9db2cc;
-	--text-strong: #f8fbff;
-	--accent: #7dd3a7;
-	--danger: #f97373;
+}
+
+:root,
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--bg: #070707;
+	--app-background:
+		radial-gradient(
+			140rem 80rem at -10% -20%,
+			rgba(255, 255, 255, 0.12),
+			transparent 55%
+		),
+		radial-gradient(
+			90rem 60rem at 110% 0%,
+			rgba(255, 255, 255, 0.06),
+			transparent 45%
+		),
+		linear-gradient(180deg, #111111 0%, #070707 42%, #050505 100%);
+	--line: rgba(255, 255, 255, 0.12);
+	--line-strong: rgba(255, 255, 255, 0.22);
+	--text-soft: #9f9a92;
+	--text-strong: #f5f1e8;
+	--accent: #ffffff;
+	--danger: #f38b8b;
+	--surface-hover: rgba(255, 255, 255, 0.055);
+	--surface-input: rgba(255, 255, 255, 0.045);
+	--surface-panel: rgba(255, 255, 255, 0.04);
+	--surface-panel-strong: rgba(255, 255, 255, 0.11);
+	--surface-panel-border: rgba(255, 255, 255, 0.14);
+	--surface-shell: rgba(10, 10, 10, 0.84);
+	--surface-header: rgba(8, 8, 8, 0.62);
+	--surface-overlay: rgba(5, 5, 5, 0.92);
+	--surface-terminal-rim: rgba(255, 255, 255, 0.08);
+	--surface-terminal-stage:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+		#030303;
+	--surface-terminal: #030303;
+	--terminal-fg: #f0ece4;
+	--terminal-cursor: #ffffff;
+	--terminal-selection-bg: rgba(255, 255, 255, 0.18);
+	--status-connected: #b8d7c4;
+	--status-connecting: #d8c59c;
+	--status-disconnected: #f0a4a4;
+	--status-ring: rgba(255, 255, 255, 0.12);
+	--alert-border: rgba(243, 139, 139, 0.28);
+	--alert-bg: rgba(88, 24, 24, 0.34);
+	--alert-text: #ffe1e1;
+	--overlay-backdrop: rgba(0, 0, 0, 0.82);
+	--selection-border: rgba(255, 255, 255, 0.24);
+	--focus-ring: rgba(255, 255, 255, 0.34);
+	--status-chip-bg: rgba(255, 255, 255, 0.07);
+	--status-chip-border: rgba(255, 255, 255, 0.16);
+	--status-chip-failed-bg: rgba(243, 139, 139, 0.12);
+	--status-chip-failed-border: rgba(243, 139, 139, 0.22);
+	--shadow-panel: 0 22px 80px rgba(0, 0, 0, 0.42);
+	--shadow-elevated: 0 12px 36px rgba(0, 0, 0, 0.24);
+	--shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+:root[data-theme="light"] {
+	color-scheme: light;
+	--bg: #f5f3ee;
+	--app-background:
+		radial-gradient(
+			130rem 84rem at -10% -22%,
+			rgba(0, 0, 0, 0.06),
+			transparent 55%
+		),
+		radial-gradient(
+			96rem 64rem at 110% 0%,
+			rgba(0, 0, 0, 0.04),
+			transparent 48%
+		),
+		linear-gradient(180deg, #fbfaf7 0%, #f2efe9 48%, #ece8e0 100%);
+	--line: rgba(15, 15, 15, 0.12);
+	--line-strong: rgba(15, 15, 15, 0.22);
+	--text-soft: #686156;
+	--text-strong: #111111;
+	--accent: #0f172a;
+	--danger: #b91c1c;
+	--surface-hover: rgba(15, 15, 15, 0.045);
+	--surface-input: rgba(255, 255, 255, 0.86);
+	--surface-panel: rgba(255, 255, 255, 0.72);
+	--surface-panel-strong: rgba(15, 15, 15, 0.08);
+	--surface-panel-border: rgba(15, 15, 15, 0.1);
+	--surface-shell: rgba(250, 248, 243, 0.82);
+	--surface-header: rgba(251, 250, 247, 0.68);
+	--surface-overlay: rgba(245, 243, 238, 0.94);
+	--surface-terminal-rim: rgba(15, 15, 15, 0.08);
+	--surface-terminal-stage:
+		linear-gradient(
+			180deg,
+			rgba(255, 255, 255, 0.82),
+			rgba(236, 232, 224, 0.94)
+		),
+		#fffdfa;
+	--surface-terminal: #fffdfa;
+	--terminal-fg: #181818;
+	--terminal-cursor: #111111;
+	--terminal-selection-bg: rgba(17, 17, 17, 0.16);
+	--status-connected: #32684e;
+	--status-connecting: #876830;
+	--status-disconnected: #b74c4c;
+	--status-ring: rgba(15, 15, 15, 0.14);
+	--alert-border: rgba(220, 38, 38, 0.22);
+	--alert-bg: rgba(255, 242, 242, 0.9);
+	--alert-text: #991b1b;
+	--overlay-backdrop: rgba(235, 232, 224, 0.82);
+	--selection-border: rgba(15, 15, 15, 0.2);
+	--focus-ring: rgba(17, 17, 17, 0.22);
+	--status-chip-bg: rgba(17, 17, 17, 0.04);
+	--status-chip-border: rgba(17, 17, 17, 0.1);
+	--status-chip-failed-bg: rgba(220, 38, 38, 0.07);
+	--status-chip-failed-border: rgba(220, 38, 38, 0.18);
+	--shadow-panel: 0 20px 72px rgba(36, 32, 24, 0.12);
+	--shadow-elevated: 0 10px 28px rgba(36, 32, 24, 0.08);
+	--shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 * {
@@ -19,18 +126,9 @@
 body {
 	margin: 0;
 	min-height: 100vh;
-	background:
-		radial-gradient(
-			circle at top left,
-			rgba(43, 108, 176, 0.24),
-			transparent 28rem
-		),
-		radial-gradient(
-			circle at top right,
-			rgba(125, 211, 167, 0.16),
-			transparent 18rem
-		),
-		linear-gradient(180deg, #0a1628 0%, #07101d 100%);
+	background: var(--app-background);
+	color: var(--text-strong);
+	background-attachment: fixed;
 }
 
 button,
@@ -49,11 +147,12 @@ button {
 	transition:
 		background-color 120ms ease,
 		border-color 120ms ease,
+		box-shadow 120ms ease,
 		transform 120ms ease;
 }
 
 button:hover:enabled {
-	background: rgba(255, 255, 255, 0.03);
+	background: var(--surface-hover);
 	border-color: transparent;
 	transform: none;
 }
@@ -68,9 +167,18 @@ select {
 	width: 100%;
 	border: 1px solid var(--line);
 	border-radius: 0;
-	background: rgba(5, 14, 28, 0.36);
+	background: var(--surface-input);
 	color: var(--text-strong);
 	padding: 0.85rem 0.95rem;
+	box-shadow: var(--shadow-inset);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+	outline: none;
+	border-color: var(--selection-border);
+	box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 strong {
@@ -96,7 +204,30 @@ strong {
 .app-shell {
 	position: relative;
 	min-height: 100vh;
-	padding: 0 1.5rem 1.5rem;
+	padding: 0;
+}
+
+.app-shell::before {
+	content: "";
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	background:
+		linear-gradient(
+			90deg,
+			transparent 0,
+			transparent calc(100% - 1px),
+			var(--line) calc(100% - 1px),
+			var(--line) 100%
+		),
+		linear-gradient(
+			180deg,
+			transparent 0,
+			transparent calc(100% - 1px),
+			var(--line) calc(100% - 1px),
+			var(--line) 100%
+		);
+	opacity: 0.24;
 }
 
 .app-shell__header {
@@ -105,6 +236,8 @@ strong {
 	gap: 1rem;
 	padding: 1rem 0;
 	border-bottom: 1px solid var(--line-strong);
+	background: var(--surface-header);
+	backdrop-filter: blur(18px);
 }
 
 .menu-button,
@@ -141,7 +274,8 @@ strong {
 
 .connect-panel h2,
 .connection-status-panel h2,
-.detail-section h2 {
+.detail-section h2,
+.server-modal h2 {
 	margin: 0;
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
 	font-size: 1.05rem;
@@ -167,17 +301,17 @@ strong {
 	width: 0.65rem;
 	height: 0.65rem;
 	border-radius: 999px;
-	background: #f97373;
-	box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+	background: var(--status-disconnected);
+	box-shadow: 0 0 0 1px var(--status-ring);
 	flex: 0 0 auto;
 }
 
 .app-shell__status-light[data-state="green"] {
-	background: #7dd3a7;
+	background: var(--status-connected);
 }
 
 .app-shell__status-light[data-state="yellow"] {
-	background: #facc15;
+	background: var(--status-connecting);
 }
 
 .detail-section p {
@@ -186,7 +320,7 @@ strong {
 }
 
 .app-shell__main {
-	padding-top: 1.5rem;
+	padding: 0;
 }
 
 .connect-panel,
@@ -224,9 +358,10 @@ strong {
 	width: min(100%, 18rem);
 	justify-content: center;
 	padding: 1rem 1.25rem;
-	border: 1px solid var(--line);
+	border: 1px solid var(--surface-panel-border);
 	border-radius: 0.6rem;
-	background: rgba(255, 255, 255, 0.04);
+	background: var(--surface-panel);
+	box-shadow: var(--shadow-elevated);
 }
 
 .connect-panel > * {
@@ -245,6 +380,13 @@ strong {
 .empty-state {
 	display: grid;
 	gap: 1rem;
+}
+
+.theme-fieldset {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	min-inline-size: 0;
 }
 
 .server-inline-action {
@@ -293,20 +435,34 @@ strong {
 	padding-inline: 0;
 }
 
+.theme-toggle {
+	padding-inline: 1rem;
+	border: 1px solid var(--surface-panel-border);
+	background: var(--surface-panel);
+	box-shadow: var(--shadow-inset);
+}
+
+.theme-toggle[data-active="true"] {
+	border-color: var(--selection-border);
+	background: var(--surface-panel-strong);
+	color: var(--accent);
+	box-shadow: var(--shadow-elevated);
+}
+
 [role="alert"] {
 	margin-top: 1rem;
 	padding: 0.95rem 1rem;
-	border: 1px solid rgba(249, 115, 115, 0.28);
-	background: rgba(127, 29, 29, 0.24);
-	color: #fecaca;
+	border: 1px solid var(--alert-border);
+	background: var(--alert-bg);
+	color: var(--alert-text);
 }
 
 .workspace-panel {
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr) auto;
 	overflow: hidden;
-	border-top: 1px solid var(--line);
 	border-bottom: 1px solid var(--line);
+	box-shadow: var(--shadow-panel);
 }
 
 .terminal-tabs {
@@ -320,13 +476,15 @@ strong {
 .terminal-tab {
 	flex: 0 0 auto;
 	padding-inline: 1rem;
-	background: rgba(255, 255, 255, 0.04);
-	border-bottom: 1px solid transparent;
+	background: var(--surface-panel);
+	border: 1px solid transparent;
+	box-shadow: var(--shadow-inset);
 }
 
 .terminal-tab[data-active="true"] {
-	background: rgba(125, 211, 167, 0.22);
-	border-color: rgba(125, 211, 167, 0.5);
+	background: var(--surface-panel-strong);
+	border-color: var(--selection-border);
+	box-shadow: var(--shadow-elevated);
 }
 
 .terminal-tab--add {
@@ -337,15 +495,15 @@ strong {
 .terminal-stage {
 	padding: 1rem 0;
 	min-height: 24rem;
-	background:
-		linear-gradient(180deg, rgba(4, 10, 20, 0.5), rgba(4, 10, 20, 0.8)), #02070f;
+	background: var(--surface-terminal-stage);
 }
 
 .xterm-server {
 	min-height: 100%;
 	padding: 1rem;
-	background: #02070f;
-	color: #d1fae5;
+	background: var(--surface-terminal);
+	border-block: 1px solid var(--surface-terminal-rim);
+	color: var(--terminal-fg);
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
 	white-space: pre-wrap;
 }
@@ -368,7 +526,8 @@ strong {
 	grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
 	gap: 1rem;
 	padding: 0;
-	background: #08111f;
+	background: var(--surface-overlay);
+	backdrop-filter: blur(20px);
 }
 
 .control-overlay__rail,
@@ -449,14 +608,16 @@ strong {
 	display: grid;
 	place-items: center;
 	padding: 1.5rem;
-	background: rgba(2, 6, 12, 0.72);
+	background: var(--overlay-backdrop);
 }
 
 .server-modal {
 	width: min(100%, 34rem);
 	padding: 1.5rem;
-	border: 1px solid var(--line-strong);
-	background: #08111f;
+	border: 1px solid var(--surface-panel-border);
+	background: var(--surface-shell);
+	box-shadow: var(--shadow-panel);
+	backdrop-filter: blur(22px);
 }
 
 .server-option-list {
@@ -480,16 +641,16 @@ strong {
 .status-chip {
 	justify-self: start;
 	padding: 0.4rem 0.8rem;
-	background: rgba(125, 211, 167, 0.14);
-	border: 1px solid rgba(125, 211, 167, 0.36);
+	background: var(--status-chip-bg);
+	border: 1px solid var(--status-chip-border);
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
 	font-size: 0.85rem;
 	text-transform: lowercase;
 }
 
 .status-chip[data-state="failed"] {
-	background: rgba(249, 115, 115, 0.15);
-	border-color: rgba(249, 115, 115, 0.32);
+	background: var(--status-chip-failed-bg);
+	border-color: var(--status-chip-failed-border);
 }
 
 .detail-grid {
@@ -512,7 +673,7 @@ strong {
 
 @media (max-width: 900px) {
 	.app-shell {
-		padding: 0 0.75rem 0.75rem;
+		padding: 0;
 	}
 
 	.app-shell__header {
