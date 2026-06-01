@@ -181,13 +181,11 @@ button {
 	color: var(--text-strong);
 	padding: 0.75rem 0;
 	cursor: pointer;
-}
-
-button:hover:enabled:not(.terminal-tab__button):not(.terminal-tab__close):not(
-	.terminal-tab--add
-):not(.server-list__item):not(.server-list__delete) {
-	background: var(--surface-hover);
-	border-color: transparent;
+	transition:
+		background-color 140ms ease,
+		color 140ms ease,
+		border-color 140ms ease,
+		transform 140ms ease;
 }
 
 button:disabled {
@@ -211,6 +209,33 @@ input:focus-visible,
 select:focus-visible {
 	outline: none;
 	border-color: var(--selection-border);
+	box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.icon-button {
+	all: unset;
+	display: inline-grid;
+	place-items: center;
+	width: var(--icon-button-size, 1.75rem);
+	height: var(--icon-button-size, 1.75rem);
+	border-radius: var(--icon-button-radius, 0.3rem);
+	color: var(--text-soft);
+	cursor: pointer;
+	transition:
+		background-color 140ms ease,
+		color 140ms ease,
+		box-shadow 140ms ease,
+		transform 140ms ease;
+}
+
+.icon-button:hover:enabled,
+.icon-button:focus-visible {
+	outline: none;
+	background: var(--surface-hover);
+	color: var(--text-strong);
+}
+
+.icon-button:focus-visible {
 	box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -279,20 +304,8 @@ strong {
 	backdrop-filter: blur(18px);
 }
 
-.menu-button,
-.back-button {
-	min-width: auto;
-	padding: 0.5rem 0.25rem;
-	border-bottom: 1px solid transparent;
-	align-self: stretch;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-}
-
 .connect-panel h2,
 .connection-status-panel h2,
-.detail-section h2,
 .server-modal h2 {
 	margin: 0;
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
@@ -330,11 +343,6 @@ strong {
 
 .app-shell__status-light[data-state="yellow"] {
 	background: var(--status-connecting);
-}
-
-.detail-section p {
-	margin: 0;
-	color: var(--text-soft);
 }
 
 .app-shell__main {
@@ -396,19 +404,11 @@ strong {
 	padding-bottom: 0;
 }
 
-.field-stack,
 .server-form,
 .action-column,
 .empty-state {
 	display: grid;
 	gap: 1rem;
-}
-
-.theme-fieldset {
-	margin: 0;
-	padding: 0;
-	border: 0;
-	min-inline-size: 0;
 }
 
 .server-inline-action {
@@ -452,23 +452,70 @@ strong {
 	gap: 0.75rem;
 }
 
-.ghost-button {
-	justify-self: start;
-	padding-inline: 0;
+.action-row > button:hover:enabled,
+.empty-hosts-panel button:hover:enabled,
+.server-option-list button:hover:enabled,
+.server-list__add:hover:enabled {
+	transform: translateY(-1px);
 }
 
-.theme-toggle {
-	padding-inline: 1rem;
-	border: 1px solid var(--surface-panel-border);
-	background: var(--surface-panel);
-	box-shadow: var(--shadow-inset);
+.settings-stack {
+	display: grid;
+	gap: 0;
 }
 
-.theme-toggle[data-active="true"] {
-	border-color: var(--selection-border);
-	background: var(--surface-panel-strong);
-	color: var(--accent);
-	box-shadow: var(--shadow-elevated);
+.settings-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.9rem 0;
+	border-bottom: 1px solid var(--line);
+}
+
+.settings-row:first-child {
+	border-top: 1px solid var(--line);
+}
+
+.settings-row__label {
+	color: var(--text-soft);
+	font-size: 0.9rem;
+}
+
+.settings-row__value {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	min-width: 0;
+	text-align: right;
+}
+
+.settings-row__value strong {
+	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+	font-size: 0.95rem;
+	overflow-wrap: anywhere;
+}
+
+.appearance-toggle {
+	all: unset;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	color: var(--text-soft);
+	cursor: pointer;
+}
+
+.appearance-toggle__icon {
+	flex: 0 0 auto;
+	transition:
+		color 140ms ease,
+		opacity 140ms ease;
+	opacity: 0.5;
+}
+
+.appearance-toggle__icon[data-active="true"] {
+	color: var(--text-strong);
+	opacity: 1;
 }
 
 [role="alert"] {
@@ -497,6 +544,12 @@ strong {
 	backdrop-filter: blur(18px);
 }
 
+.terminal-tabs__add {
+	align-self: center;
+	flex: 0 0 auto;
+	margin-inline: auto 0.75rem;
+}
+
 .terminal-tabs__list {
 	display: flex;
 	flex: 1 1 auto;
@@ -508,7 +561,8 @@ strong {
 .terminal-tab {
 	flex: 1 1 0;
 	position: relative;
-	display: flex;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: stretch;
 	min-height: 2.5rem;
 	min-width: 6rem;
@@ -522,12 +576,10 @@ strong {
 
 .terminal-tab__button {
 	display: flex;
-	flex: 1 1 auto;
 	align-items: center;
 	justify-content: flex-start;
 	min-width: 0;
-	padding: 0 2rem 0 0.9rem;
-	height: 100%;
+	padding: 0 0.9rem;
 	border: 0;
 	background: transparent;
 	text-align: left;
@@ -541,19 +593,12 @@ strong {
 }
 
 .terminal-tab__close {
-	position: absolute;
-	top: 50%;
-	right: 0.35rem;
-	transform: translateY(-50%);
-	display: inline-grid;
-	place-items: center;
-	width: 1.5rem;
-	height: 1.5rem;
-	border-radius: 0;
+	align-self: center;
 	color: var(--text-soft);
-	padding: 0;
 	background: transparent;
 	line-height: 1;
+	margin-inline: 0 0.35rem;
+	--icon-button-size: 1.5rem;
 }
 
 .terminal-tab__close:hover:enabled,
@@ -567,16 +612,6 @@ strong {
 	box-shadow:
 		inset 0 3px 0 var(--status-connected),
 		var(--shadow-elevated);
-}
-
-.terminal-tab--add {
-	display: inline-grid;
-	place-items: center;
-	min-width: 3rem;
-	height: 2.5rem;
-	border: 0;
-	padding: 0;
-	font-size: 1.15rem;
 }
 
 .terminal-stage {
@@ -650,7 +685,7 @@ strong {
 	border-right: 1px solid var(--line-strong);
 }
 
-.control-overlay__rail > .back-button {
+.control-overlay__rail > .icon-button {
 	margin-bottom: 1rem;
 }
 
@@ -698,12 +733,6 @@ strong {
 }
 
 .server-list__delete {
-	display: inline-grid;
-	place-items: center;
-	flex: 0 0 auto;
-	width: 1.5rem;
-	height: 1.5rem;
-	padding: 0;
 	color: var(--text-soft);
 	background: transparent;
 	line-height: 1;
@@ -718,7 +747,7 @@ strong {
 }
 
 .overlay-nav button[data-active="true"] {
-	color: var(--accent);
+	color: var(--status-connected);
 }
 
 .overlay-divider {
@@ -799,7 +828,7 @@ strong {
 
 .detail-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: 1fr;
 	gap: 0.9rem;
 }
 
@@ -848,12 +877,8 @@ strong {
 		display: block;
 	}
 
-	.control-overlay--mobile .back-button {
+	.control-overlay--mobile .control-overlay__mobile-page > .icon-button {
 		margin-bottom: 1rem;
-	}
-
-	.detail-grid {
-		grid-template-columns: 1fr;
 	}
 
 	.terminal-footer {

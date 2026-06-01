@@ -236,10 +236,7 @@ describe("TerminalArea", () => {
 			/>,
 		);
 
-		const addButton = view.container.querySelector(".terminal-tab--add");
-		if (addButton == null) {
-			throw new Error("expected add button");
-		}
+		const addButton = view.getByLabelText("Create terminal");
 		fireEvent.click(addButton);
 
 		await waitFor(() => {

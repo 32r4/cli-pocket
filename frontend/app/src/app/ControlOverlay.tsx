@@ -71,7 +71,7 @@ function SavedServers({
 					</button>
 					<button
 						type="button"
-						className="server-list__delete"
+						className="icon-button server-list__delete"
 						aria-label={`Delete ${server.label}`}
 						onClick={(event) => {
 							event.stopPropagation();
@@ -152,7 +152,7 @@ export function ControlOverlay({
 					<div className="control-overlay__mobile-page">
 						<button
 							type="button"
-							className="back-button"
+							className="icon-button"
 							onClick={onShowMenuRoot}
 							aria-label="Back to menu"
 						>
@@ -164,7 +164,7 @@ export function ControlOverlay({
 					<div className="control-overlay__mobile-page">
 						<button
 							type="button"
-							className="back-button"
+							className="icon-button"
 							onClick={onClose}
 							aria-label="Close menu"
 						>
@@ -195,7 +195,7 @@ export function ControlOverlay({
 			<div className="control-overlay__rail">
 				<button
 					type="button"
-					className="back-button"
+					className="icon-button"
 					onClick={onClose}
 					aria-label="Close menu"
 				>

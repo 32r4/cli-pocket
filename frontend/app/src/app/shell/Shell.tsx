@@ -30,7 +30,7 @@ export function Shell({
 			<header className="app-shell__header">
 				<button
 					type="button"
-					className="menu-button"
+					className="icon-button"
 					onClick={isOverlayOpen ? onCloseOverlay : onOpenOverlay}
 					aria-label={
 						isOverlayOpen ? "Close control overlay" : "Open control overlay"

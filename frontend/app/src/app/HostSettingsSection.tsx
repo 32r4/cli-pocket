@@ -1,87 +1,93 @@
+import { Copy, Moon, RefreshCw, Sun } from "lucide-react";
+import type { ReactNode } from "react";
 import type { ThemeName } from "@/state/ui/uiState";
 
 interface HostSettingsSectionProps {
 	hostAvailable: boolean;
-	localPairUrl: string | null;
 	theme: ThemeName;
-	onGenerateLocalPairUrl: () => void;
+	onCopyPairUrl: () => void;
 	onRestartLocalDaemon: () => void;
 	onThemeChange: (theme: ThemeName) => void;
 }
 
-function themeLabel(theme: ThemeName) {
-	return theme === "light" ? "Light" : "Dark";
+function SettingsRow({
+	label,
+	children,
+}: {
+	label: string;
+	children: ReactNode;
+}) {
+	return (
+		<div className="settings-row">
+			<span className="settings-row__label">{label}</span>
+			<div className="settings-row__value">{children}</div>
+		</div>
+	);
 }
 
 export function HostSettingsSection({
 	hostAvailable,
-	localPairUrl,
 	theme,
-	onGenerateLocalPairUrl,
+	onCopyPairUrl,
 	onRestartLocalDaemon,
 	onThemeChange,
 }: HostSettingsSectionProps) {
+	const isDarkTheme = theme === "dark";
+
 	return (
 		<section className="detail-section">
-			<h2>Settings</h2>
-			{hostAvailable ? (
-				<div className="action-row">
-					<button type="button" onClick={onGenerateLocalPairUrl}>
-						Generate pair URL
-					</button>
-					<button type="button" onClick={onRestartLocalDaemon}>
-						Restart daemon
-					</button>
-				</div>
-			) : null}
-			{hostAvailable && localPairUrl != null ? (
-				<div className="detail-grid">
-					<div>
-						<span>Pair URL</span>
-						<strong>{localPairUrl}</strong>
-					</div>
-				</div>
-			) : null}
-			<fieldset className="field-stack theme-fieldset">
-				<legend className="sr-only">Theme preference</legend>
-				<div className="action-row">
+			<div className="settings-stack">
+				{hostAvailable ? (
+					<SettingsRow label="Pair URL">
+						<button
+							type="button"
+							className="icon-button"
+							aria-label="Copy pair URL"
+							onClick={onCopyPairUrl}
+						>
+							<Copy aria-hidden="true" size={14} strokeWidth={1.75} />
+						</button>
+					</SettingsRow>
+				) : null}
+				{hostAvailable ? (
+					<SettingsRow label="Restart daemon">
+						<button
+							type="button"
+							className="icon-button"
+							aria-label="Restart daemon"
+							onClick={onRestartLocalDaemon}
+						>
+							<RefreshCw aria-hidden="true" size={14} strokeWidth={1.75} />
+						</button>
+					</SettingsRow>
+				) : null}
+				<SettingsRow label="Appearance">
 					<button
 						type="button"
-						data-active={theme === "dark"}
-						className="theme-toggle"
-						aria-label="Use dark theme"
-						onClick={() => onThemeChange("dark")}
+						className="appearance-toggle"
+						aria-label={`Switch to ${isDarkTheme ? "light" : "dark"} theme`}
+						aria-pressed={isDarkTheme}
+						onClick={() => onThemeChange(isDarkTheme ? "light" : "dark")}
 					>
-						Dark
+						<Sun
+							aria-hidden="true"
+							className="appearance-toggle__icon"
+							data-active={!isDarkTheme}
+							size={16}
+							strokeWidth={1.75}
+						/>
+						<Moon
+							aria-hidden="true"
+							className="appearance-toggle__icon"
+							data-active={isDarkTheme}
+							size={16}
+							strokeWidth={1.75}
+						/>
 					</button>
-					<button
-						type="button"
-						data-active={theme === "light"}
-						className="theme-toggle"
-						aria-label="Use light theme"
-						onClick={() => onThemeChange("light")}
-					>
-						Light
-					</button>
-				</div>
-			</fieldset>
-			<div className="detail-grid">
-				<div>
-					<span>Theme</span>
-					<strong>{themeLabel(theme)}</strong>
-				</div>
-				<div>
-					<span>Shell</span>
-					<strong>default</strong>
-				</div>
-				<div>
-					<span>Scrollback</span>
+				</SettingsRow>
+				<SettingsRow label="Scrollback">
 					<strong>4194304</strong>
-				</div>
-				<div>
-					<span>Keyboard</span>
-					<strong>virtual key bar on touch input</strong>
-				</div>
+				</SettingsRow>
 			</div>
 		</section>
 	);

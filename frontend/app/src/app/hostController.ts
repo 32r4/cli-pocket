@@ -82,24 +82,6 @@ export class HostController {
 		return importedServer;
 	}
 
-	async generateLocalPairUrl(): Promise<string | null> {
-		const host = this.deps.services.host;
-		if (host == null) {
-			return null;
-		}
-
-		try {
-			const localPairUrl = await host.pairUrl();
-			this.deps.onInlineError(null);
-			return localPairUrl;
-		} catch (error: unknown) {
-			this.deps.onInlineError(
-				error instanceof Error ? error.message : "failed to generate pair url",
-			);
-			return null;
-		}
-	}
-
 	async restartLocalDaemon() {
 		const host = this.deps.services.host;
 		if (host == null) {

@@ -280,7 +280,7 @@ export function TerminalArea({
 								<span className="terminal-tab__label">{terminal.title}</span>
 							</button>
 							<button
-								className="terminal-tab__close"
+								className="icon-button terminal-tab__close"
 								type="button"
 								aria-label={`Kill ${terminal.title}`}
 								onClick={(event) => {
@@ -294,7 +294,7 @@ export function TerminalArea({
 					))}
 				</div>
 				<button
-					className="terminal-tab--add"
+					className="icon-button terminal-tabs__add"
 					type="button"
 					aria-label="Create terminal"
 					onClick={() => {

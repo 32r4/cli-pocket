@@ -17,7 +17,6 @@ interface UseAppRuntimeOptions {
 interface UseAppRuntimeResult {
 	services: PlatformServices | null;
 	platformError: string | null;
-	localPairUrl: string | null;
 	session: SessionActor | null;
 	terminalController: TerminalController;
 	connectServer: (
@@ -25,7 +24,7 @@ interface UseAppRuntimeResult {
 		options?: { closeOverlay?: boolean },
 	) => Promise<void>;
 	disconnectCurrentServer: () => Promise<void>;
-	generateLocalPairUrl: () => Promise<void>;
+	copyLocalPairUrl: () => Promise<void>;
 	restartLocalDaemon: () => Promise<void>;
 	importPairingLink: (rawUrl: string) => Promise<void>;
 }
@@ -39,7 +38,6 @@ export function useAppRuntime({
 	const { daemonRegistry, uiState, workspaceState } = stores;
 	const [services, setServices] = useState<PlatformServices | null>(null);
 	const [platformError, setPlatformError] = useState<string | null>(null);
-	const [localPairUrl, setLocalPairUrl] = useState<string | null>(null);
 	const [terminalController] = useState(
 		() =>
 			new TerminalController({
@@ -54,7 +52,6 @@ export function useAppRuntime({
 		let active = true;
 		setServices(null);
 		setPlatformError(null);
-		setLocalPairUrl(null);
 
 		void platformServicesFactory(platform)
 			.then(async (instance) => {
@@ -144,10 +141,23 @@ export function useAppRuntime({
 		await controllerRef.current?.disconnect();
 	};
 
-	const generateLocalPairUrl = async () => {
-		const nextPairUrl = await hostControllerRef.current?.generateLocalPairUrl();
-		if (nextPairUrl != null) {
-			setLocalPairUrl(nextPairUrl);
+	const copyLocalPairUrl = async () => {
+		const host = services?.host;
+		if (host == null) {
+			return;
+		}
+
+		try {
+			const nextPairUrl = await host.pairUrl();
+			if (typeof navigator === "undefined" || navigator.clipboard == null) {
+				throw new Error("clipboard unavailable");
+			}
+			await navigator.clipboard.writeText(nextPairUrl);
+			onInlineError(null);
+		} catch (error: unknown) {
+			onInlineError(
+				error instanceof Error ? error.message : "failed to copy pair url",
+			);
 		}
 	};
 
@@ -166,12 +176,11 @@ export function useAppRuntime({
 	return {
 		services,
 		platformError,
-		localPairUrl,
 		session: controllerRef.current?.getSession() ?? null,
 		terminalController,
 		connectServer,
 		disconnectCurrentServer,
-		generateLocalPairUrl,
+		copyLocalPairUrl,
 		restartLocalDaemon,
 		importPairingLink,
 	};

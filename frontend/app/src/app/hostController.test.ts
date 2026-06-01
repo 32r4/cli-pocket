@@ -70,7 +70,7 @@ describe("HostController", () => {
 		expect(onInlineError).not.toHaveBeenCalledWith(expect.any(String));
 	});
 
-	it("owns pair url generation and daemon restart", async () => {
+	it("owns daemon restart", async () => {
 		const services = makeServices();
 		const controller = new HostController({
 			services,
@@ -79,10 +79,8 @@ describe("HostController", () => {
 			onInlineError: vi.fn(),
 		});
 
-		const localPairUrl = await controller.generateLocalPairUrl();
 		await controller.restartLocalDaemon();
 
-		expect(localPairUrl).toBe("https://example.test/#pair=abc");
 		expect(services.host?.restart).toHaveBeenCalledTimes(1);
 	});
 });

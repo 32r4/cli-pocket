@@ -54,12 +54,11 @@ export function AppRoot({
 	const {
 		services,
 		platformError,
-		localPairUrl,
 		session,
 		terminalController,
 		connectServer,
 		disconnectCurrentServer,
-		generateLocalPairUrl,
+		copyLocalPairUrl,
 		restartLocalDaemon,
 		importPairingLink: importAndConnectPairingLink,
 	} = useAppRuntime({
@@ -94,11 +93,6 @@ export function AppRoot({
 			window.removeEventListener("resize", updateViewport);
 		};
 	}, []);
-
-	const activeSession =
-		workspace.terminals.find(
-			(terminal) => terminal.id === workspace.activeSessionId,
-		) ?? null;
 
 	const closeServerModal = () => {
 		setServerModalMode("closed");
@@ -169,24 +163,14 @@ export function AppRoot({
 		ui.overlaySection === "settings" ? (
 			<HostSettingsSection
 				hostAvailable={services?.host != null}
-				localPairUrl={localPairUrl}
 				theme={ui.theme}
-				onGenerateLocalPairUrl={generateLocalPairUrl}
+				onCopyPairUrl={copyLocalPairUrl}
 				onRestartLocalDaemon={restartLocalDaemon}
 				onThemeChange={(theme) => ui.setTheme(theme)}
 			/>
 		) : ui.overlaySection === "diagnostics" ? (
 			<section className="detail-section">
-				<h2>Diagnostics</h2>
 				<div className="detail-grid">
-					<div>
-						<span>Status</span>
-						<strong>{workspace.connectionState}</strong>
-					</div>
-					<div>
-						<span>Active server</span>
-						<strong>{activeServer?.label ?? "none"}</strong>
-					</div>
 					<div>
 						<span>Endpoint</span>
 						<strong>
@@ -197,52 +181,16 @@ export function AppRoot({
 						<span>Last error</span>
 						<strong>{workspace.lastError ?? "none"}</strong>
 					</div>
-					<div>
-						<span>Client</span>
-						<strong>{platform.id}</strong>
-					</div>
-					<div>
-						<span>Active terminal</span>
-						<strong>{activeSession?.title ?? "none"}</strong>
-					</div>
-					<div>
-						<span>Terminal count</span>
-						<strong>{workspace.terminals.length}</strong>
-					</div>
-				</div>
-				<div className="action-row">
-					<button type="button" disabled>
-						Copy diagnostics
-					</button>
-					<button
-						type="button"
-						onClick={() => {
-							workspaceState.getState().clearError();
-							setInlineError(null);
-						}}
-					>
-						Clear errors
-					</button>
 				</div>
 			</section>
 		) : (
 			<section className="detail-section">
-				<h2>About</h2>
 				<div className="detail-grid">
 					<div>
 						<span>Version</span>
 						<strong>0.1.0</strong>
 					</div>
-					<div>
-						<span>Client</span>
-						<strong>{platform.id}</strong>
-					</div>
-					<div>
-						<span>Protocol</span>
-						<strong>v1</strong>
-					</div>
 				</div>
-				<p>Self-hosted remote terminal client.</p>
 			</section>
 		);
 
