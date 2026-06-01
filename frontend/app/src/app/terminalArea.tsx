@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { TerminalViewport } from "@/features/terminals/TerminalViewport";
 import type { TerminalController } from "@/features/terminals/terminalController";
@@ -256,37 +256,49 @@ export function TerminalArea({
 	return (
 		<section className="workspace-panel" aria-label="Terminal workspace">
 			<div className="terminal-tabs" role="tablist" aria-label="Sessions">
-				{workspace.terminals.map((terminal) => (
-					<div
-						className="terminal-tab"
-						key={terminal.id}
-						data-active={terminal.id === activeSession?.id}
-					>
-						<button
-							className="terminal-tab__button"
-							type="button"
-							onClick={() => {
-								void selectTerminal(terminal.id);
-							}}
+				<div
+					className="terminal-tabs__list"
+					style={
+						{
+							"--terminal-tab-count": workspace.terminals.length,
+						} as CSSProperties
+					}
+				>
+					{workspace.terminals.map((terminal) => (
+						<div
+							className="terminal-tab"
+							key={terminal.id}
+							data-active={terminal.id === activeSession?.id}
 						>
-							<span className="terminal-tab__label">{terminal.title}</span>
-						</button>
-						<button
-							className="terminal-tab__close"
-							type="button"
-							aria-label={`Kill ${terminal.title}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								void killTerminal(terminal.id);
-							}}
-						>
-							x
-						</button>
-					</div>
-				))}
+							<button
+								className="terminal-tab__button"
+								type="button"
+								role="tab"
+								aria-selected={terminal.id === activeSession?.id}
+								onClick={() => {
+									void selectTerminal(terminal.id);
+								}}
+							>
+								<span className="terminal-tab__label">{terminal.title}</span>
+							</button>
+							<button
+								className="terminal-tab__close"
+								type="button"
+								aria-label={`Kill ${terminal.title}`}
+								onClick={(event) => {
+									event.stopPropagation();
+									void killTerminal(terminal.id);
+								}}
+							>
+								x
+							</button>
+						</div>
+					))}
+				</div>
 				<button
-					className="terminal-tab terminal-tab--add"
+					className="terminal-tab--add"
 					type="button"
+					aria-label="Create terminal"
 					onClick={() => {
 						void createSession();
 					}}
