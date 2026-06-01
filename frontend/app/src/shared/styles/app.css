@@ -145,19 +145,13 @@ button {
 	color: var(--text-strong);
 	padding: 0.75rem 0;
 	cursor: pointer;
-	transition:
-		background-color 120ms ease,
-		border-color 120ms ease,
-		box-shadow 120ms ease,
-		transform 120ms ease;
 }
 
 button:hover:enabled:not(.terminal-tab__button):not(.terminal-tab__close):not(
 	.terminal-tab--add
-) {
+):not(.server-list__item):not(.server-list__delete) {
 	background: var(--surface-hover);
 	border-color: transparent;
-	transform: none;
 }
 
 button:disabled {
@@ -258,27 +252,6 @@ strong {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-}
-
-.menu-button__icon {
-	display: inline-grid;
-	gap: 0.25rem;
-	width: 1.25rem;
-}
-
-.menu-button__icon span {
-	display: block;
-	height: 1px;
-	background: currentColor;
-}
-
-.back-button__icon {
-	display: block;
-	width: 1rem;
-	height: 1rem;
-	border-left: 1.5px solid currentColor;
-	border-bottom: 1.5px solid currentColor;
-	transform: rotate(45deg);
 }
 
 .connect-panel h2,
@@ -509,10 +482,6 @@ strong {
 	border: 1px solid var(--line);
 	border-bottom: 0;
 	box-shadow: var(--shadow-inset);
-	transition:
-		background-color 120ms ease,
-		border-color 120ms ease,
-		box-shadow 120ms ease;
 }
 
 .terminal-tabs__list .terminal-tab {
@@ -556,10 +525,15 @@ strong {
 	width: 1.5rem;
 	height: 1.5rem;
 	border-radius: 0;
-	color: inherit;
+	color: var(--text-soft);
 	padding: 0;
 	background: transparent;
 	line-height: 1;
+}
+
+.terminal-tab__close:hover:enabled,
+.terminal-tab__close:focus-visible {
+	color: var(--danger);
 }
 
 .terminal-tab[data-active="true"] {
@@ -583,7 +557,6 @@ strong {
 .terminal-stage {
 	display: flex;
 	min-height: 0;
-	padding: 1rem 0;
 	background: var(--surface-terminal-stage);
 }
 
@@ -593,7 +566,6 @@ strong {
 	flex: 1 1 auto;
 	min-height: 0;
 	background: var(--surface-terminal);
-	border-block: 1px solid var(--surface-terminal-rim);
 }
 
 .xterm-server,
@@ -660,11 +632,8 @@ strong {
 .overlay-nav,
 .server-list {
 	display: grid;
-	gap: 0;
-}
-
-.server-list {
 	align-content: start;
+	gap: 0;
 }
 
 .overlay-nav button,
@@ -678,8 +647,52 @@ strong {
 	border-bottom: 0;
 }
 
-.overlay-nav button[data-active="true"],
-.server-list__item[data-active="true"] {
+.server-list__row {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.server-list__add {
+	justify-content: flex-start;
+	gap: 0.5rem;
+}
+
+.server-list__item {
+	flex: 1 1 auto;
+	gap: 0.55rem;
+	min-width: 0;
+	justify-content: flex-start;
+}
+
+.server-list__item span:not(.sr-only) {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.server-list__delete {
+	display: inline-grid;
+	place-items: center;
+	flex: 0 0 auto;
+	width: 1.5rem;
+	height: 1.5rem;
+	padding: 0;
+	color: var(--text-soft);
+	background: transparent;
+	line-height: 1;
+}
+
+.server-list__delete:hover:enabled {
+	color: var(--danger);
+}
+
+.server-list__delete:focus-visible {
+	color: var(--danger);
+}
+
+.overlay-nav button[data-active="true"] {
 	color: var(--accent);
 }
 
@@ -699,8 +712,8 @@ strong {
 	text-transform: uppercase;
 }
 
-.server-list__item small {
-	color: var(--text-soft);
+.server-list__item[data-active="true"] {
+	color: var(--status-connected);
 }
 
 .control-overlay__detail {

@@ -24,6 +24,7 @@ interface UseAppRuntimeResult {
 		server: DaemonRecord,
 		options?: { closeOverlay?: boolean },
 	) => Promise<void>;
+	disconnectCurrentServer: () => Promise<void>;
 	generateLocalPairUrl: () => Promise<void>;
 	restartLocalDaemon: () => Promise<void>;
 	importPairingLink: (rawUrl: string) => Promise<void>;
@@ -139,6 +140,10 @@ export function useAppRuntime({
 		}
 	};
 
+	const disconnectCurrentServer = async () => {
+		await controllerRef.current?.disconnect();
+	};
+
 	const generateLocalPairUrl = async () => {
 		const nextPairUrl = await hostControllerRef.current?.generateLocalPairUrl();
 		if (nextPairUrl != null) {
@@ -165,6 +170,7 @@ export function useAppRuntime({
 		session: controllerRef.current?.getSession() ?? null,
 		terminalController,
 		connectServer,
+		disconnectCurrentServer,
 		generateLocalPairUrl,
 		restartLocalDaemon,
 		importPairingLink,

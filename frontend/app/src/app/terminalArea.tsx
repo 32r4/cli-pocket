@@ -1,3 +1,4 @@
+import { Plus, X } from "lucide-react";
 import { type CSSProperties, useEffect, useRef } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { TerminalViewport } from "@/features/terminals/TerminalViewport";
@@ -294,7 +295,7 @@ export function TerminalArea({
 									void killTerminal(terminal.id);
 								}}
 							>
-								x
+								<X aria-hidden="true" size={14} strokeWidth={1.75} />
 							</button>
 						</div>
 					))}
@@ -307,7 +308,7 @@ export function TerminalArea({
 						void createSession();
 					}}
 				>
-					+
+					<Plus aria-hidden="true" size={16} strokeWidth={1.75} />
 				</button>
 			</div>
 			<div className="terminal-stage">

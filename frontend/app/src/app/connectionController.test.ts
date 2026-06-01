@@ -208,4 +208,58 @@ describe("ConnectionController", () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it("disconnects the active server and clears workspace state", async () => {
+		const { actor } = makeActor([
+			{ kind: "Connecting" },
+			{ kind: "Connected", server_label: "server-a" },
+		]);
+		const services = makeServices(actor);
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const workspaceState = createWorkspaceStore();
+		daemonRegistry.hydratePersistedState({
+			version: 1,
+			daemons: [
+				{
+					id: "server-a",
+					label: "server-a",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:9999",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: "server-a",
+		});
+		uiState.getState().setSelectedServerId("server-a");
+
+		const onConnectionReset = vi.fn();
+		const controller = new ConnectionController({
+			services,
+			daemonRegistry,
+			uiState,
+			workspaceState,
+			onInlineError: vi.fn(),
+			onConnectionReset,
+			onTerminalOutput: vi.fn(),
+			onTerminalRemoved: vi.fn(),
+		});
+
+		const server = daemonRegistry.getState().daemons[0];
+		expect(server).toBeDefined();
+		if (server == null) {
+			throw new Error("expected seeded daemon");
+		}
+
+		await controller.connectServer(server);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await controller.disconnect();
+
+		expect(actor.close).toHaveBeenCalledTimes(1);
+		expect(onConnectionReset).toHaveBeenCalledTimes(2);
+		expect(workspaceState.getState().connectionState).toBe("idle");
+		expect(workspaceState.getState().activeConnectionServerId).toBeNull();
+		expect(workspaceState.getState().terminals).toHaveLength(0);
+	});
 });

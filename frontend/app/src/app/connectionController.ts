@@ -138,6 +138,19 @@ export class ConnectionController {
 		}
 	}
 
+	async disconnect() {
+		this.connectionGeneration += 1;
+		this.stopTerminalPolling();
+		const session = this.session;
+		this.session = null;
+		this.deps.workspaceState.getState().markDisconnected({ reason: null });
+		this.deps.onConnectionReset();
+		this.deps.onInlineError(null);
+		if (session != null) {
+			await session.close().catch(() => undefined);
+		}
+	}
+
 	async connectServer(
 		server: DaemonRecord,
 		options?: { closeOverlay?: boolean },

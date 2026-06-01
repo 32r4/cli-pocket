@@ -1,3 +1,4 @@
+import { Menu } from "lucide-react";
 import type { ReactNode } from "react";
 
 interface ShellProps {
@@ -35,11 +36,7 @@ export function Shell({
 						isOverlayOpen ? "Close control overlay" : "Open control overlay"
 					}
 				>
-					<span className="menu-button__icon" aria-hidden="true">
-						<span />
-						<span />
-						<span />
-					</span>
+					<Menu aria-hidden="true" size={18} strokeWidth={1.75} />
 				</button>
 				<div className="app-shell__host">
 					<strong>{activeServerLabel ?? "No server"}</strong>

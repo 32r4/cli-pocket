@@ -1,3 +1,4 @@
+import { ArrowLeft, Cloud, Monitor, Plus, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
 import type { OverlaySection } from "@/state/ui/uiState";
@@ -14,27 +15,38 @@ interface ControlOverlayProps {
 	onShowMenuRoot: () => void;
 	onSelectSection: (section: OverlaySection) => void;
 	onConnectServer: (server: DaemonRecord) => void;
+	onDeleteServer: (serverId: string) => void;
 	onOpenAddServer: () => void;
 }
 
 function BackIcon() {
-	return <span className="back-button__icon" aria-hidden="true" />;
+	return <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.75} />;
 }
 
 function sectionLabel(section: OverlaySection) {
 	return section.charAt(0).toUpperCase() + section.slice(1);
 }
 
+function ServerKindIcon({ kind }: { kind: DaemonRecord["kind"] }) {
+	return kind === "direct" ? (
+		<Monitor aria-hidden="true" size={14} strokeWidth={1.75} />
+	) : (
+		<Cloud aria-hidden="true" size={14} strokeWidth={1.75} />
+	);
+}
+
 function SavedServers({
 	servers,
 	selectedServerId,
 	onConnectServer,
+	onDeleteServer,
 	onOpenAddServer,
 	showSelection,
 }: {
 	servers: DaemonRecord[];
 	selectedServerId: string | null;
 	onConnectServer: (server: DaemonRecord) => void;
+	onDeleteServer: (serverId: string) => void;
 	onOpenAddServer: () => void;
 	showSelection: boolean;
 }) {
@@ -42,25 +54,41 @@ function SavedServers({
 		<div className="server-list">
 			<p className="server-list__heading">Saved servers</p>
 			{servers.map((server) => (
-				<button
-					type="button"
-					key={server.id}
-					className="server-list__item"
-					data-active={
-						showSelection ? selectedServerId === server.id : undefined
-					}
-					onClick={() => onConnectServer(server)}
-				>
-					<span>{server.label}</span>
-					<small>{server.kind === "direct" ? "Local" : "Remote"}</small>
-				</button>
+				<div className="server-list__row" key={server.id}>
+					<button
+						type="button"
+						className="server-list__item"
+						data-active={
+							showSelection ? selectedServerId === server.id : undefined
+						}
+						onClick={() => onConnectServer(server)}
+					>
+						<ServerKindIcon kind={server.kind} />
+						<span>{server.label}</span>
+						<span className="sr-only">
+							{server.kind === "direct" ? "Local server" : "Remote server"}
+						</span>
+					</button>
+					<button
+						type="button"
+						className="server-list__delete"
+						aria-label={`Delete ${server.label}`}
+						onClick={(event) => {
+							event.stopPropagation();
+							onDeleteServer(server.id);
+						}}
+					>
+						<Trash2 aria-hidden="true" size={14} strokeWidth={1.75} />
+					</button>
+				</div>
 			))}
 			<button
 				type="button"
 				className="server-list__add"
 				onClick={onOpenAddServer}
 			>
-				+ Add server
+				<Plus aria-hidden="true" size={14} strokeWidth={1.75} />
+				<span>Add server</span>
 			</button>
 		</div>
 	);
@@ -107,6 +135,7 @@ export function ControlOverlay({
 	onShowMenuRoot,
 	onSelectSection,
 	onConnectServer,
+	onDeleteServer,
 	onOpenAddServer,
 }: ControlOverlayProps) {
 	if (!isOpen) {
@@ -151,6 +180,7 @@ export function ControlOverlay({
 							servers={servers}
 							selectedServerId={selectedServerId}
 							onConnectServer={onConnectServer}
+							onDeleteServer={onDeleteServer}
 							onOpenAddServer={onOpenAddServer}
 							showSelection={false}
 						/>
@@ -181,6 +211,7 @@ export function ControlOverlay({
 					servers={servers}
 					selectedServerId={selectedServerId}
 					onConnectServer={onConnectServer}
+					onDeleteServer={onDeleteServer}
 					onOpenAddServer={onOpenAddServer}
 					showSelection
 				/>

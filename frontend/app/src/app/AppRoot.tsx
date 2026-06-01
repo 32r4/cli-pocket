@@ -58,6 +58,7 @@ export function AppRoot({
 		session,
 		terminalController,
 		connectServer,
+		disconnectCurrentServer,
 		generateLocalPairUrl,
 		restartLocalDaemon,
 		importPairingLink: importAndConnectPairingLink,
@@ -129,6 +130,22 @@ export function AppRoot({
 		daemonRegistry.getState().selectDaemon(nextServer.id);
 		uiState.getState().setSelectedServerId(nextServer.id);
 		closeServerModal();
+	};
+
+	const deleteServer = async (serverId: string) => {
+		const workspaceSnapshot = workspaceState.getState();
+		const shouldDisconnect =
+			workspaceSnapshot.activeConnectionServerId === serverId;
+		if (shouldDisconnect) {
+			await disconnectCurrentServer();
+		}
+
+		daemonRegistry.getState().removeDaemon(serverId);
+		const nextSelectedServerId =
+			uiState.getState().selectedServerId === serverId
+				? daemonRegistry.getState().selectedDaemonId
+				: uiState.getState().selectedServerId;
+		uiState.getState().setSelectedServerId(nextSelectedServerId);
 	};
 
 	const importPairingLink = async () => {
@@ -302,6 +319,9 @@ export function AppRoot({
 				}
 				onConnectServer={(server) => {
 					void connectServer(server, { closeOverlay: true });
+				}}
+				onDeleteServer={(serverId) => {
+					void deleteServer(serverId);
 				}}
 				onOpenAddServer={openAddServerChooser}
 			/>

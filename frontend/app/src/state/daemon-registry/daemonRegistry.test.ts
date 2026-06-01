@@ -38,6 +38,34 @@ describe("daemon registry", () => {
 		expect(store.getState().daemons[0]?.label).toBe("new-name");
 	});
 
+	it("removes a daemon and falls back the selection", () => {
+		const store = createDaemonRegistryStore();
+		store.getState().upsertDaemon({
+			id: "server-1",
+			label: "one",
+			resumeTokenHex: null,
+			lastConnectedAt: null,
+			kind: "direct",
+			endpointUrl: "ws://127.0.0.1:7842/session",
+		});
+		store.getState().upsertDaemon({
+			id: "server-2",
+			label: "two",
+			resumeTokenHex: null,
+			lastConnectedAt: null,
+			kind: "direct",
+			endpointUrl: "ws://127.0.0.1:7843/session",
+		});
+		store.getState().selectDaemon("server-2");
+
+		store.getState().removeDaemon("server-2");
+
+		expect(store.getState().daemons.map((daemon) => daemon.id)).toEqual([
+			"server-1",
+		]);
+		expect(store.getState().selectedDaemonId).toBe("server-1");
+	});
+
 	it("hydrates persisted daemons and selection", () => {
 		const store = createDaemonRegistryStore();
 		store.hydratePersistedState({
