@@ -57,6 +57,10 @@
 	--shadow-panel: 0 22px 80px rgba(0, 0, 0, 0.42);
 	--shadow-elevated: 0 12px 36px rgba(0, 0, 0, 0.24);
 	--shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	--scrollbar-thumb: rgba(255, 255, 255, 0.16);
+	--scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+	--scrollbar-track: transparent;
+	--scrollbar-corner: transparent;
 }
 
 :root[data-theme="light"] {
@@ -117,10 +121,42 @@
 	--shadow-panel: 0 20px 72px rgba(36, 32, 24, 0.12);
 	--shadow-elevated: 0 10px 28px rgba(36, 32, 24, 0.08);
 	--shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+	--scrollbar-thumb: rgba(15, 15, 15, 0.16);
+	--scrollbar-thumb-hover: rgba(15, 15, 15, 0.28);
+	--scrollbar-track: transparent;
+	--scrollbar-corner: transparent;
 }
 
 * {
 	box-sizing: border-box;
+	scrollbar-width: thin;
+	scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+	width: 0.5rem;
+	height: 0.5rem;
+}
+
+*::-webkit-scrollbar-track {
+	background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+	background: var(--scrollbar-thumb);
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+	background: var(--scrollbar-thumb-hover);
+	border: 1px solid transparent;
+	background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+	background: var(--scrollbar-corner);
 }
 
 body {
@@ -462,37 +498,26 @@ strong {
 }
 
 .terminal-tabs__list {
-	--terminal-tab-count: 1;
 	display: flex;
 	flex: 1 1 auto;
 	align-items: stretch;
 	min-width: 0;
-	overflow: hidden;
+	overflow-x: auto;
 }
 
 .terminal-tab {
-	flex: 0 1 auto;
+	flex: 1 1 0;
 	position: relative;
 	display: flex;
 	align-items: stretch;
 	min-height: 2.5rem;
 	min-width: 6rem;
+	max-width: 12rem;
 	--terminal-tab-bg: var(--surface-panel);
 	background: var(--terminal-tab-bg);
 	border: 1px solid var(--line);
 	border-bottom: 0;
 	box-shadow: var(--shadow-inset);
-}
-
-.terminal-tabs__list .terminal-tab {
-	width: clamp(
-		6rem,
-		calc(
-			(100% - (0.25rem * (var(--terminal-tab-count) - 1))) /
-			var(--terminal-tab-count)
-		),
-		12rem
-	);
 }
 
 .terminal-tab__button {

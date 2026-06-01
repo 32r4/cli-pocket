@@ -1,5 +1,5 @@
 import { Plus, X } from "lucide-react";
-import { type CSSProperties, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { TerminalViewport } from "@/features/terminals/TerminalViewport";
 import type { TerminalController } from "@/features/terminals/terminalController";
@@ -261,14 +261,7 @@ export function TerminalArea({
 	return (
 		<section className="workspace-panel" aria-label="Terminal workspace">
 			<div className="terminal-tabs" role="tablist" aria-label="Sessions">
-				<div
-					className="terminal-tabs__list"
-					style={
-						{
-							"--terminal-tab-count": workspace.terminals.length,
-						} as CSSProperties
-					}
-				>
+				<div className="terminal-tabs__list">
 					{workspace.terminals.map((terminal) => (
 						<div
 							className="terminal-tab"
