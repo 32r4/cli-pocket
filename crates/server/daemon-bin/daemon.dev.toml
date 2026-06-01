@@ -11,6 +11,6 @@ base_url = "http://127.0.0.1:5173"
 
 [limits]
 max_terminals = 64
-scrollback_bytes = 2097152
+scrollback_bytes = 4194304
 scrollback_anchor_interval = 65536
 broadcast_capacity = 1024

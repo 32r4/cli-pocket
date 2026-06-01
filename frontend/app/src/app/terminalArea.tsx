@@ -39,6 +39,7 @@ interface TerminalAreaProps {
 		removeTerminal: (terminalId: string) => void;
 	}>;
 	controller: TerminalController;
+	scrollbackBytes: number;
 	theme: "light" | "dark";
 	onInlineError: (message: string | null) => void;
 }
@@ -132,6 +133,7 @@ export function TerminalArea({
 	workspace,
 	workspaceState,
 	controller,
+	scrollbackBytes,
 	theme,
 	onInlineError,
 }: TerminalAreaProps) {
@@ -227,6 +229,7 @@ export function TerminalArea({
 			const createdTerminal = await session.createTerminal({
 				cols: 120,
 				rows: 36,
+				scrollbackBytes,
 			});
 			if (createdTerminal != null) {
 				workspaceState.getState().setActiveSessionId(createdTerminal.terminal);

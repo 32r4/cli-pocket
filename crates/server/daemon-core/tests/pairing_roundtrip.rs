@@ -69,6 +69,7 @@ async fn paired_client_creates_terminal_end_to_end() {
         session_mgr: Arc::clone(&session_mgr),
         client_db: Arc::clone(&db),
         server_info,
+        scrollback_bytes: 4 * 1024 * 1024,
     };
 
     // ---- InMemoryTransport pair: `a` -> daemon, `b` -> manual client. ----
@@ -231,6 +232,7 @@ async fn paired_client_receives_live_output_after_input() {
             server_version: "test".to_string(),
             server_label: None,
         },
+        scrollback_bytes: 4 * 1024 * 1024,
     };
     let InMemoryTransportPair {
         a: daemon_transport,

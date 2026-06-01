@@ -163,6 +163,10 @@ export function AppRoot({
 		ui.overlaySection === "settings" ? (
 			<HostSettingsSection
 				hostAvailable={services?.host != null}
+				scrollbackBytes={ui.scrollbackBytes}
+				onScrollbackBytesChange={(scrollbackBytes) =>
+					ui.setScrollbackBytes(scrollbackBytes)
+				}
 				theme={ui.theme}
 				onCopyPairUrl={copyLocalPairUrl}
 				onRestartLocalDaemon={restartLocalDaemon}
@@ -217,6 +221,7 @@ export function AppRoot({
 						workspace={workspace}
 						workspaceState={workspaceState}
 						controller={terminalController}
+						scrollbackBytes={ui.scrollbackBytes}
 						theme={ui.theme}
 						onInlineError={setInlineError}
 					/>

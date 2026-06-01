@@ -40,6 +40,7 @@ pub struct ConnectionDeps {
     pub session_mgr: Arc<SessionManager>,
     pub client_db: Arc<ClientDb>,
     pub server_info: cli_pocket_proto::ServerInfo,
+    pub scrollback_bytes: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -369,7 +370,31 @@ async fn handle_terminal_create(
     params: TerminalCreateParams,
     streams: &mut StreamContext,
 ) -> crate::DaemonResult<()> {
-    let info = deps.session_mgr.create(params).await?;
+    let TerminalCreateParams {
+        cols,
+        rows,
+        cwd,
+        cmd,
+        env,
+        scrollback_bytes,
+    } = params;
+    let scrollback_bytes = match scrollback_bytes {
+        Some(bytes) => Some(bytes),
+        None => Some(u32::try_from(deps.scrollback_bytes).map_err(|_| {
+            crate::DaemonError::Config("limits.scrollback_bytes exceeds u32::MAX".to_owned())
+        })?),
+    };
+    let info = deps
+        .session_mgr
+        .create(TerminalCreateParams {
+            cols,
+            rows,
+            cwd,
+            cmd,
+            env,
+            scrollback_bytes,
+        })
+        .await?;
     let terminal_id = info.terminal;
 
     // Create a local stream ID for this terminal's output.

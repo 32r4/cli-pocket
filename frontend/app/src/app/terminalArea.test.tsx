@@ -8,6 +8,8 @@ import type {
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { openTerminalSnapshot, TerminalArea } from "./terminalArea";
 
+const DEFAULT_SCROLLBACK_BYTES = 4 * 1024 * 1024;
+
 function makeSession(openTerminal: SessionActor["openTerminal"]): SessionActor {
 	return {
 		events: () => ({
@@ -158,6 +160,7 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
+				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -231,6 +234,7 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
+				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -249,6 +253,7 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
+				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -258,6 +263,7 @@ describe("TerminalArea", () => {
 			expect(session.createTerminal).toHaveBeenCalledWith({
 				cols: 120,
 				rows: 36,
+				scrollbackBytes: DEFAULT_SCROLLBACK_BYTES,
 			});
 			expect(workspaceState.getState().activeSessionId).toBe("t2");
 			expect(session.openTerminal).toHaveBeenCalledWith("t2");
@@ -312,6 +318,7 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
+				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -325,6 +332,7 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
+				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,

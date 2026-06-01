@@ -1,9 +1,12 @@
 import { Copy, Moon, RefreshCw, Sun } from "lucide-react";
 import type { ReactNode } from "react";
+import { Group, Input, NumberField } from "react-aria-components";
 import type { ThemeName } from "@/state/ui/uiState";
 
 interface HostSettingsSectionProps {
 	hostAvailable: boolean;
+	scrollbackBytes: number;
+	onScrollbackBytesChange: (scrollbackBytes: number) => void;
 	theme: ThemeName;
 	onCopyPairUrl: () => void;
 	onRestartLocalDaemon: () => void;
@@ -25,8 +28,14 @@ function SettingsRow({
 	);
 }
 
+const MIB = 1024 * 1024;
+const MIN_SCROLLBACK_MIB = 1;
+const MAX_SCROLLBACK_MIB = 64;
+
 export function HostSettingsSection({
 	hostAvailable,
+	scrollbackBytes,
+	onScrollbackBytesChange,
 	theme,
 	onCopyPairUrl,
 	onRestartLocalDaemon,
@@ -62,7 +71,27 @@ export function HostSettingsSection({
 					</div>
 				</SettingsRow>
 				<SettingsRow label="Scrollback">
-					<strong>4194304</strong>
+					<NumberField
+						aria-label="Scrollback in MiB"
+						value={Math.round(scrollbackBytes / MIB)}
+						minValue={MIN_SCROLLBACK_MIB}
+						maxValue={MAX_SCROLLBACK_MIB}
+						step={1}
+						commitBehavior="snap"
+						formatOptions={{ maximumFractionDigits: 0, useGrouping: false }}
+						isWheelDisabled
+						onChange={(nextScrollbackMiB) => {
+							onScrollbackBytesChange(nextScrollbackMiB * MIB);
+						}}
+					>
+						<Group className="settings-row__scrollback-field">
+							<Input
+								className="settings-row__scrollback-input"
+								inputMode="numeric"
+							/>
+							<span className="settings-row__scrollback-unit">MiB</span>
+						</Group>
+					</NumberField>
 				</SettingsRow>
 				{hostAvailable ? (
 					<SettingsRow label="Pair URL">

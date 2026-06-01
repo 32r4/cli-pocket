@@ -86,6 +86,7 @@ impl Daemon {
         let accept_deps = AcceptDeps {
             identity,
             relay_psk: relay_psk.clone(),
+            config: self.config.clone(),
             session_mgr: Arc::clone(&self.session_mgr),
             client_db: Arc::clone(&self.client_db),
             server_info: self.server_info.clone(),

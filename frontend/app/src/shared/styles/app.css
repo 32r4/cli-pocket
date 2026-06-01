@@ -469,6 +469,7 @@ strong {
 	align-items: center;
 	justify-content: space-between;
 	gap: 1rem;
+	min-height: 4rem;
 	padding: 0.9rem 0;
 	border-bottom: 1px solid var(--line);
 }
@@ -490,10 +491,21 @@ strong {
 	text-align: right;
 }
 
-.settings-row__value strong {
-	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-	font-size: 0.95rem;
-	overflow-wrap: anywhere;
+.settings-row__scrollback-unit {
+	color: var(--text-soft);
+	font-size: 0.9rem;
+}
+
+.settings-row__scrollback-field {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.settings-row__scrollback-input {
+	width: 4.5rem;
+	padding: 0.35rem 0.5rem;
+	text-align: right;
 }
 
 .appearance-toggle {

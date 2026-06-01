@@ -4,6 +4,7 @@ use std::time::Duration;
 use cli_pocket_crypto::{KeyPair, NoiseAnonymousInitiator};
 use cli_pocket_daemon_core::accept::{run_accepted_transport, AcceptDeps, AcceptedTransport};
 use cli_pocket_daemon_core::client_db::{ClientDb, ClientRecord};
+use cli_pocket_daemon_core::config::DaemonConfig;
 use cli_pocket_daemon_core::identity_store::load_or_create;
 use cli_pocket_daemon_core::listener::serve;
 use cli_pocket_daemon_core::session::SessionManager;
@@ -166,6 +167,7 @@ impl ListenerFixture {
         let accept_deps = AcceptDeps {
             identity: Arc::clone(&identity),
             relay_psk: None,
+            config: DaemonConfig::default(),
             session_mgr,
             client_db: Arc::clone(&client_db),
             server_info: ServerInfo {

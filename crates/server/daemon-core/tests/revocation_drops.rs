@@ -71,6 +71,7 @@ async fn revocation_drops_live_session() {
         session_mgr: Arc::clone(&session_mgr),
         client_db: Arc::clone(&db),
         server_info,
+        scrollback_bytes: 4 * 1024 * 1024,
     };
 
     // ---- InMemoryTransport pair: `a` -> daemon, `b` -> manual client. ----
