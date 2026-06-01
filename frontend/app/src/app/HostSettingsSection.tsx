@@ -37,6 +37,33 @@ export function HostSettingsSection({
 	return (
 		<section className="detail-section">
 			<div className="settings-stack">
+				<SettingsRow label="Appearance">
+					<div className="appearance-toggle">
+						<button
+							type="button"
+							className="icon-button appearance-toggle__button"
+							aria-label="Light theme"
+							aria-pressed={!isDarkTheme}
+							data-active={!isDarkTheme}
+							onClick={() => onThemeChange("light")}
+						>
+							<Sun aria-hidden="true" size={16} strokeWidth={1.75} />
+						</button>
+						<button
+							type="button"
+							className="icon-button appearance-toggle__button"
+							aria-label="Dark theme"
+							aria-pressed={isDarkTheme}
+							data-active={isDarkTheme}
+							onClick={() => onThemeChange("dark")}
+						>
+							<Moon aria-hidden="true" size={16} strokeWidth={1.75} />
+						</button>
+					</div>
+				</SettingsRow>
+				<SettingsRow label="Scrollback">
+					<strong>4194304</strong>
+				</SettingsRow>
 				{hostAvailable ? (
 					<SettingsRow label="Pair URL">
 						<button
@@ -61,33 +88,6 @@ export function HostSettingsSection({
 						</button>
 					</SettingsRow>
 				) : null}
-				<SettingsRow label="Appearance">
-					<button
-						type="button"
-						className="appearance-toggle"
-						aria-label={`Switch to ${isDarkTheme ? "light" : "dark"} theme`}
-						aria-pressed={isDarkTheme}
-						onClick={() => onThemeChange(isDarkTheme ? "light" : "dark")}
-					>
-						<Sun
-							aria-hidden="true"
-							className="appearance-toggle__icon"
-							data-active={!isDarkTheme}
-							size={16}
-							strokeWidth={1.75}
-						/>
-						<Moon
-							aria-hidden="true"
-							className="appearance-toggle__icon"
-							data-active={isDarkTheme}
-							size={16}
-							strokeWidth={1.75}
-						/>
-					</button>
-				</SettingsRow>
-				<SettingsRow label="Scrollback">
-					<strong>4194304</strong>
-				</SettingsRow>
 			</div>
 		</section>
 	);
