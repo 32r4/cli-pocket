@@ -266,4 +266,77 @@ describe("TerminalArea", () => {
 			expect(session.openTerminal).toHaveBeenCalledWith("t2");
 		});
 	});
+
+	it("refreshes the terminal list after killing one", async () => {
+		const workspaceState = createWorkspaceStore();
+		workspaceState.getState().markConnected();
+		workspaceState.getState().syncTerminalList([
+			{
+				terminal: "t1",
+				cols: 80,
+				rows: 24,
+				created_at_unix_ms: 1,
+				label: "shell",
+				attached_clients: 1,
+			},
+		]);
+		workspaceState.getState().setActiveSessionId("t1");
+
+		const session = makeSession(
+			vi.fn(
+				async () =>
+					({
+						info: {
+							terminal: "t1",
+							cols: 80,
+							rows: 24,
+							created_at_unix_ms: 1,
+							label: "shell",
+							attached_clients: 1,
+						},
+						snapshot_bytes_b64: btoa("snapshot"),
+					}) satisfies TerminalSnapshotRecord,
+			),
+		);
+		session.refreshTerminals = vi.fn(async () => undefined);
+
+		const controller = {
+			setTheme: vi.fn(),
+			setActiveTerminal: vi.fn(),
+			setHandlers: vi.fn(),
+			renderSnapshot: vi.fn(),
+			mount: vi.fn(async () => undefined),
+			unmount: vi.fn(),
+		};
+
+		const view = render(
+			<TerminalArea
+				session={session}
+				workspace={workspaceState.getState()}
+				workspaceState={workspaceState}
+				controller={controller as never}
+				theme="dark"
+				onInlineError={vi.fn()}
+			/>,
+		);
+
+		const killButton = view.getByLabelText("Kill shell");
+		fireEvent.click(killButton);
+		view.rerender(
+			<TerminalArea
+				session={session}
+				workspace={workspaceState.getState()}
+				workspaceState={workspaceState}
+				controller={controller as never}
+				theme="dark"
+				onInlineError={vi.fn()}
+			/>,
+		);
+		expect(view.queryByLabelText("Kill shell")).toBeNull();
+
+		await waitFor(() => {
+			expect(session.kill).toHaveBeenCalledWith("t1", "TERM");
+			expect(workspaceState.getState().terminals).toHaveLength(0);
+		});
+	});
 });

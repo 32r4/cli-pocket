@@ -114,6 +114,8 @@ export class ConnectionController {
 	private session: SessionActor | null = null;
 	private connectionGeneration = 0;
 	private bootstrapped = false;
+	private terminalRefreshTimer: number | null = null;
+	private readonly terminalRefreshIntervalMs = 1000;
 
 	constructor(private readonly deps: ControllerDeps) {}
 
@@ -128,6 +130,7 @@ export class ConnectionController {
 
 	async shutdown() {
 		this.connectionGeneration += 1;
+		this.stopTerminalPolling();
 		const session = this.session;
 		this.session = null;
 		if (session != null) {
@@ -195,6 +198,7 @@ export class ConnectionController {
 		this.connectionGeneration += 1;
 		const generation = this.connectionGeneration;
 
+		this.stopTerminalPolling();
 		const previous = this.session;
 		this.session = null;
 		if (previous != null) {
@@ -257,7 +261,8 @@ export class ConnectionController {
 					.updateDaemonLabel(activeServerId, serverLabel);
 			}
 			this.deps.workspaceState.getState().markConnected();
-			void this.session?.refreshTerminals();
+			void this.refreshTerminalsOnce();
+			this.startTerminalPolling();
 			return;
 		}
 		if (kind === "Disconnected") {
@@ -321,7 +326,7 @@ export class ConnectionController {
 			if (terminalId != null) {
 				this.deps.workspaceState.getState().removeTerminal(terminalId);
 				this.deps.onTerminalRemoved(terminalId);
-				void this.session?.refreshTerminals();
+				void this.refreshTerminalsOnce();
 			}
 			return;
 		}
@@ -337,5 +342,52 @@ export class ConnectionController {
 
 	getSession() {
 		return this.session;
+	}
+
+	private stopTerminalPolling() {
+		if (this.terminalRefreshTimer != null) {
+			window.clearTimeout(this.terminalRefreshTimer);
+			this.terminalRefreshTimer = null;
+		}
+	}
+
+	private startTerminalPolling() {
+		this.stopTerminalPolling();
+		const generation = this.connectionGeneration;
+
+		const tick = async () => {
+			if (generation !== this.connectionGeneration || this.session == null) {
+				return;
+			}
+
+			await this.refreshTerminalsOnce();
+
+			if (generation !== this.connectionGeneration || this.session == null) {
+				return;
+			}
+
+			this.terminalRefreshTimer = window.setTimeout(() => {
+				this.terminalRefreshTimer = null;
+				void tick();
+			}, this.terminalRefreshIntervalMs);
+		};
+
+		this.terminalRefreshTimer = window.setTimeout(() => {
+			this.terminalRefreshTimer = null;
+			void tick();
+		}, this.terminalRefreshIntervalMs);
+	}
+
+	private async refreshTerminalsOnce() {
+		const session = this.session;
+		if (session == null) {
+			return;
+		}
+
+		try {
+			await session.refreshTerminals();
+		} catch {
+			// Best-effort polling. Connection lifecycle events handle disconnects.
+		}
 	}
 }

@@ -25,6 +25,7 @@ interface TerminalAreaProps {
 		activeSessionId: string | null;
 	};
 	workspaceState: StoreApi<{
+		terminals: TerminalSummaryView[];
 		setActiveSessionId: (terminalId: string | null) => void;
 		markTerminalConnecting: (terminalId: string) => void;
 		markTerminalReady: (info: TerminalSnapshotRecord["info"]) => void;
@@ -34,6 +35,7 @@ interface TerminalAreaProps {
 			cols: number,
 			rows: number,
 		) => void;
+		removeTerminal: (terminalId: string) => void;
 	}>;
 	controller: TerminalController;
 	theme: "light" | "dark";
@@ -244,9 +246,11 @@ export function TerminalArea({
 			return;
 		}
 
+		workspaceState.getState().removeTerminal(terminalId);
 		try {
 			await session.kill(terminalId, "TERM");
 		} catch (error: unknown) {
+			await session.refreshTerminals().catch(() => undefined);
 			onInlineError(
 				error instanceof Error ? error.message : "failed to kill terminal",
 			);
