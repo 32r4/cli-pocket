@@ -1,5 +1,5 @@
-import { fireEvent, render, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
 	SessionActor,
 	TerminalInfoRecord,
@@ -8,6 +8,10 @@ import type {
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { openTerminalSnapshot, TerminalArea } from "./terminalArea";
 
+afterEach(() => {
+	cleanup();
+});
+
 function makeSession(openTerminal: SessionActor["openTerminal"]): SessionActor {
 	return {
 		events: () => ({
@@ -15,6 +19,12 @@ function makeSession(openTerminal: SessionActor["openTerminal"]): SessionActor {
 		}),
 		refreshTerminals: vi.fn(async () => undefined),
 		openTerminal,
+		readHistory: vi.fn(async () => ({
+			terminal_id: "t1",
+			start_seq: 0,
+			end_seq: 0,
+			bytes_b64: "",
+		})),
 		createTerminal: vi.fn(async () => null),
 		getServerConfig: vi.fn(async () => ({ scrollback_bytes: 4 * 1024 * 1024 })),
 		setServerConfig: vi.fn(async (config) => config),
@@ -26,6 +36,30 @@ function makeSession(openTerminal: SessionActor["openTerminal"]): SessionActor {
 }
 
 describe("openTerminalSnapshot", () => {
+	it("does not mark terminal connecting before a session exists", async () => {
+		const onMarkTerminalConnecting = vi.fn();
+		const onMarkTerminalReady = vi.fn();
+		const onMarkTerminalError = vi.fn();
+		const onInlineError = vi.fn();
+		const onRenderSnapshot = vi.fn();
+
+		await openTerminalSnapshot({
+			session: null,
+			terminalId: "t1",
+			onMarkTerminalConnecting,
+			onMarkTerminalReady,
+			onMarkTerminalError,
+			onInlineError,
+			onRenderSnapshot,
+		});
+
+		expect(onMarkTerminalConnecting).not.toHaveBeenCalled();
+		expect(onMarkTerminalReady).not.toHaveBeenCalled();
+		expect(onMarkTerminalError).not.toHaveBeenCalled();
+		expect(onRenderSnapshot).not.toHaveBeenCalled();
+		expect(onInlineError).not.toHaveBeenCalled();
+	});
+
 	it("marks ready and renders decoded snapshot", async () => {
 		const session = makeSession(
 			vi.fn(
@@ -39,6 +73,9 @@ describe("openTerminalSnapshot", () => {
 							label: "shell",
 							attached_clients: 1,
 						},
+						start_seq: 0,
+						end_seq: 5,
+						render_prefix_b64: btoa(""),
 						snapshot_bytes_b64: btoa("hello"),
 					}) satisfies TerminalSnapshotRecord,
 			),
@@ -69,11 +106,60 @@ describe("openTerminalSnapshot", () => {
 				label: "shell",
 				attached_clients: 1,
 			},
+			start_seq: 0,
+			end_seq: 5,
+			render_prefix_b64: btoa(""),
 			snapshot_bytes_b64: btoa("hello"),
 		});
-		expect(onRenderSnapshot).toHaveBeenCalledWith("t1", "hello");
+		expect(onRenderSnapshot).toHaveBeenCalledWith("t1", "hello", 0);
 		expect(onMarkTerminalError).not.toHaveBeenCalled();
 		expect(onInlineError).not.toHaveBeenCalled();
+	});
+
+	it("preloads shared history before rendering the initial terminal window", async () => {
+		const session = makeSession(
+			vi.fn(
+				async () =>
+					({
+						info: {
+							terminal: "t1",
+							cols: 80,
+							rows: 24,
+							created_at_unix_ms: 1,
+							label: "shell",
+							attached_clients: 1,
+						},
+						start_seq: 5,
+						end_seq: 10,
+						render_prefix_b64: btoa(""),
+						snapshot_bytes_b64: btoa("world"),
+					}) satisfies TerminalSnapshotRecord,
+			),
+		);
+		session.readHistory = vi.fn(async () => ({
+			terminal_id: "t1",
+			start_seq: 0,
+			end_seq: 5,
+			bytes_b64: btoa("hello"),
+		}));
+		const onMarkTerminalConnecting = vi.fn();
+		const onMarkTerminalReady = vi.fn();
+		const onMarkTerminalError = vi.fn();
+		const onInlineError = vi.fn();
+		const onRenderSnapshot = vi.fn();
+
+		await openTerminalSnapshot({
+			session,
+			terminalId: "t1",
+			onMarkTerminalConnecting,
+			onMarkTerminalReady,
+			onMarkTerminalError,
+			onInlineError,
+			onRenderSnapshot,
+		});
+
+		expect(session.readHistory).toHaveBeenCalledWith("t1", 5, 32 * 1024);
+		expect(onRenderSnapshot).toHaveBeenCalledWith("t1", "helloworld", 0);
 	});
 
 	it("marks error when snapshot payload is invalid", async () => {
@@ -119,6 +205,9 @@ describe("TerminalArea", () => {
 							label: "new shell",
 							attached_clients: 1,
 						},
+						start_seq: 0,
+						end_seq: 8,
+						render_prefix_b64: btoa(""),
 						snapshot_bytes_b64: btoa("snapshot"),
 					}) satisfies TerminalSnapshotRecord,
 			),
@@ -149,7 +238,7 @@ describe("TerminalArea", () => {
 			setTheme: vi.fn(),
 			setActiveTerminal: vi.fn(),
 			setHandlers: vi.fn(),
-			renderSnapshot: vi.fn(),
+			renderSnapshotWithRange: vi.fn(),
 			mount: vi.fn(async () => undefined),
 			unmount: vi.fn(),
 		};
@@ -167,7 +256,11 @@ describe("TerminalArea", () => {
 
 		await waitFor(() => {
 			expect(session.openTerminal).toHaveBeenCalledWith("t2");
-			expect(controller.renderSnapshot).toHaveBeenCalledWith("t2", "snapshot");
+			expect(controller.renderSnapshotWithRange).toHaveBeenCalledWith(
+				"t2",
+				"snapshot",
+				0,
+			);
 		});
 	});
 
@@ -199,6 +292,9 @@ describe("TerminalArea", () => {
 				async () =>
 					({
 						info: createdTerminal,
+						start_seq: 0,
+						end_seq: 8,
+						render_prefix_b64: btoa(""),
 						snapshot_bytes_b64: btoa("snapshot"),
 					}) satisfies TerminalSnapshotRecord,
 			),
@@ -222,7 +318,7 @@ describe("TerminalArea", () => {
 			setTheme: vi.fn(),
 			setActiveTerminal: vi.fn(),
 			setHandlers: vi.fn(),
-			renderSnapshot: vi.fn(),
+			renderSnapshotWithRange: vi.fn(),
 			mount: vi.fn(async () => undefined),
 			unmount: vi.fn(),
 		};
@@ -293,6 +389,9 @@ describe("TerminalArea", () => {
 							label: "shell",
 							attached_clients: 1,
 						},
+						start_seq: 0,
+						end_seq: 8,
+						render_prefix_b64: btoa(""),
 						snapshot_bytes_b64: btoa("snapshot"),
 					}) satisfies TerminalSnapshotRecord,
 			),
@@ -303,7 +402,7 @@ describe("TerminalArea", () => {
 			setTheme: vi.fn(),
 			setActiveTerminal: vi.fn(),
 			setHandlers: vi.fn(),
-			renderSnapshot: vi.fn(),
+			renderSnapshotWithRange: vi.fn(),
 			mount: vi.fn(async () => undefined),
 			unmount: vi.fn(),
 		};

@@ -11,6 +11,7 @@ import type {
 	RegistryAdapter,
 	ServerConfigRecord,
 	SessionActor,
+	TerminalHistoryPageRecord,
 	TerminalInfoRecord,
 	TerminalSnapshotRecord,
 } from "../bridge/types";
@@ -76,6 +77,18 @@ class TauriSessionActor implements SessionActor {
 	async openTerminal(terminalId: string) {
 		return await invoke<TerminalSnapshotRecord>("cli_pocket_open_terminal", {
 			terminalId,
+		});
+	}
+
+	async readHistory(
+		terminalId: string,
+		before: number | null,
+		maxBytes: number,
+	) {
+		return await invoke<TerminalHistoryPageRecord>("cli_pocket_read_history", {
+			terminalId,
+			before,
+			maxBytes,
 		});
 	}
 

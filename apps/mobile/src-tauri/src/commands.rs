@@ -44,6 +44,16 @@ pub async fn cli_pocket_list_terminals(
 }
 
 #[tauri::command]
+pub async fn cli_pocket_read_history(
+    state: State<'_, AppState>,
+    terminal_id: String,
+    before: Option<u64>,
+    max_bytes: u32,
+) -> Result<serde_json::Value, String> {
+    shared_commands::read_history(state.session(), terminal_id, before, max_bytes).await
+}
+
+#[tauri::command]
 pub async fn cli_pocket_send_input(
     state: State<'_, AppState>,
     terminal_id: String,

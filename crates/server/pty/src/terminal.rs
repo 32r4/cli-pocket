@@ -1,6 +1,6 @@
 use crate::output::{OutputBroadcaster, OutputChunk, OutputStream};
 use crate::platform;
-use crate::ring::{RingError, ScrollbackRing};
+use crate::ring::{HistorySlice, RingError, ScrollbackRing};
 use bytes::Bytes;
 use cli_pocket_proto::{
     DeltaSlice, ExitInfo, KillSignal, Snapshot, StreamSeq, TerminalCreateParams, TerminalId,
@@ -147,6 +147,12 @@ impl Terminal {
     pub fn since(&self, seq: StreamSeq) -> Option<DeltaSlice> {
         let ring = lock_or_recover(&self.inner.ring, "ring");
         ring.since(seq)
+    }
+
+    #[must_use]
+    pub fn history_page(&self, before: Option<StreamSeq>, max_bytes: usize) -> HistorySlice {
+        let ring = lock_or_recover(&self.inner.ring, "ring");
+        ring.history_page(before, max_bytes)
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), TerminalError> {

@@ -19,6 +19,13 @@ struct Anchor {
     state: AnchorState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistorySlice {
+    pub start_seq: StreamSeq,
+    pub end_seq: StreamSeq,
+    pub bytes: ByteBuf,
+}
+
 pub struct ScrollbackRing {
     bytes: VecDeque<u8>,
     anchors: VecDeque<Anchor>,
@@ -125,6 +132,31 @@ impl ScrollbackRing {
             bytes: ByteBuf::from(bytes),
             head_seq: self.head_seq,
         })
+    }
+
+    #[must_use]
+    pub fn history_page(&self, before: Option<StreamSeq>, max_bytes: usize) -> HistorySlice {
+        let end_offset = before
+            .map_or(self.head_seq.0, |seq| seq.0)
+            .clamp(self.tail_offset, self.head_seq.0);
+        let available = end_offset.saturating_sub(self.tail_offset);
+        let page_len = available.min(u64::try_from(max_bytes).unwrap_or(u64::MAX));
+        let start_offset = end_offset.saturating_sub(page_len);
+        let start_rel = offset_to_relative(start_offset, self.tail_offset);
+        let byte_len = usize::try_from(page_len).unwrap_or(usize::MAX);
+        let bytes: Vec<u8> = self
+            .bytes
+            .iter()
+            .skip(start_rel)
+            .take(byte_len)
+            .copied()
+            .collect();
+
+        HistorySlice {
+            start_seq: StreamSeq(start_offset),
+            end_seq: StreamSeq(end_offset),
+            bytes: ByteBuf::from(bytes),
+        }
     }
 
     fn maybe_place_anchor(&mut self) {
@@ -252,6 +284,45 @@ mod tests {
             Some(tail.0)
         );
         assert!(ring.snapshot().bytes.len() <= 64);
+    }
+
+    #[test]
+    fn history_page_returns_latest_window_when_before_is_absent() {
+        let mut ring = ScrollbackRing::new(80, 24, None).unwrap();
+
+        ring.push(b"abcdefghij");
+
+        let page = ring.history_page(None, 4);
+
+        assert_eq!(page.start_seq, StreamSeq(6));
+        assert_eq!(page.end_seq, StreamSeq(10));
+        assert_eq!(&page.bytes[..], b"ghij");
+    }
+
+    #[test]
+    fn history_page_clamps_before_to_retained_window() {
+        let mut ring = ScrollbackRing::new(80, 24, None).unwrap();
+
+        ring.push(b"abcdefghij");
+
+        let page = ring.history_page(Some(StreamSeq(4)), 8);
+
+        assert_eq!(page.start_seq, StreamSeq(0));
+        assert_eq!(page.end_seq, StreamSeq(4));
+        assert_eq!(&page.bytes[..], b"abcd");
+    }
+
+    #[test]
+    fn history_page_returns_empty_slice_when_before_is_at_tail() {
+        let mut ring = ScrollbackRing::new(80, 24, None).unwrap();
+
+        ring.push(b"abcdefghij");
+
+        let page = ring.history_page(Some(StreamSeq(0)), 8);
+
+        assert_eq!(page.start_seq, StreamSeq(0));
+        assert_eq!(page.end_seq, StreamSeq(0));
+        assert!(page.bytes.is_empty());
     }
 
     #[test]

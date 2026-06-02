@@ -3,7 +3,9 @@ use bytes::Bytes;
 use cli_pocket_client_core::{
     ClientIdentity, KeyValueStore, SessionBuilder, SessionConfig, SessionEndpoint, TerminalSnapshot,
 };
-use cli_pocket_proto::{ResumeToken, ServerConfig, TerminalCreateParams, TerminalId, TerminalInfo};
+use cli_pocket_proto::{
+    ResumeToken, ServerConfig, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
+};
 use cli_pocket_tauri_bindings::{
     FileKvStore, OsRandom, SessionHandle, TokioClock, TokioWsTransport,
 };
@@ -132,6 +134,26 @@ pub async fn list_terminals(session: SessionHandle) -> Result<Vec<serde_json::Va
             .map(serialize_terminal_info)
             .collect::<Vec<_>>()
     })
+}
+
+pub async fn read_history(
+    session: SessionHandle,
+    terminal_id: String,
+    before: Option<u64>,
+    max_bytes: u32,
+) -> Result<serde_json::Value, String> {
+    let terminal_id = parse_terminal_id(&terminal_id)?;
+    session
+        .read_history(terminal_id, before.map(StreamSeq), max_bytes)
+        .await
+        .map(|page| {
+            serde_json::json!({
+                "terminal_id": page.terminal_id.0.to_string(),
+                "start_seq": page.start_seq.0,
+                "end_seq": page.end_seq.0,
+                "bytes_b64": base64::engine::general_purpose::STANDARD.encode(&page.bytes),
+            })
+        })
 }
 
 pub async fn get_server_config(session: SessionHandle) -> Result<serde_json::Value, String> {
@@ -311,6 +333,9 @@ fn serialize_terminal_info(info: &TerminalInfo) -> serde_json::Value {
 fn serialize_terminal_snapshot(snapshot: &TerminalSnapshot) -> serde_json::Value {
     serde_json::json!({
         "info": serialize_terminal_info(&snapshot.info),
+        "start_seq": snapshot.start_seq.0,
+        "end_seq": snapshot.end_seq.0,
+        "render_prefix_b64": base64::engine::general_purpose::STANDARD.encode(snapshot.render_prefix.as_bytes()),
         "snapshot_bytes_b64": base64::engine::general_purpose::STANDARD.encode(&snapshot.bytes),
     })
 }

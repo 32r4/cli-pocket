@@ -156,40 +156,16 @@ async fn revocation_drops_live_session() {
     let create_ok = recv_frame(&mut client_transport, &mut session)
         .await
         .expect("recv TerminalCreateOk");
-    let (terminal_id, stream_id) = match &create_ok.body {
+    let terminal_id = match &create_ok.body {
         FrameBody::TerminalCreateOk {
             request_id: rid,
-            terminal,
-            stream,
+            info,
         } => {
             assert_eq!(*rid, request_id, "request_id should match");
-            (*terminal, *stream)
+            info.terminal
         }
         other => panic!("expected TerminalCreateOk, got {other:?}"),
     };
-
-    // ---- Drain any follow-up snapshot Output frame, if produced quickly. ----
-    // Mirrors `pairing_roundtrip.rs`: a freshly-spawned PTY may emit an empty
-    // snapshot, in which case no Output frame is produced; tolerate either via
-    // a short timeout.
-    if let Ok(Ok(extra)) = timeout(
-        Duration::from_millis(200),
-        recv_frame_inner(&mut client_transport, &mut session),
-    )
-    .await
-    {
-        if let FrameBody::Output {
-            stream: s,
-            bytes: _,
-            seq: _,
-        } = extra.body
-        {
-            assert_eq!(
-                s, stream_id,
-                "Output.stream should match the created stream"
-            );
-        }
-    }
 
     // ---- Sanity: SessionManager now owns one terminal. ----
     let list = session_mgr.list();

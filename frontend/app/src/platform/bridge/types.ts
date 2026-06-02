@@ -37,7 +37,17 @@ export interface TerminalInfoRecord {
 
 export interface TerminalSnapshotRecord {
 	info: TerminalInfoRecord;
+	start_seq: number;
+	end_seq: number;
+	render_prefix_b64: string;
 	snapshot_bytes_b64: string;
+}
+
+export interface TerminalHistoryPageRecord {
+	terminal_id: string;
+	start_seq: number;
+	end_seq: number;
+	bytes_b64: string;
 }
 
 export interface ServerConfigRecord {
@@ -57,6 +67,11 @@ export interface SessionActor {
 	events(): AsyncIterable<unknown>;
 	refreshTerminals(): Promise<void>;
 	openTerminal(terminalId: string): Promise<TerminalSnapshotRecord>;
+	readHistory(
+		terminalId: string,
+		before: number | null,
+		maxBytes: number,
+	): Promise<TerminalHistoryPageRecord>;
 	createTerminal(
 		params: CreateTerminalParams,
 	): Promise<TerminalInfoRecord | null>;

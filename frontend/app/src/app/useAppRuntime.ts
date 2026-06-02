@@ -41,6 +41,8 @@ export function useAppRuntime({
 	const [terminalController] = useState(
 		() =>
 			new TerminalController({
+				session: () => null,
+				onError: () => undefined,
 				onInput: () => undefined,
 				onResize: () => undefined,
 			}),
@@ -79,8 +81,8 @@ export function useAppRuntime({
 					workspaceState,
 					onInlineError,
 					onConnectionReset: () => terminalController.reset(),
-					onTerminalOutput: (terminalId, chunk) => {
-						terminalController.appendActiveOutput(terminalId, chunk);
+					onTerminalOutput: (terminalId, chunk, streamSeq) => {
+						terminalController.appendActiveOutput(terminalId, chunk, streamSeq);
 					},
 					onTerminalRemoved: (terminalId) => {
 						terminalController.removeTerminal(terminalId);

@@ -17,7 +17,8 @@ pub use frame::{Frame, FrameBody};
 pub use hello::{Hello, HelloOk, ResumeAttachment, ResumeToken, ServerInfo};
 pub use relay::{PairCloseReason, PairId, RelayCtrl, RelayData, RELAY_DISC_CTRL, RELAY_DISC_DATA};
 pub use snapshot::{
-    AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs, Snapshot, TerminalModes,
+    AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs, Snapshot, TerminalBaseline,
+    TerminalModes,
 };
 pub use terminal::{
     ClientId, ExitInfo, KillSignal, ServerConfig, ServerId, SessionId, StreamId, StreamSeq,

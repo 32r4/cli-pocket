@@ -2,8 +2,8 @@ use bytes::Bytes;
 use cli_pocket_crypto::{NoiseAnonymousInitiator, NoiseInitiator, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
-    ByeReason, Frame, FrameBody, Hello, ProtocolError, ServerConfig, ServerId, StreamId,
-    TerminalCreateParams, TerminalId, TerminalInfo, PROTOCOL_VERSION,
+    ByeReason, Frame, FrameBody, Hello, ProtocolError, ResumeToken, ServerConfig, ServerId,
+    StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo, PROTOCOL_VERSION,
 };
 use futures_channel::{mpsc, oneshot};
 use futures_util::{
@@ -17,16 +17,17 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use crate::events::ClientEvent;
+use crate::history::TerminalHistoryPage;
 use crate::identity::ClientIdentity;
 use crate::relay::open_client_pair;
-use crate::snapshot::TerminalSnapshot;
+use crate::snapshot::{render_prefix_from_anchor, TerminalSnapshot};
 use crate::terminal::{TerminalCmd, TerminalHandle};
 use crate::{ClientError, ClientResult, Clock, KeyValueStore, Rng, Transport};
 
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
     pub endpoint: SessionEndpoint,
-    pub resume_token: Option<cli_pocket_proto::ResumeToken>,
+    pub resume_token: Option<ResumeToken>,
     pub backoff: (u64, u64, u32),
 }
 
@@ -46,6 +47,7 @@ const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
 
 type SharedReply<T> = Rc<RefCell<Option<oneshot::Sender<ClientResult<T>>>>>;
 type TerminalSnapshotReply = SharedReply<TerminalSnapshot>;
+type HistoryReply = SharedReply<TerminalHistoryPage>;
 type TerminalListReply = SharedReply<Vec<TerminalInfo>>;
 type ServerConfigReply = SharedReply<ServerConfig>;
 type UnitReply = SharedReply<()>;
@@ -107,10 +109,15 @@ enum SessionCommand {
     OpenTerminal {
         terminal: TerminalId,
         reply: TerminalSnapshotReply,
-        emit_created_event: bool,
     },
     ListTerminals {
         reply: TerminalListReply,
+    },
+    ReadHistory {
+        terminal: TerminalId,
+        before: Option<StreamSeq>,
+        max_bytes: u32,
+        reply: HistoryReply,
     },
     GetServerConfig {
         reply: ServerConfigReply,
@@ -210,7 +217,6 @@ impl ClientSession {
             .send(SessionCommand::OpenTerminal {
                 terminal,
                 reply: Rc::new(RefCell::new(Some(reply_tx))),
-                emit_created_event: false,
             })
             .await
             .map_err(|_| ClientError::Closed)?;
@@ -223,6 +229,27 @@ impl ClientSession {
         self.session_cmd_tx
             .clone()
             .send(SessionCommand::ListTerminals {
+                reply: Rc::new(RefCell::new(Some(reply_tx))),
+            })
+            .await
+            .map_err(|_| ClientError::Closed)?;
+
+        reply_rx.await.map_err(|_| ClientError::Closed)?
+    }
+
+    pub async fn read_history(
+        &self,
+        terminal: TerminalId,
+        before: Option<StreamSeq>,
+        max_bytes: u32,
+    ) -> ClientResult<TerminalHistoryPage> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.session_cmd_tx
+            .clone()
+            .send(SessionCommand::ReadHistory {
+                terminal,
+                before,
+                max_bytes,
                 reply: Rc::new(RefCell::new(Some(reply_tx))),
             })
             .await
@@ -395,7 +422,7 @@ async fn run_session_loop<T, C, R, K>(
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 async fn run_one_connection<T, C, R>(
     identity: &ClientIdentity,
     config: &SessionConfig,
@@ -413,8 +440,6 @@ where
     C: Clock,
     R: Rng,
 {
-    let _ = &config.resume_token;
-
     let mut session = match &config.endpoint {
         SessionEndpoint::Direct(_) => {
             let mut noise = NoiseAnonymousInitiator::new(&identity.keypair)?;
@@ -453,7 +478,7 @@ where
     let hello = Frame::body(FrameBody::Hello(Hello {
         protocol_min: PROTOCOL_VERSION,
         protocol_max: PROTOCOL_VERSION,
-        resume: None,
+        resume: config.resume_token.clone(),
     }));
     send_encrypted(transport, &mut session, &hello).await?;
 
@@ -476,9 +501,11 @@ where
         })
         .await;
     *state.reached_connected = true;
+
     let mut heartbeat = HeartbeatState::new(clock.now_ms());
     let mut runtime = RuntimeState::default();
     let mut pending_lists = HashMap::<u32, TerminalListReply>::new();
+    let mut pending_history = HashMap::<u32, HistoryReply>::new();
     let mut pending_server_config = PendingServerConfigReplies::new();
     let mut pending_kills = HashMap::<u32, UnitReply>::new();
 
@@ -508,6 +535,7 @@ where
                     cmd.clone(),
                     &mut next_request_id,
                     &mut pending_lists,
+                    &mut pending_history,
                     &mut pending_server_config,
                     &mut pending_kills,
                 );
@@ -530,7 +558,7 @@ where
                 )
                 .await
                 {
-                    Either::Left((cmd, _pending_other)) => {
+                    Either::Left((cmd, _)) => {
                         let Some(cmd) = cmd else {
                             return Ok(());
                         };
@@ -543,13 +571,14 @@ where
                             cmd.clone(),
                             &mut next_request_id,
                             &mut pending_lists,
+                            &mut pending_history,
                             &mut pending_server_config,
                             &mut pending_kills,
                         );
                         pending_session_cmds.push_back(cmd);
                         Either::Left((Some(frame), ()))
                     }
-                    Either::Right((Either::Left((cmd, _pending_frame)), _pending_session_cmd)) => {
+                    Either::Right((Either::Left((cmd, _)), _)) => {
                         let Some(cmd) = cmd else {
                             return Ok(());
                         };
@@ -558,9 +587,7 @@ where
                         pending_cmds.push_back(cmd);
                         Either::Left((frame, ()))
                     }
-                    Either::Right((Either::Right((frame, _pending_cmd)), _pending_session_cmd)) => {
-                        Either::Right((frame, ()))
-                    }
+                    Either::Right((Either::Right((frame, _)), _)) => Either::Right((frame, ())),
                 }
             };
 
@@ -577,217 +604,15 @@ where
                         Ok(frame) => frame,
                         Err(err) => return Err(err),
                     };
-                    match frame.body {
-                        FrameBody::Output { stream, seq, bytes } => {
-                            if runtime.active_stream() != Some(stream) {
-                                Action::None
-                            } else if let Some(handle) = state.terminal.borrow_mut().as_mut() {
-                                handle.last_seq = Some(seq);
-                                runtime.update_active_seq(seq);
-                                Action::Emit(ClientEvent::TerminalOutput {
-                                    terminal_id: handle.terminal_id(),
-                                    stream_seq: seq,
-                                    bytes: Bytes::from(bytes.into_vec()),
-                                })
-                            } else {
-                                Action::None
-                            }
-                        }
-                        FrameBody::TerminalCreateOk {
-                            request_id,
-                            terminal: created_terminal,
-                            stream,
-                        } => {
-                            if let Some((info, stream)) =
-                                runtime.complete_create(request_id, created_terminal, stream)
-                            {
-                                runtime.store_info(info);
-                                let detach_request_id = next_request_id;
-                                next_request_id = next_request_id.saturating_add(1);
-                                Action::Send(Frame::body(FrameBody::TerminalDetach {
-                                    request_id: detach_request_id,
-                                    stream,
-                                }))
-                            } else {
-                                Action::Emit(ClientEvent::Error(format!(
-                                    "terminal create ok missing metadata for {created_terminal:?}"
-                                )))
-                            }
-                        }
-                        FrameBody::TerminalCreateErr { request_id, error } => {
-                            if runtime.remove_pending_create(request_id).is_some() {
-                                Action::Emit(ClientEvent::Error(format!(
-                                    "terminal create failed: {error}"
-                                )))
-                            } else {
-                                Action::Emit(ClientEvent::Error(format!(
-                                    "terminal create failed for unknown request {request_id}: {error}"
-                                )))
-                            }
-                        }
-                        FrameBody::TerminalAttachOk {
-                            request_id,
-                            snapshot,
-                            stream,
-                            head_seq,
-                            ..
-                        } => {
-                            let mut event = None;
-                            if let Some(pending) = runtime.take_pending_open(request_id) {
-                                let info = runtime.info(pending.terminal).cloned().unwrap_or(
-                                    TerminalInfo {
-                                        terminal: pending.terminal,
-                                        cols: snapshot.cols,
-                                        rows: snapshot.rows,
-                                        created_at_unix_ms: 0,
-                                        label: snapshot.anchor_state.title.clone(),
-                                        attached_clients: 1,
-                                    },
-                                );
-                                runtime.store_info(info.clone());
-                                runtime.set_active(&info, stream, Some(head_seq));
-                                *state.terminal.borrow_mut() = Some(TerminalHandle::new(
-                                    info.clone(),
-                                    stream,
-                                    Some(head_seq),
-                                    state.cmd_tx.clone(),
-                                ));
-
-                                if pending.emit_created_event {
-                                    event = Some(ClientEvent::TerminalCreated(info.clone()));
-                                }
-
-                                if let Some(reply) = pending.notify {
-                                    if let Some(reply) = reply.borrow_mut().take() {
-                                        let _ = reply
-                                            .send(Ok(TerminalSnapshot::from_parts(info, snapshot)));
-                                    }
-                                }
-                            }
-                            event.map_or(Action::None, Action::Emit)
-                        }
-                        FrameBody::TerminalAttachErr { request_id, error } => {
-                            if let Some(pending) = runtime.take_pending_open(request_id) {
-                                if let Some(reply) = pending.notify {
-                                    if let Some(reply) = reply.borrow_mut().take() {
-                                        let _ = reply.send(Err(ClientError::Proto(format!(
-                                            "terminal open failed: {error}"
-                                        ))));
-                                    }
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::TerminalDetachOk { request_id }
-                        | FrameBody::TerminalDetachErr { request_id, .. } => {
-                            if let Some(pending) = runtime.take_pending_detach(request_id) {
-                                clear_active_terminal(state.terminal, &mut runtime);
-                                if let Some(open_request_id) = pending.next_open_request_id {
-                                    if let Some(open) = runtime.pending_open(open_request_id) {
-                                        Action::Send(Frame::body(FrameBody::TerminalAttach {
-                                            request_id: open.request_id,
-                                            terminal: open.terminal,
-                                            since: None,
-                                        }))
-                                    } else {
-                                        Action::None
-                                    }
-                                } else {
-                                    Action::None
-                                }
-                            } else {
-                                Action::None
-                            }
-                        }
-                        FrameBody::TerminalListOk {
-                            request_id,
-                            terminals,
-                        } => {
-                            for terminal in &terminals {
-                                runtime.store_info(terminal.clone());
-                            }
-                            if let Some(reply) = pending_lists.remove(&request_id) {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    let _ = reply.send(Ok(terminals));
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::ServerConfigGetOk { request_id, config } => {
-                            if let Some(reply) = pending_server_config.reads.remove(&request_id) {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    let _ = reply.send(Ok(config));
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::ServerConfigGetErr { request_id, error } => {
-                            if let Some(reply) = pending_server_config.reads.remove(&request_id) {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    let _ = reply.send(Err(ClientError::Proto(format!(
-                                        "server config get failed: {error}"
-                                    ))));
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::ServerConfigSetOk { request_id, config } => {
-                            if let Some(reply) = pending_server_config.writes.remove(&request_id) {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    let _ = reply.send(Ok(config));
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::ServerConfigSetErr { request_id, error } => {
-                            if let Some(reply) = pending_server_config.writes.remove(&request_id) {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    let _ = reply.send(Err(ClientError::Proto(format!(
-                                        "server config set failed: {error}"
-                                    ))));
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::TerminalKillOk { request_id } => {
-                            if let Some(reply) = pending_kills.remove(&request_id) {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    let _ = reply.send(Ok(()));
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::TerminalKillErr { request_id, error } => {
-                            if let Some(reply) = pending_kills.remove(&request_id) {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    let _ = reply.send(Err(ClientError::Proto(format!(
-                                        "terminal kill failed: {error}"
-                                    ))));
-                                }
-                            }
-                            Action::None
-                        }
-                        FrameBody::TerminalExit { terminal, exit } => {
-                            if runtime.active_terminal() == Some(terminal) {
-                                clear_active_terminal(state.terminal, &mut runtime);
-                            }
-                            Action::Emit(ClientEvent::TerminalExited {
-                                terminal_id: terminal,
-                                info: exit,
-                            })
-                        }
-                        FrameBody::Bye { reason } => {
-                            if is_recoverable_bye(&reason) {
-                                Action::Return(Err(ClientError::Closed))
-                            } else {
-                                Action::Return(Err(ClientError::Rejected(reason)))
-                            }
-                        }
-                        FrameBody::Ping { nonce } => {
-                            Action::Send(Frame::body(FrameBody::Pong { nonce }))
-                        }
-                        _ => Action::None,
-                    }
+                    handle_inbound_frame(
+                        frame,
+                        &mut runtime,
+                        &state,
+                        &mut pending_lists,
+                        &mut pending_history,
+                        &mut pending_server_config,
+                        &mut pending_kills,
+                    )?
                 }
             }
         };
@@ -811,6 +636,297 @@ where
             Action::None => {}
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_inbound_frame(
+    frame: Frame,
+    runtime: &mut RuntimeState,
+    state: &ConnectionState<'_>,
+    pending_lists: &mut HashMap<u32, TerminalListReply>,
+    pending_history: &mut HashMap<u32, HistoryReply>,
+    pending_server_config: &mut PendingServerConfigReplies,
+    pending_kills: &mut HashMap<u32, UnitReply>,
+) -> ClientResult<Action> {
+    let action = match frame.body {
+        FrameBody::Output { stream, seq, bytes } => {
+            if runtime.snapshot_in_progress_for(stream) {
+                return Err(ClientError::Proto(
+                    "received live output before snapshot finished".to_owned(),
+                ));
+            }
+
+            if runtime.active_stream() != Some(stream) {
+                Action::None
+            } else if let Some(handle) = state.terminal.borrow_mut().as_mut() {
+                handle.last_seq = Some(seq);
+                runtime.update_active_seq(seq);
+                Action::Emit(ClientEvent::TerminalOutput {
+                    terminal_id: handle.terminal_id(),
+                    stream_seq: seq,
+                    bytes: Bytes::from(bytes.into_vec()),
+                })
+            } else {
+                Action::None
+            }
+        }
+        FrameBody::TerminalSnapshotChunk {
+            stream,
+            seq,
+            offset,
+            bytes,
+            last,
+        } => {
+            runtime
+                .push_snapshot_chunk(stream, seq, offset, bytes.as_ref(), last)
+                .map_err(ClientError::Proto)?;
+            Action::None
+        }
+        FrameBody::TerminalCreateOk { request_id, info } => {
+            if runtime.remove_pending_create(request_id) {
+                runtime.store_info(info.clone());
+                Action::Emit(ClientEvent::TerminalCreated(info))
+            } else {
+                Action::Emit(ClientEvent::Error(format!(
+                    "terminal create ok for unknown request {request_id}"
+                )))
+            }
+        }
+        FrameBody::TerminalCreateErr { request_id, error } => {
+            if runtime.remove_pending_create(request_id) {
+                Action::Emit(ClientEvent::Error(format!(
+                    "terminal create failed: {error}"
+                )))
+            } else {
+                Action::Emit(ClientEvent::Error(format!(
+                    "terminal create failed for unknown request {request_id}: {error}"
+                )))
+            }
+        }
+        FrameBody::TerminalAttachOk {
+            request_id,
+            baseline,
+            stream,
+            ..
+        } => {
+            let Some(pending) = runtime.take_pending_open(request_id) else {
+                return Ok(Action::None);
+            };
+
+            let info = runtime
+                .info(pending.terminal)
+                .cloned()
+                .unwrap_or_else(|| TerminalInfo {
+                    terminal: pending.terminal,
+                    cols: baseline.cols,
+                    rows: baseline.rows,
+                    created_at_unix_ms: 0,
+                    label: baseline.anchor_state.title.clone(),
+                    attached_clients: 1,
+                });
+            runtime.store_info(info.clone());
+            runtime.set_active(&info, stream, Some(baseline.head_seq));
+            *state.terminal.borrow_mut() = Some(TerminalHandle::new(
+                info.clone(),
+                stream,
+                Some(baseline.head_seq),
+                state.cmd_tx.clone(),
+            ));
+
+            if baseline.byte_len == 0 {
+                if let Some(reply) = pending.reply {
+                    if let Some(reply) = reply.borrow_mut().take() {
+                        let _ = reply.send(Ok(TerminalSnapshot::new(
+                            info,
+                            baseline.head_seq,
+                            baseline.head_seq,
+                            Bytes::new(),
+                            render_prefix_from_anchor(&baseline.anchor_state),
+                        )));
+                    }
+                }
+                Action::None
+            } else {
+                runtime.begin_snapshot(
+                    info,
+                    stream,
+                    baseline.head_seq,
+                    baseline.byte_len,
+                    render_prefix_from_anchor(&baseline.anchor_state),
+                    pending.reply,
+                );
+                Action::None
+            }
+        }
+        FrameBody::TerminalAttachErr { request_id, error } => {
+            if let Some(pending) = runtime.take_pending_open(request_id) {
+                if let Some(reply) = pending.reply {
+                    if let Some(reply) = reply.borrow_mut().take() {
+                        let _ = reply.send(Err(ClientError::Proto(format!(
+                            "terminal open failed: {error}"
+                        ))));
+                    }
+                }
+            }
+            Action::None
+        }
+        FrameBody::TerminalDetachOk { request_id }
+        | FrameBody::TerminalDetachErr { request_id, .. } => {
+            if let Some(pending) = runtime.take_pending_detach(request_id) {
+                clear_active_terminal(state.terminal, runtime);
+                if let Some(open_request_id) = pending.next_open_request_id {
+                    if let Some(open) = runtime.pending_open(open_request_id) {
+                        Action::Send(Frame::body(FrameBody::TerminalAttach {
+                            request_id: open.request_id,
+                            terminal: open.terminal,
+                        }))
+                    } else {
+                        Action::None
+                    }
+                } else {
+                    Action::None
+                }
+            } else {
+                Action::None
+            }
+        }
+        FrameBody::TerminalListOk {
+            request_id,
+            terminals,
+        } => {
+            for terminal in &terminals {
+                runtime.store_info(terminal.clone());
+            }
+            if let Some(reply) = pending_lists.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Ok(terminals));
+                }
+            }
+            Action::None
+        }
+        FrameBody::HistoryChunk {
+            request_id,
+            terminal,
+            start_seq,
+            end_seq,
+            bytes,
+            last,
+        } => {
+            runtime
+                .push_history_chunk(
+                    request_id,
+                    terminal,
+                    start_seq,
+                    end_seq,
+                    bytes.as_ref(),
+                    last,
+                )
+                .map_err(ClientError::Proto)?;
+            if last {
+                let completed = runtime
+                    .take_completed_history(request_id)
+                    .ok_or_else(|| ClientError::Proto("history assembly missing".to_owned()))?;
+                if let Some(reply) = pending_history.remove(&request_id) {
+                    if let Some(reply) = reply.borrow_mut().take() {
+                        let _ = reply.send(Ok(TerminalHistoryPage::new(
+                            completed.terminal,
+                            completed.start_seq,
+                            completed.end_seq,
+                            Bytes::from(completed.bytes),
+                        )));
+                    }
+                }
+                Action::None
+            } else {
+                Action::None
+            }
+        }
+        FrameBody::HistoryErr { request_id, error } => {
+            runtime.drop_history(request_id);
+            if let Some(reply) = pending_history.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Err(ClientError::Proto(format!(
+                        "history read failed: {error}"
+                    ))));
+                }
+            }
+            Action::None
+        }
+        FrameBody::ServerConfigGetOk { request_id, config } => {
+            if let Some(reply) = pending_server_config.reads.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Ok(config));
+                }
+            }
+            Action::None
+        }
+        FrameBody::ServerConfigGetErr { request_id, error } => {
+            if let Some(reply) = pending_server_config.reads.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Err(ClientError::Proto(format!(
+                        "server config get failed: {error}"
+                    ))));
+                }
+            }
+            Action::None
+        }
+        FrameBody::ServerConfigSetOk { request_id, config } => {
+            if let Some(reply) = pending_server_config.writes.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Ok(config));
+                }
+            }
+            Action::None
+        }
+        FrameBody::ServerConfigSetErr { request_id, error } => {
+            if let Some(reply) = pending_server_config.writes.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Err(ClientError::Proto(format!(
+                        "server config set failed: {error}"
+                    ))));
+                }
+            }
+            Action::None
+        }
+        FrameBody::TerminalKillOk { request_id } => {
+            if let Some(reply) = pending_kills.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Ok(()));
+                }
+            }
+            Action::None
+        }
+        FrameBody::TerminalKillErr { request_id, error } => {
+            if let Some(reply) = pending_kills.remove(&request_id) {
+                if let Some(reply) = reply.borrow_mut().take() {
+                    let _ = reply.send(Err(ClientError::Proto(format!(
+                        "terminal kill failed: {error}"
+                    ))));
+                }
+            }
+            Action::None
+        }
+        FrameBody::TerminalExit { terminal, exit } => {
+            if runtime.active_terminal() == Some(terminal) {
+                clear_active_terminal(state.terminal, runtime);
+            }
+            Action::Emit(ClientEvent::TerminalExited {
+                terminal_id: terminal,
+                info: exit,
+            })
+        }
+        FrameBody::Bye { reason } => {
+            if is_recoverable_bye(&reason) {
+                Action::Return(Err(ClientError::Closed))
+            } else {
+                Action::Return(Err(ClientError::Rejected(reason)))
+            }
+        }
+        FrameBody::Ping { nonce } => Action::Send(Frame::body(FrameBody::Pong { nonce })),
+        _ => Action::None,
+    };
+
+    Ok(action)
 }
 
 async fn recv_with_heartbeat<T, C, R>(
@@ -901,12 +1017,14 @@ fn frame_for_command(active: Option<&TerminalHandle>, cmd: TerminalCmd) -> Optio
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn frame_for_session_command(
     runtime: &mut RuntimeState,
     active_terminal: &Rc<RefCell<Option<TerminalHandle>>>,
     cmd: SessionCommand,
     next_request_id: &mut u32,
     pending_lists: &mut HashMap<u32, TerminalListReply>,
+    pending_history: &mut HashMap<u32, HistoryReply>,
     pending_server_config: &mut PendingServerConfigReplies,
     pending_kills: &mut HashMap<u32, UnitReply>,
 ) -> Frame {
@@ -914,17 +1032,16 @@ fn frame_for_session_command(
         SessionCommand::CreateTerminal(params) => {
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
-            runtime.record_create(request_id, params.clone());
+            runtime.record_create(request_id);
             Frame::body(FrameBody::TerminalCreate { request_id, params })
         }
         SessionCommand::OpenTerminal {
             terminal: target,
             reply,
-            emit_created_event,
         } => {
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
-            runtime.start_open(request_id, target, reply, emit_created_event);
+            runtime.start_open(request_id, target, reply);
 
             if let Some(active) = active_terminal.borrow().as_ref() {
                 let detach_request_id = *next_request_id;
@@ -938,7 +1055,6 @@ fn frame_for_session_command(
                 Frame::body(FrameBody::TerminalAttach {
                     request_id,
                     terminal: target,
-                    since: None,
                 })
             }
         }
@@ -947,6 +1063,23 @@ fn frame_for_session_command(
             *next_request_id = next_request_id.saturating_add(1);
             pending_lists.insert(request_id, reply);
             Frame::body(FrameBody::TerminalList { request_id })
+        }
+        SessionCommand::ReadHistory {
+            terminal,
+            before,
+            max_bytes,
+            reply,
+        } => {
+            let request_id = *next_request_id;
+            *next_request_id = next_request_id.saturating_add(1);
+            runtime.begin_history(request_id, terminal);
+            pending_history.insert(request_id, reply);
+            Frame::body(FrameBody::HistoryRequest {
+                request_id,
+                terminal,
+                before,
+                max_bytes,
+            })
         }
         SessionCommand::GetServerConfig { reply } => {
             let request_id = *next_request_id;
@@ -1060,22 +1193,24 @@ struct RuntimeState {
     info_cache: HashMap<TerminalId, TerminalInfo>,
     pending_opens: Vec<PendingOpen>,
     pending_detaches: HashMap<u32, PendingDetach>,
-    pending_creates: Vec<PendingCreate>,
+    pending_creates: Vec<u32>,
+    opening_snapshot: Option<SnapshotAssembly>,
+    pending_history: HashMap<u32, HistoryAssembly>,
+    completed_history: HashMap<u32, CompletedHistory>,
 }
 
 #[derive(Debug, Clone)]
 struct ActiveTerminalState {
     terminal: TerminalId,
     stream: StreamId,
-    last_seq: Option<cli_pocket_proto::StreamSeq>,
+    last_seq: Option<StreamSeq>,
 }
 
 #[derive(Debug, Clone)]
 struct PendingOpen {
     request_id: u32,
     terminal: TerminalId,
-    notify: Option<TerminalSnapshotReply>,
-    emit_created_event: bool,
+    reply: Option<TerminalSnapshotReply>,
 }
 
 #[derive(Debug, Clone)]
@@ -1084,9 +1219,31 @@ struct PendingDetach {
 }
 
 #[derive(Debug, Clone)]
-struct PendingCreate {
-    request_id: u32,
-    params: TerminalCreateParams,
+struct SnapshotAssembly {
+    info: TerminalInfo,
+    stream: StreamId,
+    start_seq: StreamSeq,
+    head_seq: StreamSeq,
+    expected_len: usize,
+    bytes: Vec<u8>,
+    render_prefix: String,
+    reply: Option<TerminalSnapshotReply>,
+}
+
+#[derive(Debug, Clone)]
+struct HistoryAssembly {
+    terminal: TerminalId,
+    start_seq: Option<StreamSeq>,
+    next_seq: Option<StreamSeq>,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct CompletedHistory {
+    terminal: TerminalId,
+    start_seq: StreamSeq,
+    end_seq: StreamSeq,
+    bytes: Vec<u8>,
 }
 
 impl RuntimeState {
@@ -1098,18 +1255,13 @@ impl RuntimeState {
         self.active.as_ref().map(|active| active.terminal)
     }
 
-    fn update_active_seq(&mut self, seq: cli_pocket_proto::StreamSeq) {
+    fn update_active_seq(&mut self, seq: StreamSeq) {
         if let Some(active) = self.active.as_mut() {
             active.last_seq = Some(seq);
         }
     }
 
-    fn set_active(
-        &mut self,
-        info: &TerminalInfo,
-        stream: StreamId,
-        last_seq: Option<cli_pocket_proto::StreamSeq>,
-    ) {
+    fn set_active(&mut self, info: &TerminalInfo, stream: StreamId, last_seq: Option<StreamSeq>) {
         self.info_cache.insert(info.terminal, info.clone());
         self.active = Some(ActiveTerminalState {
             terminal: info.terminal,
@@ -1120,6 +1272,7 @@ impl RuntimeState {
 
     fn clear_active(&mut self) {
         self.active = None;
+        self.opening_snapshot = None;
     }
 
     fn store_info(&mut self, info: TerminalInfo) {
@@ -1130,49 +1283,27 @@ impl RuntimeState {
         self.info_cache.get(&terminal)
     }
 
-    fn record_create(&mut self, request_id: u32, params: TerminalCreateParams) {
-        self.pending_creates
-            .push(PendingCreate { request_id, params });
+    fn record_create(&mut self, request_id: u32) {
+        self.pending_creates.push(request_id);
     }
 
-    fn remove_pending_create(&mut self, request_id: u32) -> Option<PendingCreate> {
-        let idx = self
+    fn remove_pending_create(&mut self, request_id: u32) -> bool {
+        let Some(index) = self
             .pending_creates
             .iter()
-            .position(|pending| pending.request_id == request_id)?;
-        Some(self.pending_creates.remove(idx))
-    }
-
-    fn complete_create(
-        &mut self,
-        request_id: u32,
-        terminal: TerminalId,
-        stream: StreamId,
-    ) -> Option<(TerminalInfo, StreamId)> {
-        let pending = self.remove_pending_create(request_id)?;
-        let info = TerminalInfo {
-            terminal,
-            cols: pending.params.cols,
-            rows: pending.params.rows,
-            created_at_unix_ms: 0,
-            label: pending.params.cmd.first().cloned(),
-            attached_clients: 1,
+            .position(|pending| *pending == request_id)
+        else {
+            return false;
         };
-        Some((info, stream))
+        self.pending_creates.remove(index);
+        true
     }
 
-    fn start_open(
-        &mut self,
-        request_id: u32,
-        terminal: TerminalId,
-        notify: TerminalSnapshotReply,
-        emit_created_event: bool,
-    ) {
+    fn start_open(&mut self, request_id: u32, terminal: TerminalId, reply: TerminalSnapshotReply) {
         self.pending_opens.push(PendingOpen {
             request_id,
             terminal,
-            notify: Some(notify),
-            emit_created_event,
+            reply: Some(reply),
         });
     }
 
@@ -1202,6 +1333,169 @@ impl RuntimeState {
     fn take_pending_detach(&mut self, request_id: u32) -> Option<PendingDetach> {
         self.pending_detaches.remove(&request_id)
     }
+
+    fn begin_snapshot(
+        &mut self,
+        info: TerminalInfo,
+        stream: StreamId,
+        head_seq: StreamSeq,
+        expected_len: u32,
+        render_prefix: String,
+        reply: Option<TerminalSnapshotReply>,
+    ) {
+        let expected_len = usize::try_from(expected_len).unwrap_or(usize::MAX);
+        let start_seq = StreamSeq(
+            head_seq
+                .0
+                .saturating_sub(u64::try_from(expected_len).unwrap_or(u64::MAX)),
+        );
+        self.opening_snapshot = Some(SnapshotAssembly {
+            info,
+            stream,
+            start_seq,
+            head_seq,
+            expected_len,
+            bytes: Vec::new(),
+            render_prefix,
+            reply,
+        });
+    }
+
+    fn snapshot_in_progress_for(&self, stream: StreamId) -> bool {
+        self.opening_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.stream == stream)
+    }
+
+    fn push_snapshot_chunk(
+        &mut self,
+        stream: StreamId,
+        seq: StreamSeq,
+        offset: u32,
+        bytes: &[u8],
+        last: bool,
+    ) -> Result<(), String> {
+        let Some(snapshot) = self.opening_snapshot.as_mut() else {
+            return Err("snapshot chunk arrived without active attach".to_owned());
+        };
+
+        if snapshot.stream != stream {
+            return Err("snapshot chunk stream mismatch".to_owned());
+        }
+        if snapshot.head_seq != seq {
+            return Err("snapshot chunk sequence mismatch".to_owned());
+        }
+
+        let offset = usize::try_from(offset).map_err(|_| "snapshot offset overflow")?;
+        if offset != snapshot.bytes.len() {
+            return Err("snapshot chunk offset mismatch".to_owned());
+        }
+
+        snapshot.bytes.extend_from_slice(bytes);
+        let done = last || snapshot.bytes.len() >= snapshot.expected_len;
+        if !done {
+            return Ok(());
+        }
+
+        let completed = self
+            .opening_snapshot
+            .take()
+            .ok_or_else(|| "snapshot assembly missing".to_owned())?;
+        if completed.bytes.len() != completed.expected_len {
+            return Err("snapshot chunk length mismatch".to_owned());
+        }
+
+        if let Some(active) = self.active.as_mut() {
+            if active.stream == completed.stream {
+                active.last_seq = Some(completed.head_seq);
+            }
+        }
+
+        if let Some(reply) = completed.reply {
+            if let Some(reply) = reply.borrow_mut().take() {
+                let snapshot = TerminalSnapshot::new(
+                    completed.info,
+                    completed.start_seq,
+                    completed.head_seq,
+                    Bytes::from(completed.bytes),
+                    completed.render_prefix,
+                );
+                let _ = reply.send(Ok(snapshot));
+                return Ok(());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn begin_history(&mut self, request_id: u32, terminal: TerminalId) {
+        self.pending_history.insert(
+            request_id,
+            HistoryAssembly {
+                terminal,
+                start_seq: None,
+                next_seq: None,
+                bytes: Vec::new(),
+            },
+        );
+    }
+
+    fn push_history_chunk(
+        &mut self,
+        request_id: u32,
+        terminal: TerminalId,
+        start_seq: StreamSeq,
+        end_seq: StreamSeq,
+        bytes: &[u8],
+        last: bool,
+    ) -> Result<(), String> {
+        let Some(history) = self.pending_history.get_mut(&request_id) else {
+            return Err("history chunk arrived without pending request".to_owned());
+        };
+        if history.terminal != terminal {
+            return Err("history chunk terminal mismatch".to_owned());
+        }
+        if end_seq.0.saturating_sub(start_seq.0) != bytes.len() as u64 {
+            return Err("history chunk length mismatch".to_owned());
+        }
+        if let Some(next_seq) = history.next_seq {
+            if next_seq != start_seq {
+                return Err("history chunk sequence gap".to_owned());
+            }
+        }
+
+        history.bytes.extend_from_slice(bytes);
+        if history.start_seq.is_none() {
+            history.start_seq = Some(start_seq);
+        }
+        history.next_seq = Some(end_seq);
+        if last {
+            let completed = self
+                .pending_history
+                .remove(&request_id)
+                .ok_or_else(|| "history assembly missing".to_owned())?;
+            self.completed_history.insert(
+                request_id,
+                CompletedHistory {
+                    terminal: completed.terminal,
+                    start_seq: completed.start_seq.unwrap_or(start_seq),
+                    end_seq,
+                    bytes: completed.bytes,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    fn take_completed_history(&mut self, request_id: u32) -> Option<CompletedHistory> {
+        self.completed_history.remove(&request_id)
+    }
+
+    fn drop_history(&mut self, request_id: u32) {
+        self.pending_history.remove(&request_id);
+        self.completed_history.remove(&request_id);
+    }
 }
 
 fn clear_active_terminal(
@@ -1225,4 +1519,32 @@ fn parse_psk_hex(psk_hex: &str) -> ClientResult<[u8; 32]> {
     bytes
         .try_into()
         .map_err(|_| ClientError::Transport("relay psk_hex must be 32 bytes".to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cli_pocket_proto::TerminalId;
+
+    #[test]
+    fn completed_history_uses_first_chunk_start_seq() {
+        let mut runtime = RuntimeState::default();
+        let terminal = TerminalId::new();
+
+        runtime.begin_history(7, terminal);
+        runtime
+            .push_history_chunk(7, terminal, StreamSeq(10), StreamSeq(14), b"abcd", false)
+            .expect("first chunk accepted");
+        runtime
+            .push_history_chunk(7, terminal, StreamSeq(14), StreamSeq(18), b"efgh", true)
+            .expect("second chunk accepted");
+
+        let completed = runtime
+            .take_completed_history(7)
+            .expect("history should complete");
+
+        assert_eq!(completed.start_seq, StreamSeq(10));
+        assert_eq!(completed.end_seq, StreamSeq(18));
+        assert_eq!(completed.bytes, b"abcdefgh");
+    }
 }

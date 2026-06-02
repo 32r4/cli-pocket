@@ -9,6 +9,10 @@ import type {
 } from "@/platform/bridge/types";
 import type { ConnectionState } from "@/state/workspace/workspaceState";
 
+const initialHistoryPageBytes = 32 * 1024;
+const initialHistoryTargetBytes = 128 * 1024;
+const maxInitialHistoryPages = 4;
+
 interface TerminalSummaryView {
 	id: string;
 	title: string;
@@ -81,6 +85,54 @@ function parseTerminalSnapshot(value: unknown): TerminalSnapshotRecord | null {
 	return value as TerminalSnapshotRecord;
 }
 
+async function preloadTerminalWindow(
+	session: SessionActor,
+	snapshot: TerminalSnapshotRecord,
+) {
+	const renderPrefix = decodeBase64Bytes(snapshot.render_prefix_b64);
+	let startSeq = snapshot.start_seq;
+	const historyChunks: string[] = [];
+	const snapshotBytes = decodeBase64Bytes(snapshot.snapshot_bytes_b64);
+	let loadedBytes = snapshotBytes.length;
+	let nextBefore = snapshot.start_seq;
+
+	for (
+		let page = 0;
+		page < maxInitialHistoryPages &&
+		nextBefore > 0 &&
+		loadedBytes < initialHistoryTargetBytes;
+		page += 1
+	) {
+		const history = await session.readHistory(
+			snapshot.info.terminal,
+			nextBefore,
+			initialHistoryPageBytes,
+		);
+		if (history.bytes_b64.length === 0) {
+			startSeq = history.start_seq;
+			break;
+		}
+
+		const chunk = decodeBase64Bytes(history.bytes_b64);
+		if (chunk.length === 0 || history.start_seq >= nextBefore) {
+			break;
+		}
+
+		historyChunks.unshift(chunk);
+		loadedBytes += chunk.length;
+		startSeq = history.start_seq;
+		nextBefore = history.start_seq;
+		if (history.start_seq === 0) {
+			break;
+		}
+	}
+
+	return {
+		startSeq,
+		snapshot: `${renderPrefix}${historyChunks.join("")}${snapshotBytes}`,
+	};
+}
+
 export async function openTerminalSnapshot({
 	session,
 	terminalId,
@@ -96,12 +148,16 @@ export async function openTerminalSnapshot({
 	onMarkTerminalReady: (snapshot: TerminalSnapshotRecord) => void;
 	onMarkTerminalError: (terminalId: string, message: string) => void;
 	onInlineError: (message: string | null) => void;
-	onRenderSnapshot: (terminalId: string, snapshot: string) => void;
+	onRenderSnapshot: (
+		terminalId: string,
+		snapshot: string,
+		startSeq: number,
+	) => void;
 }) {
-	onMarkTerminalConnecting(terminalId);
 	if (session == null) {
 		return;
 	}
+	onMarkTerminalConnecting(terminalId);
 
 	try {
 		const snapshot = await Promise.race([
@@ -117,8 +173,21 @@ export async function openTerminalSnapshot({
 		if (parsed == null) {
 			throw new Error("invalid terminal snapshot");
 		}
+		let initialWindow = {
+			startSeq: parsed.start_seq,
+			snapshot: `${decodeBase64Bytes(parsed.render_prefix_b64)}${decodeBase64Bytes(parsed.snapshot_bytes_b64)}`,
+		};
+		try {
+			initialWindow = await preloadTerminalWindow(session, parsed);
+		} catch {
+			// Fall back to the attach snapshot if preloading shared history fails.
+		}
 		onMarkTerminalReady(parsed);
-		onRenderSnapshot(terminalId, decodeBase64Bytes(parsed.snapshot_bytes_b64));
+		onRenderSnapshot(
+			terminalId,
+			initialWindow.snapshot,
+			initialWindow.startSeq,
+		);
 	} catch (error: unknown) {
 		const message =
 			error instanceof Error ? error.message : "failed to open terminal";
@@ -156,6 +225,9 @@ export function TerminalArea({
 			lastOpenedTerminalIdRef.current = null;
 			return;
 		}
+		if (session == null) {
+			return;
+		}
 		if (activeSession.status === "connecting") {
 			return;
 		}
@@ -178,14 +250,18 @@ export function TerminalArea({
 				lastOpenedTerminalIdRef.current = null;
 			},
 			onInlineError,
-			onRenderSnapshot: (terminalId, snapshot) => {
-				controller.renderSnapshot(terminalId, snapshot);
+			onRenderSnapshot: (terminalId, snapshot, startSeq) => {
+				controller.renderSnapshotWithRange(terminalId, snapshot, startSeq);
 			},
 		});
 	}, [activeSession, controller, onInlineError, session, workspaceState]);
 
 	useEffect(() => {
 		controller.setHandlers({
+			session: () => session,
+			onError: (message) => {
+				onInlineError(message);
+			},
 			onInput: (terminalId, data) => {
 				if (session == null) {
 					return;

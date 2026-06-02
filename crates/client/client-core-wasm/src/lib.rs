@@ -207,6 +207,36 @@ mod tests {
             assert!(parse_connect_config_json(&value).is_err());
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test]
+    fn terminal_snapshot_js_includes_render_prefix() {
+        let snapshot = TerminalSnapshot::new(
+            cli_pocket_proto::TerminalInfo {
+                terminal: cli_pocket_proto::TerminalId(uuid::Uuid::nil()),
+                cols: 80,
+                rows: 24,
+                created_at_unix_ms: 1,
+                label: None,
+                attached_clients: 1,
+            },
+            cli_pocket_proto::StreamSeq(0),
+            cli_pocket_proto::StreamSeq(2),
+            Bytes::from_static(b"ok"),
+            "\u{1b}[?25h".to_owned(),
+        );
+
+        let value = terminal_snapshot_to_js(&snapshot).expect("serialize snapshot");
+        let render_prefix = js_sys::Reflect::get(&value, &JsValue::from_str("render_prefix_b64"))
+            .expect("render_prefix_b64 property")
+            .as_string()
+            .expect("render_prefix_b64 string");
+
+        assert_eq!(
+            render_prefix,
+            BASE64.encode(snapshot.render_prefix.as_bytes())
+        );
+    }
 }
 
 #[wasm_bindgen(start)]
@@ -324,6 +354,22 @@ impl CliPocketClient {
         let client = self.clone();
         future_to_promise(async move {
             let value = client.open_terminal_inner(terminal_id).await?;
+            Ok(value)
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn read_history(
+        &self,
+        terminal_id: String,
+        before: Option<u64>,
+        max_bytes: u32,
+    ) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            let value = client
+                .read_history_inner(terminal_id, before, max_bytes)
+                .await?;
             Ok(value)
         })
     }
@@ -516,6 +562,38 @@ impl CliPocketClient {
             .map_err(js_error)?;
 
         terminal_snapshot_to_js(&snapshot)
+    }
+
+    async fn read_history_inner(
+        &self,
+        terminal_id: String,
+        before: Option<u64>,
+        max_bytes: u32,
+    ) -> Result<JsValue, JsValue> {
+        let session = self
+            .inner
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let page = session
+            .read_history(
+                parse_terminal_id(&terminal_id)?,
+                before.map(cli_pocket_proto::StreamSeq),
+                max_bytes,
+            )
+            .await
+            .map_err(js_error)?;
+
+        serde_json::json!({
+            "terminal_id": page.terminal_id.0.to_string(),
+            "start_seq": page.start_seq.0,
+            "end_seq": page.end_seq.0,
+            "bytes_b64": BASE64.encode(&page.bytes),
+        })
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&format!("serialize history page: {e}")))
     }
 
     async fn list_terminals_inner(&self) -> Result<JsValue, JsValue> {
@@ -835,6 +913,9 @@ fn terminal_info_to_json_value(info: &TerminalInfo) -> serde_json::Value {
 fn terminal_snapshot_to_js(snapshot: &TerminalSnapshot) -> Result<JsValue, JsValue> {
     serde_json::json!({
         "info": terminal_info_to_json_value(&snapshot.info),
+        "start_seq": snapshot.start_seq.0,
+        "end_seq": snapshot.end_seq.0,
+        "render_prefix_b64": BASE64.encode(snapshot.render_prefix.as_bytes()),
         "snapshot_bytes_b64": BASE64.encode(&snapshot.bytes),
     })
     .serialize(&serde_wasm_bindgen::Serializer::json_compatible())

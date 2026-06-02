@@ -12,6 +12,27 @@ pub struct Snapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalBaseline {
+    pub cols: u16,
+    pub rows: u16,
+    pub anchor_state: AnchorState,
+    pub head_seq: StreamSeq,
+    pub byte_len: u32,
+}
+
+impl From<&Snapshot> for TerminalBaseline {
+    fn from(snapshot: &Snapshot) -> Self {
+        Self {
+            cols: snapshot.cols,
+            rows: snapshot.rows,
+            anchor_state: snapshot.anchor_state.clone(),
+            head_seq: snapshot.head_seq,
+            byte_len: u32::try_from(snapshot.bytes.len()).unwrap_or(u32::MAX),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnchorState {
     pub cursor: (u16, u16),
     pub sgr: SgrAttrs,

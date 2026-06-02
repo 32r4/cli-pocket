@@ -9,5 +9,5 @@ mod platform;
 
 pub use output::{Lagged, OutputBroadcaster, OutputChunk, OutputRecv, OutputStream};
 pub use parser::AnchorTracker;
-pub use ring::{RingError, ScrollbackRing};
+pub use ring::{HistorySlice, RingError, ScrollbackRing};
 pub use terminal::{Terminal, TerminalError};

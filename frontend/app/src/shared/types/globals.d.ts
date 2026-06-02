@@ -10,6 +10,11 @@ declare module "cli-pocket-client-core-wasm" {
 		get_server_config(): Promise<unknown>;
 		list_terminals(): Promise<unknown>;
 		open_terminal(terminalId: string): Promise<unknown>;
+		read_history(
+			terminalId: string,
+			before: number | null,
+			maxBytes: number,
+		): Promise<unknown>;
 		set_server_config(configJson: string): Promise<unknown>;
 		send_input(terminalId: string, data: Uint8Array): Promise<void>;
 		resize(terminalId: string, cols: number, rows: number): Promise<void>;

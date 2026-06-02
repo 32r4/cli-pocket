@@ -12,6 +12,7 @@ import type {
 	RegistryAdapter,
 	ServerConfigRecord,
 	SessionActor,
+	TerminalHistoryPageRecord,
 	TerminalInfoRecord,
 	TerminalSnapshotRecord,
 } from "../bridge/types";
@@ -98,6 +99,18 @@ class WebSessionActor implements SessionActor {
 		return (await this.client.open_terminal(
 			terminalId,
 		)) as TerminalSnapshotRecord;
+	}
+
+	async readHistory(
+		terminalId: string,
+		before: number | null,
+		maxBytes: number,
+	): Promise<TerminalHistoryPageRecord> {
+		return (await this.client.read_history(
+			terminalId,
+			before,
+			maxBytes,
+		)) as TerminalHistoryPageRecord;
 	}
 
 	async createTerminal(params: CreateTerminalParams) {

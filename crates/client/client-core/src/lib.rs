@@ -5,6 +5,7 @@
 
 pub mod error;
 pub mod events;
+pub mod history;
 pub mod identity;
 pub mod reconnect;
 pub mod relay;
@@ -15,6 +16,7 @@ pub mod traits;
 
 pub use error::{ClientError, ClientResult};
 pub use events::ClientEvent;
+pub use history::TerminalHistoryPage;
 pub use identity::ClientIdentity;
 pub use session::{ClientSession, SessionBuilder, SessionConfig, SessionEndpoint};
 pub use snapshot::TerminalSnapshot;

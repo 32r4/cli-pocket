@@ -2,8 +2,8 @@
 //!
 //! Asserts the daemon's happy path: a paired client (whose public key is in
 //! `clients.json`) connects over an `InMemoryTransport`, completes Noise XK,
-//! sends `Hello`, creates a terminal, writes input, and receives a
-//! `TerminalCreateOk` plus an `Output` snapshot frame from the daemon.
+//! sends `Hello`, creates a terminal, attaches it, writes input, and receives
+//! chunked terminal output from the daemon.
 //!
 //! No real sockets are involved. The client side manually drives a
 //! `NoiseInitiator` against `run_connection_with_handshake` running on the
@@ -22,7 +22,7 @@ use cli_pocket_daemon_core::session::SessionManager;
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Hello, ServerInfo};
-use cli_pocket_proto::{ClientId, StreamId, TerminalCreateParams, PROTOCOL_VERSION};
+use cli_pocket_proto::{ClientId, StreamId, TerminalCreateParams, TerminalId, PROTOCOL_VERSION};
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
 use parking_lot::Mutex;
 use tempfile::TempDir;
@@ -150,44 +150,20 @@ async fn paired_client_creates_terminal_end_to_end() {
         .await
         .expect("send TerminalCreate");
 
-    // ---- Expect TerminalCreateOk (the snapshot Output may follow but is optional). ----
+    // ---- Expect TerminalCreateOk. ----
     let create_ok = recv_frame(&mut client_transport, &mut session)
         .await
         .expect("recv TerminalCreateOk");
-    let (terminal_id, stream_id) = match &create_ok.body {
+    let terminal_id = match &create_ok.body {
         FrameBody::TerminalCreateOk {
             request_id: rid,
-            terminal,
-            stream,
+            info,
         } => {
             assert_eq!(*rid, request_id, "request_id should match");
-            (*terminal, *stream)
+            info.terminal
         }
         other => panic!("expected TerminalCreateOk, got {other:?}"),
     };
-
-    // ---- Drain any follow-up snapshot Output frame, if produced quickly. ----
-    // The daemon sends an initial Output with the terminal's snapshot only when
-    // it is non-empty; on a freshly-spawned PTY the snapshot may legitimately be
-    // empty, so we tolerate either outcome via a short timeout.
-    if let Ok(Ok(extra)) = timeout(
-        Duration::from_millis(200),
-        recv_frame_inner(&mut client_transport, &mut session),
-    )
-    .await
-    {
-        if let FrameBody::Output {
-            stream: s,
-            bytes: _,
-            seq: _,
-        } = extra.body
-        {
-            assert_eq!(
-                s, stream_id,
-                "Output.stream should match the created stream"
-            );
-        }
-    }
 
     // ---- Sanity: SessionManager now owns one terminal. ----
     let list = session_mgr.list();
@@ -254,14 +230,16 @@ async fn paired_client_receives_live_output_after_input() {
         .await
         .expect("connect paired client");
 
-    let stream_id = create_terminal(
+    let terminal_id = create_terminal(
         &mut client_transport,
         &mut session,
         live_output_terminal_cmd(),
     )
     .await
     .expect("create terminal");
-    drain_optional_output(&mut client_transport, &mut session).await;
+    let stream_id = attach_terminal(&mut client_transport, &mut session, terminal_id)
+        .await
+        .expect("attach terminal");
 
     let input = live_output_input();
     let expected = b"cli-pocket-live-output";
@@ -279,6 +257,135 @@ async fn paired_client_receives_live_output_after_input() {
     recv_output_containing(&mut client_transport, &mut session, stream_id, expected)
         .await
         .expect("recv live output");
+
+    daemon_task.abort();
+    let _ = daemon_task.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paired_client_pages_history() {
+    let dir = TempDir::new().expect("tempdir");
+    let id_path = dir.path().join("identity.json");
+    let clients_path = dir.path().join("clients.json");
+    let revoked_path = dir.path().join("revoked.json");
+
+    let daemon_id = load_or_create(&id_path).expect("load_or_create daemon identity");
+    let client_keypair = KeyPair::generate().expect("client keypair");
+    let client_pub = client_keypair.public;
+
+    let db = Arc::new(
+        ClientDb::open(&clients_path, &revoked_path)
+            .await
+            .expect("ClientDb::open"),
+    );
+    db.add(ClientRecord {
+        client_id: ClientId(Uuid::from_bytes([0x89; 16])),
+        public_key: client_pub,
+        paired_at: 0,
+    })
+    .await
+    .expect("add client record");
+
+    let deps = ConnectionDeps {
+        session_mgr: Arc::new(SessionManager::new(4)),
+        client_db: db,
+        server_info: ServerInfo {
+            server_version: "test".to_string(),
+            server_label: None,
+        },
+        config: Arc::new(Mutex::new(cli_pocket_daemon_core::DaemonConfig::default())),
+    };
+    let InMemoryTransportPair {
+        a: daemon_transport,
+        b: client_transport,
+    } = InMemoryTransportPair::new(16);
+    let daemon_keypair = daemon_id.keypair.clone();
+    let daemon_task = tokio::spawn(async move {
+        run_connection_with_handshake(
+            daemon_transport,
+            &daemon_keypair,
+            HandshakeKind::Direct { auto_pair: false },
+            deps,
+        )
+        .await
+    });
+
+    let mut client_transport = client_transport;
+    let mut session = connect_paired_client(&mut client_transport, &client_keypair)
+        .await
+        .expect("connect paired client");
+
+    let terminal_id = create_terminal(
+        &mut client_transport,
+        &mut session,
+        live_output_terminal_cmd(),
+    )
+    .await
+    .expect("create terminal");
+    let stream_id = attach_terminal(&mut client_transport, &mut session, terminal_id)
+        .await
+        .expect("attach terminal");
+
+    send_frame(
+        &mut client_transport,
+        &mut session,
+        &Frame::body(FrameBody::Input {
+            stream: stream_id,
+            bytes: live_output_input().into(),
+        }),
+    )
+    .await
+    .expect("send input");
+
+    recv_output_containing(
+        &mut client_transport,
+        &mut session,
+        stream_id,
+        b"cli-pocket-live-output",
+    )
+    .await
+    .expect("recv live output");
+
+    send_frame(
+        &mut client_transport,
+        &mut session,
+        &Frame::body(FrameBody::HistoryRequest {
+            request_id: 3,
+            terminal: terminal_id,
+            before: None,
+            max_bytes: 8,
+        }),
+    )
+    .await
+    .expect("send history request");
+
+    let mut history = Vec::new();
+    loop {
+        let frame = recv_frame(&mut client_transport, &mut session)
+            .await
+            .expect("recv history chunk");
+        match frame.body {
+            FrameBody::HistoryChunk {
+                request_id,
+                terminal,
+                start_seq,
+                end_seq,
+                bytes,
+                last,
+            } => {
+                assert_eq!(request_id, 3);
+                assert_eq!(terminal, terminal_id);
+                assert_eq!(end_seq.0.saturating_sub(start_seq.0), bytes.len() as u64);
+                history.extend_from_slice(bytes.as_ref());
+                if last {
+                    break;
+                }
+            }
+            other => panic!("expected HistoryChunk, got {other:?}"),
+        }
+    }
+
+    assert_eq!(history, expected_history_tail());
 
     daemon_task.abort();
     let _ = daemon_task.await;
@@ -344,7 +451,7 @@ async fn create_terminal(
     client_transport: &mut InMemoryTransport,
     session: &mut NoiseSession,
     cmd: Vec<String>,
-) -> Result<StreamId, String> {
+) -> Result<TerminalId, String> {
     let create = Frame::body(FrameBody::TerminalCreate {
         request_id: 1,
         params: TerminalCreateParams {
@@ -359,20 +466,64 @@ async fn create_terminal(
 
     let create_ok = recv_frame(client_transport, session).await?;
     match create_ok.body {
-        FrameBody::TerminalCreateOk { stream, .. } => Ok(stream),
+        FrameBody::TerminalCreateOk { info, .. } => Ok(info.terminal),
         other => Err(format!("expected TerminalCreateOk, got {other:?}")),
     }
 }
 
-async fn drain_optional_output(
+async fn attach_terminal(
     client_transport: &mut InMemoryTransport,
     session: &mut NoiseSession,
-) {
-    let _ = timeout(
-        Duration::from_millis(200),
-        recv_frame_inner(client_transport, session),
-    )
-    .await;
+    terminal_id: TerminalId,
+) -> Result<StreamId, String> {
+    let attach = Frame::body(FrameBody::TerminalAttach {
+        request_id: 2,
+        terminal: terminal_id,
+    });
+    send_frame(client_transport, session, &attach).await?;
+
+    let attach_ok = recv_frame(client_transport, session).await?;
+    let (stream_id, snapshot_len) = match attach_ok.body {
+        FrameBody::TerminalAttachOk {
+            request_id,
+            baseline,
+            stream,
+            ..
+        } => {
+            if request_id != 2 {
+                return Err(format!("unexpected attach request id {request_id}"));
+            }
+            (
+                stream,
+                usize::try_from(baseline.byte_len).unwrap_or(usize::MAX),
+            )
+        }
+        other => return Err(format!("expected TerminalAttachOk, got {other:?}")),
+    };
+
+    let mut received = 0usize;
+    while received < snapshot_len {
+        let frame = recv_frame(client_transport, session).await?;
+        match frame.body {
+            FrameBody::TerminalSnapshotChunk {
+                stream,
+                bytes,
+                last,
+                ..
+            } => {
+                if stream != stream_id {
+                    return Err(format!("snapshot chunk for unexpected stream {stream:?}"));
+                }
+                received = received.saturating_add(bytes.len());
+                if last {
+                    break;
+                }
+            }
+            other => return Err(format!("expected TerminalSnapshotChunk, got {other:?}")),
+        }
+    }
+
+    Ok(stream_id)
 }
 
 async fn recv_output_containing(
@@ -460,6 +611,11 @@ fn live_output_input() -> Vec<u8> {
     b"cli-pocket-live-output\n".to_vec()
 }
 
+#[cfg(unix)]
+fn expected_history_tail() -> Vec<u8> {
+    b"output\n".to_vec()
+}
+
 #[cfg(windows)]
 fn live_output_terminal_cmd() -> Vec<String> {
     vec![
@@ -474,4 +630,9 @@ fn live_output_terminal_cmd() -> Vec<String> {
 #[cfg(windows)]
 fn live_output_input() -> Vec<u8> {
     b"cli-pocket-live-output\r\n".to_vec()
+}
+
+#[cfg(windows)]
+fn expected_history_tail() -> Vec<u8> {
+    b"output\r\n".to_vec()
 }

@@ -41,9 +41,18 @@ function makeActor(events: unknown[]) {
 							label: null,
 							attached_clients: 1,
 						},
+						start_seq: 0,
+						end_seq: 0,
+						render_prefix_b64: "",
 						snapshot_bytes_b64: "",
 					}) as TerminalSnapshotRecord,
 			),
+			readHistory: vi.fn(async () => ({
+				terminal_id: "t1",
+				start_seq: 0,
+				end_seq: 0,
+				bytes_b64: "",
+			})),
 			createTerminal: vi.fn(
 				async (): Promise<TerminalInfoRecord | null> => null,
 			),

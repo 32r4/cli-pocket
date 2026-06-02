@@ -66,7 +66,11 @@ interface ControllerDeps {
 	workspaceState: WorkspaceStore;
 	onInlineError: (message: string | null) => void;
 	onConnectionReset: () => void;
-	onTerminalOutput: (terminalId: string, chunk: string) => void;
+	onTerminalOutput: (
+		terminalId: string,
+		chunk: string,
+		streamSeq: number,
+	) => void;
 	onTerminalRemoved: (terminalId: string) => void;
 }
 
@@ -331,8 +335,16 @@ export class ConnectionController {
 				"bytes_b64" in event && typeof event.bytes_b64 === "string"
 					? event.bytes_b64
 					: null;
-			if (terminalId != null && bytesB64 != null) {
-				this.deps.onTerminalOutput(terminalId, decodeBase64Bytes(bytesB64));
+			const streamSeq =
+				"stream_seq" in event && typeof event.stream_seq === "number"
+					? event.stream_seq
+					: null;
+			if (terminalId != null && bytesB64 != null && streamSeq != null) {
+				this.deps.onTerminalOutput(
+					terminalId,
+					decodeBase64Bytes(bytesB64),
+					streamSeq,
+				);
 			}
 			return;
 		}

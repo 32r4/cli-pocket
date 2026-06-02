@@ -104,6 +104,10 @@ fn arb_snapshot() -> impl Strategy<Value = Snapshot> {
         )
 }
 
+fn arb_terminal_baseline() -> impl Strategy<Value = TerminalBaseline> {
+    arb_snapshot().prop_map(|snapshot| TerminalBaseline::from(&snapshot))
+}
+
 fn arb_hello() -> impl Strategy<Value = Hello> {
     (
         any::<u32>(),
@@ -157,40 +161,30 @@ fn arb_connection_frame_body() -> impl Strategy<Value = FrameBody> {
 
 fn arb_terminal_frame_body() -> impl Strategy<Value = FrameBody> {
     prop_oneof![
-        (any::<u32>(), arb_uuid(), any::<u32>()).prop_map(|(request_id, terminal, stream)| {
-            FrameBody::TerminalCreateOk {
-                request_id,
-                terminal: TerminalId(terminal),
-                stream: StreamId(stream),
-            }
-        }),
+        (any::<u32>(), arb_terminal_info())
+            .prop_map(|(request_id, info)| FrameBody::TerminalCreateOk { request_id, info }),
         any::<u32>().prop_map(|request_id| FrameBody::TerminalCreateErr {
             request_id,
             error: ProtocolError::UnknownTerminal,
         }),
-        (any::<u32>(), arb_uuid(), prop::option::of(any::<u64>())).prop_map(
-            |(request_id, terminal, since)| FrameBody::TerminalAttach {
-                request_id,
-                terminal: TerminalId(terminal),
-                since: since.map(StreamSeq),
-            },
-        ),
+        (any::<u32>(), arb_uuid()).prop_map(|(request_id, terminal)| FrameBody::TerminalAttach {
+            request_id,
+            terminal: TerminalId(terminal),
+        }),
         (
             any::<u32>(),
-            arb_snapshot(),
-            any::<u64>(),
+            arb_terminal_baseline(),
             any::<u32>(),
-            any::<u32>(),
+            any::<u32>()
         )
-            .prop_map(|(request_id, snapshot, head_seq, stream, initial_window)| {
+            .prop_map(|(request_id, baseline, stream, initial_window)| {
                 FrameBody::TerminalAttachOk {
                     request_id,
-                    snapshot,
-                    head_seq: StreamSeq(head_seq),
+                    baseline,
                     stream: StreamId(stream),
                     initial_window,
                 }
-            }),
+            },),
         any::<u32>().prop_map(|request_id| FrameBody::TerminalAttachErr {
             request_id,
             error: ProtocolError::Unauthorized,
@@ -227,9 +221,61 @@ fn arb_data_frame_body() -> impl Strategy<Value = FrameBody> {
                 bytes,
             }
         }),
+        (
+            any::<u32>(),
+            any::<u64>(),
+            any::<u32>(),
+            arb_bytes(256),
+            any::<bool>()
+        )
+            .prop_map(|(stream, seq, offset, bytes, last)| {
+                FrameBody::TerminalSnapshotChunk {
+                    stream: StreamId(stream),
+                    seq: StreamSeq(seq),
+                    offset,
+                    bytes,
+                    last,
+                }
+            }),
         (any::<u32>(), arb_bytes(256)).prop_map(|(stream, bytes)| FrameBody::Input {
             stream: StreamId(stream),
             bytes,
+        }),
+        (
+            any::<u32>(),
+            arb_uuid(),
+            prop::option::of(any::<u64>()),
+            any::<u32>(),
+        )
+            .prop_map(|(request_id, terminal, before, max_bytes)| {
+                FrameBody::HistoryRequest {
+                    request_id,
+                    terminal: TerminalId(terminal),
+                    before: before.map(StreamSeq),
+                    max_bytes,
+                }
+            }),
+        (
+            any::<u32>(),
+            arb_uuid(),
+            any::<u64>(),
+            any::<u64>(),
+            arb_bytes(256),
+            any::<bool>(),
+        )
+            .prop_map(|(request_id, terminal, start_seq, end_seq, bytes, last)| {
+                FrameBody::HistoryChunk {
+                    request_id,
+                    terminal: TerminalId(terminal),
+                    start_seq: StreamSeq(start_seq),
+                    end_seq: StreamSeq(end_seq),
+                    bytes,
+                    last,
+                }
+            },),
+        any::<u32>().prop_map(|request_id| FrameBody::HistoryErr {
+            request_id,
+            error: ProtocolError::ResourceExhausted,
         }),
     ]
 }

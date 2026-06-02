@@ -1,6 +1,6 @@
 use crate::error::{ByeReason, ProtocolError};
 use crate::hello::{Hello, HelloOk};
-use crate::snapshot::Snapshot;
+use crate::snapshot::TerminalBaseline;
 use crate::terminal::ServerConfig;
 use crate::terminal::{
     ExitInfo, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
@@ -35,8 +35,7 @@ pub enum FrameBody {
     },
     TerminalCreateOk {
         request_id: u32,
-        terminal: TerminalId,
-        stream: StreamId,
+        info: TerminalInfo,
     },
     TerminalCreateErr {
         request_id: u32,
@@ -46,12 +45,10 @@ pub enum FrameBody {
     TerminalAttach {
         request_id: u32,
         terminal: TerminalId,
-        since: Option<StreamSeq>,
     },
     TerminalAttachOk {
         request_id: u32,
-        snapshot: Snapshot,
-        head_seq: StreamSeq,
+        baseline: TerminalBaseline,
         stream: StreamId,
         initial_window: u32,
     },
@@ -128,9 +125,35 @@ pub enum FrameBody {
         seq: StreamSeq,
         bytes: ByteBuf,
     },
+    TerminalSnapshotChunk {
+        stream: StreamId,
+        seq: StreamSeq,
+        offset: u32,
+        bytes: ByteBuf,
+        last: bool,
+    },
     Input {
         stream: StreamId,
         bytes: ByteBuf,
+    },
+
+    HistoryRequest {
+        request_id: u32,
+        terminal: TerminalId,
+        before: Option<StreamSeq>,
+        max_bytes: u32,
+    },
+    HistoryChunk {
+        request_id: u32,
+        terminal: TerminalId,
+        start_seq: StreamSeq,
+        end_seq: StreamSeq,
+        bytes: ByteBuf,
+        last: bool,
+    },
+    HistoryErr {
+        request_id: u32,
+        error: ProtocolError,
     },
     Resize {
         stream: StreamId,
