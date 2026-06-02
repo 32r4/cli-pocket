@@ -271,6 +271,7 @@ impl DaemonFixture {
                 clients_path: dir.path().join("clients.json"),
                 revoked_path: dir.path().join("revoked.json"),
             },
+            config_path: None,
             relay: RelayConfig {
                 base_url: format!("ws://{relay_addr}"),
                 psk_hex: String::new(),

@@ -13,6 +13,7 @@ use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Hello, ServerInfo};
 use cli_pocket_proto::{ClientId, PROTOCOL_VERSION};
 use cli_pocket_transport::{TokioWsTransport, Transport};
+use parking_lot::Mutex;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -167,7 +168,7 @@ impl ListenerFixture {
         let accept_deps = AcceptDeps {
             identity: Arc::clone(&identity),
             relay_psk: None,
-            config: DaemonConfig::default(),
+            config: Arc::new(Mutex::new(DaemonConfig::default())),
             session_mgr,
             client_db: Arc::clone(&client_db),
             server_info: ServerInfo {

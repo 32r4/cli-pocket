@@ -3,7 +3,7 @@ use bytes::Bytes;
 use cli_pocket_client_core::{
     ClientIdentity, KeyValueStore, SessionBuilder, SessionConfig, SessionEndpoint, TerminalSnapshot,
 };
-use cli_pocket_proto::{ResumeToken, TerminalCreateParams, TerminalId, TerminalInfo};
+use cli_pocket_proto::{ResumeToken, ServerConfig, TerminalCreateParams, TerminalId, TerminalInfo};
 use cli_pocket_tauri_bindings::{
     FileKvStore, OsRandom, SessionHandle, TokioClock, TokioWsTransport,
 };
@@ -53,8 +53,6 @@ struct CreateTerminalArgs {
     shell: Option<String>,
     #[serde(default)]
     env: std::collections::BTreeMap<String, String>,
-    #[serde(default, alias = "scrollbackBytes")]
-    scrollback_bytes: Option<u32>,
 }
 
 pub async fn connect(
@@ -112,7 +110,6 @@ pub async fn create_terminal(
                 params.cmd
             },
             env: params.env.into_iter().collect(),
-            scrollback_bytes: params.scrollback_bytes,
         })
         .await
 }
@@ -135,6 +132,24 @@ pub async fn list_terminals(session: SessionHandle) -> Result<Vec<serde_json::Va
             .map(serialize_terminal_info)
             .collect::<Vec<_>>()
     })
+}
+
+pub async fn get_server_config(session: SessionHandle) -> Result<serde_json::Value, String> {
+    session
+        .get_server_config()
+        .await
+        .map(|config| serialize_server_config(&config))
+}
+
+pub async fn set_server_config(
+    session: SessionHandle,
+    config: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let config: ServerConfig = serde_json::from_value(config).map_err(|error| error.to_string())?;
+    session
+        .set_server_config(config)
+        .await
+        .map(|config| serialize_server_config(&config))
 }
 
 pub async fn send_input(
@@ -297,6 +312,12 @@ fn serialize_terminal_snapshot(snapshot: &TerminalSnapshot) -> serde_json::Value
     serde_json::json!({
         "info": serialize_terminal_info(&snapshot.info),
         "snapshot_bytes_b64": base64::engine::general_purpose::STANDARD.encode(&snapshot.bytes),
+    })
+}
+
+fn serialize_server_config(config: &ServerConfig) -> serde_json::Value {
+    serde_json::json!({
+        "scrollback_bytes": config.scrollback_bytes,
     })
 }
 

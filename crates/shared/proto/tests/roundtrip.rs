@@ -27,18 +27,14 @@ fn arb_terminal_create_params() -> impl Strategy<Value = TerminalCreateParams> {
         prop::option::of(arb_string(32)),
         prop::collection::vec(arb_string(8), 0..=4),
         prop::collection::vec((arb_string(8), arb_string(16)), 0..=4),
-        prop::option::of(0u32..=1_000_000),
     )
-        .prop_map(
-            |(cols, rows, cwd, cmd, env, scrollback_bytes)| TerminalCreateParams {
-                cols,
-                rows,
-                cwd,
-                cmd,
-                env,
-                scrollback_bytes,
-            },
-        )
+        .prop_map(|(cols, rows, cwd, cmd, env)| TerminalCreateParams {
+            cols,
+            rows,
+            cwd,
+            cmd,
+            env,
+        })
 }
 
 fn arb_exit_info() -> impl Strategy<Value = ExitInfo> {

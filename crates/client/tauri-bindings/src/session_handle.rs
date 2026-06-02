@@ -7,7 +7,7 @@ use cli_pocket_client_core::session::SessionSpawner;
 use cli_pocket_client_core::{
     ClientEvent, ClientSession, Clock, KeyValueStore, Rng, TerminalSnapshot, Transport,
 };
-use cli_pocket_proto::{TerminalCreateParams, TerminalId, TerminalInfo};
+use cli_pocket_proto::{ServerConfig, TerminalCreateParams, TerminalId, TerminalInfo};
 use futures_channel::mpsc as futures_mpsc;
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
@@ -40,6 +40,13 @@ enum SessionCommand {
     },
     ListTerminals {
         reply: oneshot::Sender<Result<Vec<TerminalInfo>, String>>,
+    },
+    GetServerConfig {
+        reply: oneshot::Sender<Result<ServerConfig, String>>,
+    },
+    SetServerConfig {
+        config: ServerConfig,
+        reply: oneshot::Sender<Result<ServerConfig, String>>,
     },
     SendInput {
         terminal_id: TerminalId,
@@ -176,6 +183,33 @@ impl SessionHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
             .send(SessionCommand::ListTerminals { reply: reply_tx })
+            .await
+            .map_err(|_| "actor closed".to_owned())?;
+
+        reply_rx
+            .await
+            .map_err(|_| "actor dropped reply".to_owned())?
+    }
+
+    pub async fn get_server_config(&self) -> Result<ServerConfig, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SessionCommand::GetServerConfig { reply: reply_tx })
+            .await
+            .map_err(|_| "actor closed".to_owned())?;
+
+        reply_rx
+            .await
+            .map_err(|_| "actor dropped reply".to_owned())?
+    }
+
+    pub async fn set_server_config(&self, config: ServerConfig) -> Result<ServerConfig, String> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.cmd_tx
+            .send(SessionCommand::SetServerConfig {
+                config,
+                reply: reply_tx,
+            })
             .await
             .map_err(|_| "actor closed".to_owned())?;
 
@@ -359,6 +393,26 @@ async fn handle_command(
             let result = match &state.session {
                 Some(session) => session
                     .list_terminals()
+                    .await
+                    .map_err(|error| error.to_string()),
+                None => Err("not connected".to_owned()),
+            };
+            let _ = reply.send(result);
+        }
+        SessionCommand::GetServerConfig { reply } => {
+            let result = match &state.session {
+                Some(session) => session
+                    .get_server_config()
+                    .await
+                    .map_err(|error| error.to_string()),
+                None => Err("not connected".to_owned()),
+            };
+            let _ = reply.send(result);
+        }
+        SessionCommand::SetServerConfig { config, reply } => {
+            let result = match &state.session {
+                Some(session) => session
+                    .set_server_config(config)
                     .await
                     .map_err(|error| error.to_string()),
                 None => Err("not connected".to_owned()),

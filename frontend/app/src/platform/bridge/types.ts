@@ -40,6 +40,10 @@ export interface TerminalSnapshotRecord {
 	snapshot_bytes_b64: string;
 }
 
+export interface ServerConfigRecord {
+	scrollback_bytes: number;
+}
+
 export interface CreateTerminalParams {
 	cols: number;
 	rows: number;
@@ -47,7 +51,6 @@ export interface CreateTerminalParams {
 	cmd?: string[];
 	shell?: string;
 	env?: Record<string, string>;
-	scrollbackBytes?: number;
 }
 
 export interface SessionActor {
@@ -57,6 +60,8 @@ export interface SessionActor {
 	createTerminal(
 		params: CreateTerminalParams,
 	): Promise<TerminalInfoRecord | null>;
+	getServerConfig(): Promise<ServerConfigRecord>;
+	setServerConfig(config: ServerConfigRecord): Promise<ServerConfigRecord>;
 	sendInput(terminalId: string, bytes: Uint8Array): Promise<void>;
 	resize(terminalId: string, cols: number, rows: number): Promise<void>;
 	kill(terminalId: string, signal: string): Promise<void>;

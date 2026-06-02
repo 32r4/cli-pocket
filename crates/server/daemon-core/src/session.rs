@@ -73,7 +73,11 @@ impl SessionManager {
     ///
     /// Returns `TerminalInfo` on success. Fails if the terminal limit is reached
     /// or if the PTY subsystem cannot spawn the terminal.
-    pub async fn create(&self, params: TerminalCreateParams) -> crate::DaemonResult<TerminalInfo> {
+    pub async fn create(
+        &self,
+        params: TerminalCreateParams,
+        scrollback_bytes: usize,
+    ) -> crate::DaemonResult<TerminalInfo> {
         {
             let g = self.inner.lock();
             if g.terminals.len() >= g.max_terminals {
@@ -84,7 +88,8 @@ impl SessionManager {
             }
         }
 
-        let terminal = Terminal::spawn(&params).map_err(crate::DaemonError::Pty)?;
+        let terminal =
+            Terminal::spawn(&params, scrollback_bytes).map_err(crate::DaemonError::Pty)?;
         let id = terminal.id();
         let (cols, rows) = terminal.dims();
         let created_at_unix_ms = now_unix_ms();

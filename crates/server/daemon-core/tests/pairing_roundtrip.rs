@@ -24,6 +24,7 @@ use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Hello, ServerInfo};
 use cli_pocket_proto::{ClientId, StreamId, TerminalCreateParams, PROTOCOL_VERSION};
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
+use parking_lot::Mutex;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -69,7 +70,7 @@ async fn paired_client_creates_terminal_end_to_end() {
         session_mgr: Arc::clone(&session_mgr),
         client_db: Arc::clone(&db),
         server_info,
-        scrollback_bytes: 4 * 1024 * 1024,
+        config: Arc::new(Mutex::new(cli_pocket_daemon_core::DaemonConfig::default())),
     };
 
     // ---- InMemoryTransport pair: `a` -> daemon, `b` -> manual client. ----
@@ -143,7 +144,6 @@ async fn paired_client_creates_terminal_end_to_end() {
             cwd: None,
             cmd: terminal_cmd(),
             env: Vec::new(),
-            scrollback_bytes: None,
         },
     });
     send_frame(&mut client_transport, &mut session, &create)
@@ -232,7 +232,7 @@ async fn paired_client_receives_live_output_after_input() {
             server_version: "test".to_string(),
             server_label: None,
         },
-        scrollback_bytes: 4 * 1024 * 1024,
+        config: Arc::new(Mutex::new(cli_pocket_daemon_core::DaemonConfig::default())),
     };
     let InMemoryTransportPair {
         a: daemon_transport,
@@ -353,7 +353,6 @@ async fn create_terminal(
             cwd: None,
             cmd,
             env: Vec::new(),
-            scrollback_bytes: None,
         },
     });
     send_frame(client_transport, session, &create).await?;

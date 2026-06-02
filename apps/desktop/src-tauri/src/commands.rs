@@ -35,6 +35,21 @@ pub async fn cli_pocket_list_terminals(
 }
 
 #[tauri::command]
+pub async fn cli_pocket_get_server_config(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    shared_commands::get_server_config(state.session()).await
+}
+
+#[tauri::command]
+pub async fn cli_pocket_set_server_config(
+    state: State<'_, AppState>,
+    config: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    shared_commands::set_server_config(state.session(), config).await
+}
+
+#[tauri::command]
 pub async fn cli_pocket_send_input(
     state: State<'_, AppState>,
     terminal_id: String,

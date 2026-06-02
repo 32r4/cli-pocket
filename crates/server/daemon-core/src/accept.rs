@@ -3,6 +3,7 @@ use std::sync::Arc;
 use cli_pocket_crypto::KeyPair;
 use cli_pocket_proto::ServerInfo;
 use cli_pocket_transport::Transport;
+use parking_lot::Mutex;
 
 use crate::client_db::ClientDb;
 use crate::config::DaemonConfig;
@@ -25,7 +26,7 @@ pub enum AcceptedTransportKind {
 pub struct AcceptDeps {
     pub identity: Arc<KeyPair>,
     pub relay_psk: Option<Arc<[u8; 32]>>,
-    pub config: DaemonConfig,
+    pub config: Arc<Mutex<DaemonConfig>>,
     pub session_mgr: Arc<SessionManager>,
     pub client_db: Arc<ClientDb>,
     pub server_info: ServerInfo,
@@ -37,7 +38,7 @@ impl AcceptDeps {
             session_mgr: Arc::clone(&self.session_mgr),
             client_db: Arc::clone(&self.client_db),
             server_info: self.server_info.clone(),
-            scrollback_bytes: self.config.limits.scrollback_bytes,
+            config: Arc::clone(&self.config),
         }
     }
 }

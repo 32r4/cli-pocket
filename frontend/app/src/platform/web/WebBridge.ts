@@ -10,6 +10,7 @@ import type {
 	CreateTerminalParams,
 	PlatformServices,
 	RegistryAdapter,
+	ServerConfigRecord,
 	SessionActor,
 	TerminalInfoRecord,
 	TerminalSnapshotRecord,
@@ -108,12 +109,23 @@ class WebSessionActor implements SessionActor {
 				cwd: params.cwd ?? null,
 				cmd: params.cmd ?? [],
 				env: Object.entries(params.env ?? {}),
-				scrollbackBytes: params.scrollbackBytes ?? null,
 			}),
 		);
 		const after = await this.loadTerminals();
 		this.queue.push(terminalListEvent(after));
 		return findCreatedTerminal(before, after);
+	}
+
+	async getServerConfig(): Promise<ServerConfigRecord> {
+		return (await this.client.get_server_config()) as ServerConfigRecord;
+	}
+
+	async setServerConfig(
+		config: ServerConfigRecord,
+	): Promise<ServerConfigRecord> {
+		return (await this.client.set_server_config(
+			JSON.stringify(config),
+		)) as ServerConfigRecord;
 	}
 
 	async sendInput(terminalId: string, bytes: Uint8Array) {

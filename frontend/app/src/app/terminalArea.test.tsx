@@ -8,8 +8,6 @@ import type {
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { openTerminalSnapshot, TerminalArea } from "./terminalArea";
 
-const DEFAULT_SCROLLBACK_BYTES = 4 * 1024 * 1024;
-
 function makeSession(openTerminal: SessionActor["openTerminal"]): SessionActor {
 	return {
 		events: () => ({
@@ -18,6 +16,8 @@ function makeSession(openTerminal: SessionActor["openTerminal"]): SessionActor {
 		refreshTerminals: vi.fn(async () => undefined),
 		openTerminal,
 		createTerminal: vi.fn(async () => null),
+		getServerConfig: vi.fn(async () => ({ scrollback_bytes: 4 * 1024 * 1024 })),
+		setServerConfig: vi.fn(async (config) => config),
 		sendInput: vi.fn(async () => undefined),
 		resize: vi.fn(async () => undefined),
 		kill: vi.fn(async () => undefined),
@@ -160,7 +160,6 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
-				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -234,7 +233,6 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
-				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -253,7 +251,6 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
-				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -263,7 +260,6 @@ describe("TerminalArea", () => {
 			expect(session.createTerminal).toHaveBeenCalledWith({
 				cols: 120,
 				rows: 36,
-				scrollbackBytes: DEFAULT_SCROLLBACK_BYTES,
 			});
 			expect(workspaceState.getState().activeSessionId).toBe("t2");
 			expect(session.openTerminal).toHaveBeenCalledWith("t2");
@@ -318,7 +314,6 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
-				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -332,7 +327,6 @@ describe("TerminalArea", () => {
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
 				controller={controller as never}
-				scrollbackBytes={DEFAULT_SCROLLBACK_BYTES}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,

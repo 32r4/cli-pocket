@@ -26,6 +26,7 @@ use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Hello, ServerInfo};
 use cli_pocket_proto::{ByeReason, ClientId, TerminalCreateParams, PROTOCOL_VERSION};
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
+use parking_lot::Mutex;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -71,7 +72,7 @@ async fn revocation_drops_live_session() {
         session_mgr: Arc::clone(&session_mgr),
         client_db: Arc::clone(&db),
         server_info,
-        scrollback_bytes: 4 * 1024 * 1024,
+        config: Arc::new(Mutex::new(cli_pocket_daemon_core::DaemonConfig::default())),
     };
 
     // ---- InMemoryTransport pair: `a` -> daemon, `b` -> manual client. ----
@@ -145,7 +146,6 @@ async fn revocation_drops_live_session() {
             cwd: None,
             cmd: terminal_cmd(),
             env: Vec::new(),
-            scrollback_bytes: None,
         },
     });
     send_frame(&mut client_transport, &mut session, &create)

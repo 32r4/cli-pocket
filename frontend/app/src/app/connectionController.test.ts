@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
 	ConnectConfig,
 	PlatformServices,
+	ServerConfigRecord,
 	SessionActor,
 	TerminalSnapshotRecord,
 } from "@/platform/bridge/types";
@@ -42,6 +43,13 @@ function makeActor(events: unknown[]) {
 					}) as TerminalSnapshotRecord,
 			),
 			createTerminal: vi.fn(async () => null),
+			getServerConfig: vi.fn(
+				async () =>
+					({
+						scrollback_bytes: 4 * 1024 * 1024,
+					}) satisfies ServerConfigRecord,
+			),
+			setServerConfig: vi.fn(async (config: ServerConfigRecord) => config),
 			sendInput: vi.fn(async () => undefined),
 			resize: vi.fn(async () => undefined),
 			kill: vi.fn(async () => undefined),

@@ -6,6 +6,11 @@ port = 17842
 base_url = "wss://relay.cli-pocket.32r4.asia"
 psk_hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 
+[relay.retry]
+initial_ms = 500
+max_ms = 30000
+mul_x10 = 20
+
 [app]
 base_url = "http://127.0.0.1:5173"
 

@@ -4,11 +4,11 @@ import { Group, Input, NumberField } from "react-aria-components";
 import type { ThemeName } from "@/state/ui/uiState";
 
 interface HostSettingsSectionProps {
-	hostAvailable: boolean;
-	scrollbackBytes: number;
+	scrollbackBytes: number | null;
 	onScrollbackBytesChange: (scrollbackBytes: number) => void;
 	theme: ThemeName;
 	onCopyPairUrl: () => void;
+	showPairControls: boolean;
 	onRestartLocalDaemon: () => void;
 	onThemeChange: (theme: ThemeName) => void;
 }
@@ -33,11 +33,11 @@ const MIN_SCROLLBACK_MIB = 1;
 const MAX_SCROLLBACK_MIB = 64;
 
 export function HostSettingsSection({
-	hostAvailable,
 	scrollbackBytes,
 	onScrollbackBytesChange,
 	theme,
 	onCopyPairUrl,
+	showPairControls,
 	onRestartLocalDaemon,
 	onThemeChange,
 }: HostSettingsSectionProps) {
@@ -70,30 +70,35 @@ export function HostSettingsSection({
 						</button>
 					</div>
 				</SettingsRow>
-				<SettingsRow label="Scrollback">
-					<NumberField
-						aria-label="Scrollback in MiB"
-						value={Math.round(scrollbackBytes / MIB)}
-						minValue={MIN_SCROLLBACK_MIB}
-						maxValue={MAX_SCROLLBACK_MIB}
-						step={1}
-						commitBehavior="snap"
-						formatOptions={{ maximumFractionDigits: 0, useGrouping: false }}
-						isWheelDisabled
-						onChange={(nextScrollbackMiB) => {
-							onScrollbackBytesChange(nextScrollbackMiB * MIB);
-						}}
-					>
-						<Group className="settings-row__scrollback-field">
-							<Input
-								className="settings-row__scrollback-input"
-								inputMode="numeric"
-							/>
-							<span className="settings-row__scrollback-unit">MiB</span>
-						</Group>
-					</NumberField>
-				</SettingsRow>
-				{hostAvailable ? (
+				{scrollbackBytes != null ? (
+					<SettingsRow label="Scrollback">
+						<NumberField
+							aria-label="Scrollback in MiB"
+							value={Math.round(scrollbackBytes / MIB)}
+							minValue={MIN_SCROLLBACK_MIB}
+							maxValue={MAX_SCROLLBACK_MIB}
+							step={1}
+							commitBehavior="snap"
+							formatOptions={{
+								maximumFractionDigits: 0,
+								useGrouping: false,
+							}}
+							isWheelDisabled
+							onChange={(nextScrollbackMiB) => {
+								onScrollbackBytesChange(nextScrollbackMiB * MIB);
+							}}
+						>
+							<Group className="settings-row__scrollback-field">
+								<Input
+									className="settings-row__scrollback-input"
+									inputMode="numeric"
+								/>
+								<span className="settings-row__scrollback-unit">MiB</span>
+							</Group>
+						</NumberField>
+					</SettingsRow>
+				) : null}
+				{showPairControls ? (
 					<SettingsRow label="Pair URL">
 						<button
 							type="button"
@@ -105,7 +110,7 @@ export function HostSettingsSection({
 						</button>
 					</SettingsRow>
 				) : null}
-				{hostAvailable ? (
+				{showPairControls ? (
 					<SettingsRow label="Restart daemon">
 						<button
 							type="button"

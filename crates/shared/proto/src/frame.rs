@@ -1,6 +1,7 @@
 use crate::error::{ByeReason, ProtocolError};
 use crate::hello::{Hello, HelloOk};
 use crate::snapshot::Snapshot;
+use crate::terminal::ServerConfig;
 use crate::terminal::{
     ExitInfo, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
 };
@@ -89,6 +90,31 @@ pub enum FrameBody {
     TerminalListOk {
         request_id: u32,
         terminals: Vec<TerminalInfo>,
+    },
+
+    ServerConfigGet {
+        request_id: u32,
+    },
+    ServerConfigGetOk {
+        request_id: u32,
+        config: ServerConfig,
+    },
+    ServerConfigGetErr {
+        request_id: u32,
+        error: ProtocolError,
+    },
+
+    ServerConfigSet {
+        request_id: u32,
+        config: ServerConfig,
+    },
+    ServerConfigSetOk {
+        request_id: u32,
+        config: ServerConfig,
+    },
+    ServerConfigSetErr {
+        request_id: u32,
+        error: ProtocolError,
     },
 
     TerminalExit {

@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use cli_pocket_proto::ServerInfo;
+use parking_lot::Mutex;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -31,6 +32,7 @@ pub struct Daemon {
     pub client_db: Arc<ClientDb>,
     pub server_info: ServerInfo,
     pub config: DaemonConfig,
+    pub shared_config: Arc<Mutex<DaemonConfig>>,
     listener_handle: Option<JoinHandle<()>>,
     relay_handle: Option<JoinHandle<()>>,
     listener_accept_handle: Option<JoinHandle<()>>,
@@ -55,6 +57,7 @@ impl Daemon {
             server_version: env!("CARGO_PKG_VERSION").to_string(),
             server_label: detect_server_label(),
         };
+        let shared_config = Arc::new(Mutex::new(config.clone()));
 
         Ok(Self {
             identity,
@@ -62,6 +65,7 @@ impl Daemon {
             client_db,
             server_info,
             config,
+            shared_config,
             listener_handle: None,
             relay_handle: None,
             listener_accept_handle: None,
@@ -86,7 +90,7 @@ impl Daemon {
         let accept_deps = AcceptDeps {
             identity,
             relay_psk: relay_psk.clone(),
-            config: self.config.clone(),
+            config: Arc::clone(&self.shared_config),
             session_mgr: Arc::clone(&self.session_mgr),
             client_db: Arc::clone(&self.client_db),
             server_info: self.server_info.clone(),

@@ -2,8 +2,8 @@ use bytes::Bytes;
 use cli_pocket_crypto::{NoiseAnonymousInitiator, NoiseInitiator, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
-    ByeReason, Frame, FrameBody, Hello, ProtocolError, ServerId, StreamId, TerminalCreateParams,
-    TerminalId, TerminalInfo, PROTOCOL_VERSION,
+    ByeReason, Frame, FrameBody, Hello, ProtocolError, ServerConfig, ServerId, StreamId,
+    TerminalCreateParams, TerminalId, TerminalInfo, PROTOCOL_VERSION,
 };
 use futures_channel::{mpsc, oneshot};
 use futures_util::{
@@ -47,7 +47,22 @@ const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
 type SharedReply<T> = Rc<RefCell<Option<oneshot::Sender<ClientResult<T>>>>>;
 type TerminalSnapshotReply = SharedReply<TerminalSnapshot>;
 type TerminalListReply = SharedReply<Vec<TerminalInfo>>;
+type ServerConfigReply = SharedReply<ServerConfig>;
 type UnitReply = SharedReply<()>;
+
+struct PendingServerConfigReplies {
+    reads: HashMap<u32, ServerConfigReply>,
+    writes: HashMap<u32, ServerConfigReply>,
+}
+
+impl PendingServerConfigReplies {
+    fn new() -> Self {
+        Self {
+            reads: HashMap::new(),
+            writes: HashMap::new(),
+        }
+    }
+}
 
 pub trait SessionSpawner {
     fn spawn(&self, fut: LocalBoxFuture<'static, ()>);
@@ -96,6 +111,13 @@ enum SessionCommand {
     },
     ListTerminals {
         reply: TerminalListReply,
+    },
+    GetServerConfig {
+        reply: ServerConfigReply,
+    },
+    SetServerConfig {
+        config: ServerConfig,
+        reply: ServerConfigReply,
     },
     KillTerminal {
         terminal: TerminalId,
@@ -201,6 +223,33 @@ impl ClientSession {
         self.session_cmd_tx
             .clone()
             .send(SessionCommand::ListTerminals {
+                reply: Rc::new(RefCell::new(Some(reply_tx))),
+            })
+            .await
+            .map_err(|_| ClientError::Closed)?;
+
+        reply_rx.await.map_err(|_| ClientError::Closed)?
+    }
+
+    pub async fn get_server_config(&self) -> ClientResult<ServerConfig> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.session_cmd_tx
+            .clone()
+            .send(SessionCommand::GetServerConfig {
+                reply: Rc::new(RefCell::new(Some(reply_tx))),
+            })
+            .await
+            .map_err(|_| ClientError::Closed)?;
+
+        reply_rx.await.map_err(|_| ClientError::Closed)?
+    }
+
+    pub async fn set_server_config(&self, config: ServerConfig) -> ClientResult<ServerConfig> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.session_cmd_tx
+            .clone()
+            .send(SessionCommand::SetServerConfig {
+                config,
                 reply: Rc::new(RefCell::new(Some(reply_tx))),
             })
             .await
@@ -430,6 +479,7 @@ where
     let mut heartbeat = HeartbeatState::new(clock.now_ms());
     let mut runtime = RuntimeState::default();
     let mut pending_lists = HashMap::<u32, TerminalListReply>::new();
+    let mut pending_server_config = PendingServerConfigReplies::new();
     let mut pending_kills = HashMap::<u32, UnitReply>::new();
 
     loop {
@@ -458,6 +508,7 @@ where
                     cmd.clone(),
                     &mut next_request_id,
                     &mut pending_lists,
+                    &mut pending_server_config,
                     &mut pending_kills,
                 );
                 pending_session_cmds.push_front(cmd);
@@ -492,6 +543,7 @@ where
                             cmd.clone(),
                             &mut next_request_id,
                             &mut pending_lists,
+                            &mut pending_server_config,
                             &mut pending_kills,
                         );
                         pending_session_cmds.push_back(cmd);
@@ -661,6 +713,42 @@ where
                             }
                             Action::None
                         }
+                        FrameBody::ServerConfigGetOk { request_id, config } => {
+                            if let Some(reply) = pending_server_config.reads.remove(&request_id) {
+                                if let Some(reply) = reply.borrow_mut().take() {
+                                    let _ = reply.send(Ok(config));
+                                }
+                            }
+                            Action::None
+                        }
+                        FrameBody::ServerConfigGetErr { request_id, error } => {
+                            if let Some(reply) = pending_server_config.reads.remove(&request_id) {
+                                if let Some(reply) = reply.borrow_mut().take() {
+                                    let _ = reply.send(Err(ClientError::Proto(format!(
+                                        "server config get failed: {error}"
+                                    ))));
+                                }
+                            }
+                            Action::None
+                        }
+                        FrameBody::ServerConfigSetOk { request_id, config } => {
+                            if let Some(reply) = pending_server_config.writes.remove(&request_id) {
+                                if let Some(reply) = reply.borrow_mut().take() {
+                                    let _ = reply.send(Ok(config));
+                                }
+                            }
+                            Action::None
+                        }
+                        FrameBody::ServerConfigSetErr { request_id, error } => {
+                            if let Some(reply) = pending_server_config.writes.remove(&request_id) {
+                                if let Some(reply) = reply.borrow_mut().take() {
+                                    let _ = reply.send(Err(ClientError::Proto(format!(
+                                        "server config set failed: {error}"
+                                    ))));
+                                }
+                            }
+                            Action::None
+                        }
                         FrameBody::TerminalKillOk { request_id } => {
                             if let Some(reply) = pending_kills.remove(&request_id) {
                                 if let Some(reply) = reply.borrow_mut().take() {
@@ -819,6 +907,7 @@ fn frame_for_session_command(
     cmd: SessionCommand,
     next_request_id: &mut u32,
     pending_lists: &mut HashMap<u32, TerminalListReply>,
+    pending_server_config: &mut PendingServerConfigReplies,
     pending_kills: &mut HashMap<u32, UnitReply>,
 ) -> Frame {
     match cmd {
@@ -858,6 +947,18 @@ fn frame_for_session_command(
             *next_request_id = next_request_id.saturating_add(1);
             pending_lists.insert(request_id, reply);
             Frame::body(FrameBody::TerminalList { request_id })
+        }
+        SessionCommand::GetServerConfig { reply } => {
+            let request_id = *next_request_id;
+            *next_request_id = next_request_id.saturating_add(1);
+            pending_server_config.reads.insert(request_id, reply);
+            Frame::body(FrameBody::ServerConfigGet { request_id })
+        }
+        SessionCommand::SetServerConfig { config, reply } => {
+            let request_id = *next_request_id;
+            *next_request_id = next_request_id.saturating_add(1);
+            pending_server_config.writes.insert(request_id, reply);
+            Frame::body(FrameBody::ServerConfigSet { request_id, config })
         }
         SessionCommand::KillTerminal { terminal, reply } => {
             let request_id = *next_request_id;

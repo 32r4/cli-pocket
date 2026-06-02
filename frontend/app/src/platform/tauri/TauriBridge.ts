@@ -9,6 +9,7 @@ import type {
 	HostAdapter,
 	PlatformServices,
 	RegistryAdapter,
+	ServerConfigRecord,
 	SessionActor,
 	TerminalInfoRecord,
 	TerminalSnapshotRecord,
@@ -84,6 +85,16 @@ class TauriSessionActor implements SessionActor {
 		const after = await this.loadTerminals();
 		this.eventSource.push(terminalListEvent(after));
 		return findCreatedTerminal(before, after);
+	}
+
+	async getServerConfig() {
+		return await invoke<ServerConfigRecord>("cli_pocket_get_server_config");
+	}
+
+	async setServerConfig(config: ServerConfigRecord) {
+		return await invoke<ServerConfigRecord>("cli_pocket_set_server_config", {
+			config,
+		});
 	}
 
 	async sendInput(terminalId: string, bytes: Uint8Array) {

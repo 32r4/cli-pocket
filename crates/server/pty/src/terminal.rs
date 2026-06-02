@@ -46,7 +46,10 @@ struct TerminalInner {
 }
 
 impl Terminal {
-    pub fn spawn(params: &TerminalCreateParams) -> Result<Self, TerminalError> {
+    pub fn spawn(
+        params: &TerminalCreateParams,
+        scrollback_bytes: usize,
+    ) -> Result<Self, TerminalError> {
         let cols = params.cols.max(1);
         let rows = params.rows.max(1);
         let pty_size = PtySize {
@@ -78,11 +81,7 @@ impl Terminal {
 
         let killer = child.clone_killer();
 
-        let ring = ScrollbackRing::new(
-            cols,
-            rows,
-            params.scrollback_bytes.map(|value| value as usize),
-        )?;
+        let ring = ScrollbackRing::new(cols, rows, Some(scrollback_bytes))?;
         let broadcaster = Arc::new(OutputBroadcaster::new());
         let (exit_tx, exit_rx) = watch::channel(None);
 
@@ -549,7 +548,6 @@ mod tests {
             cwd: None,
             cmd: echo_command(),
             env: Vec::new(),
-            scrollback_bytes: None,
         }
     }
 
@@ -574,7 +572,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn echo_hello_appears_in_snapshot() {
         let params = echo_params();
-        let terminal = Terminal::spawn(&params).expect("terminal should spawn");
+        let terminal = Terminal::spawn(&params, 4 * 1024 * 1024).expect("terminal should spawn");
 
         let _exit = timeout(Duration::from_secs(5), terminal.wait())
             .await
@@ -596,7 +594,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn subscriber_receives_live_output() {
         let params = echo_params();
-        let terminal = Terminal::spawn(&params).expect("terminal should spawn");
+        let terminal = Terminal::spawn(&params, 4 * 1024 * 1024).expect("terminal should spawn");
         let mut stream = terminal.subscribe();
 
         let bytes = timeout(Duration::from_secs(5), async {
@@ -628,9 +626,9 @@ mod tests {
             cwd: None,
             cmd: Vec::new(),
             env: Vec::new(),
-            scrollback_bytes: None,
         };
-        let terminal = Terminal::spawn(&params).expect("default shell should spawn");
+        let terminal =
+            Terminal::spawn(&params, 4 * 1024 * 1024).expect("default shell should spawn");
 
         terminal
             .kill(KillSignal::Term)

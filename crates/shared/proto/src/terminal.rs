@@ -52,7 +52,11 @@ pub struct TerminalCreateParams {
     pub cwd: Option<String>,
     pub cmd: Vec<String>,
     pub env: Vec<(String, String)>,
-    pub scrollback_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerConfig {
+    pub scrollback_bytes: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -19,7 +19,7 @@ use cli_pocket_client_core::{
     ClientEvent, ClientIdentity, ClientResult, ClientSession, KeyValueStore, SessionBuilder,
     SessionConfig, SessionEndpoint, TerminalSnapshot,
 };
-use cli_pocket_proto::{ResumeToken, TerminalCreateParams, TerminalId, TerminalInfo};
+use cli_pocket_proto::{ResumeToken, ServerConfig, TerminalCreateParams, TerminalId, TerminalInfo};
 use futures_channel::mpsc;
 use futures_util::{future::LocalBoxFuture, StreamExt};
 use js_sys::Promise;
@@ -245,8 +245,6 @@ struct JsCreateTerminalParams {
     /// Environment overrides as `[[key, value], ...]`.
     #[serde(default)]
     env: Vec<(String, String)>,
-    #[serde(default, alias = "scrollbackBytes")]
-    scrollback_bytes: Option<u32>,
 }
 
 /// JSON config consumed by [`CliPocketClient::connect`].
@@ -311,8 +309,7 @@ impl CliPocketClient {
     /// Spawn a new terminal in the current session.
     ///
     /// `params_json` is a JSON object with fields:
-    ///   `cols`, `rows`, `cwd?`, `cmd?` (string[]), `env?` ([[k,v],...]),
-    ///   `scrollback_bytes?`.
+    ///   `cols`, `rows`, `cwd?`, `cmd?` (string[]), `env?` ([[k,v],...]).
     #[wasm_bindgen]
     pub fn create_terminal(&self, params_json: String) -> Promise {
         let client = self.clone();
@@ -336,6 +333,24 @@ impl CliPocketClient {
         let client = self.clone();
         future_to_promise(async move {
             let value = client.list_terminals_inner().await?;
+            Ok(value)
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn get_server_config(&self) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            let value = client.get_server_config_inner().await?;
+            Ok(value)
+        })
+    }
+
+    #[wasm_bindgen]
+    pub fn set_server_config(&self, config_json: String) -> Promise {
+        let client = self.clone();
+        future_to_promise(async move {
+            let value = client.set_server_config_inner(config_json).await?;
             Ok(value)
         })
     }
@@ -482,7 +497,6 @@ impl CliPocketClient {
             cwd: js_params.cwd,
             cmd: js_params.cmd,
             env: js_params.env,
-            scrollback_bytes: js_params.scrollback_bytes,
         };
 
         session.create_terminal(params).await.map_err(js_error)
@@ -520,6 +534,32 @@ impl CliPocketClient {
         values
             .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|e| JsValue::from_str(&format!("serialize terminals: {e}")))
+    }
+
+    async fn get_server_config_inner(&self) -> Result<JsValue, JsValue> {
+        let session = self
+            .inner
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+
+        let config = session.get_server_config().await.map_err(js_error)?;
+        server_config_to_js(&config)
+    }
+
+    async fn set_server_config_inner(&self, config_json: String) -> Result<JsValue, JsValue> {
+        let session = self
+            .inner
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("not connected"))?
+            .clone();
+        let config: ServerConfig = serde_json::from_str(&config_json)
+            .map_err(|e| JsValue::from_str(&format!("config_json: {e}")))?;
+
+        let config = session.set_server_config(config).await.map_err(js_error)?;
+        server_config_to_js(&config)
     }
 
     async fn send_input_inner(&self, terminal_id: String, data: Vec<u8>) -> Result<(), JsValue> {
@@ -799,6 +839,14 @@ fn terminal_snapshot_to_js(snapshot: &TerminalSnapshot) -> Result<JsValue, JsVal
     })
     .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
     .map_err(|e| JsValue::from_str(&format!("serialize terminal snapshot: {e}")))
+}
+
+fn server_config_to_js(config: &ServerConfig) -> Result<JsValue, JsValue> {
+    serde_json::json!({
+        "scrollback_bytes": config.scrollback_bytes,
+    })
+    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+    .map_err(|e| JsValue::from_str(&format!("serialize server config: {e}")))
 }
 
 fn js_error(error: impl std::fmt::Display) -> JsValue {

@@ -18,12 +18,13 @@ use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::HelloOk;
 use cli_pocket_proto::{
-    ByeReason, Hello, KillSignal, ProtocolError, SessionId, StreamId, StreamSeq,
+    ByeReason, Hello, KillSignal, ProtocolError, ServerConfig, SessionId, StreamId, StreamSeq,
     TerminalCreateParams, TerminalId, PROTOCOL_VERSION,
 };
 use cli_pocket_pty::output::{OutputChunk, OutputRecv};
 use cli_pocket_pty::Terminal;
 use cli_pocket_transport::Transport;
+use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -40,7 +41,7 @@ pub struct ConnectionDeps {
     pub session_mgr: Arc<SessionManager>,
     pub client_db: Arc<ClientDb>,
     pub server_info: cli_pocket_proto::ServerInfo,
-    pub scrollback_bytes: usize,
+    pub config: Arc<Mutex<crate::config::DaemonConfig>>,
 }
 
 #[derive(Clone, Copy)]
@@ -253,6 +254,26 @@ async fn run_connection_post_handshake<T: Transport>(
                 }))
                 .await?;
             }
+            FrameBody::ServerConfigGet { request_id } => {
+                let resp = match server_config_from_deps(&deps) {
+                    Ok(config) => Frame::body(FrameBody::ServerConfigGetOk { request_id, config }),
+                    Err(error) => Frame::body(FrameBody::ServerConfigGetErr {
+                        request_id,
+                        error: ProtocolError::Other(error.to_string()),
+                    }),
+                };
+                chan.send_frame(&resp).await?;
+            }
+            FrameBody::ServerConfigSet { request_id, config } => {
+                let resp = match apply_server_config_update(&deps, &config) {
+                    Ok(config) => Frame::body(FrameBody::ServerConfigSetOk { request_id, config }),
+                    Err(error) => Frame::body(FrameBody::ServerConfigSetErr {
+                        request_id,
+                        error: ProtocolError::Other(error.to_string()),
+                    }),
+                };
+                chan.send_frame(&resp).await?;
+            }
 
             // ---- Data plane ----
             FrameBody::Input { stream, bytes } => {
@@ -376,24 +397,19 @@ async fn handle_terminal_create(
         cwd,
         cmd,
         env,
-        scrollback_bytes,
     } = params;
-    let scrollback_bytes = match scrollback_bytes {
-        Some(bytes) => Some(bytes),
-        None => Some(u32::try_from(deps.scrollback_bytes).map_err(|_| {
-            crate::DaemonError::Config("limits.scrollback_bytes exceeds u32::MAX".to_owned())
-        })?),
-    };
     let info = deps
         .session_mgr
-        .create(TerminalCreateParams {
-            cols,
-            rows,
-            cwd,
-            cmd,
-            env,
-            scrollback_bytes,
-        })
+        .create(
+            TerminalCreateParams {
+                cols,
+                rows,
+                cwd,
+                cmd,
+                env,
+            },
+            current_scrollback_bytes(deps),
+        )
         .await?;
     let terminal_id = info.terminal;
 
@@ -441,6 +457,38 @@ async fn handle_terminal_create(
 
     info!(terminal_id = ?terminal_id, stream_id = ?stream_id, client_id = ?client_id, "terminal created");
     Ok(())
+}
+
+fn current_scrollback_bytes(deps: &ConnectionDeps) -> usize {
+    deps.config.lock().limits.scrollback_bytes
+}
+
+fn server_config_from_deps(deps: &ConnectionDeps) -> crate::DaemonResult<ServerConfig> {
+    Ok(ServerConfig {
+        scrollback_bytes: u32::try_from(current_scrollback_bytes(deps)).map_err(|_| {
+            crate::DaemonError::Config("limits.scrollback_bytes exceeds u32::MAX".to_owned())
+        })?,
+    })
+}
+
+fn apply_server_config_update(
+    deps: &ConnectionDeps,
+    config: &ServerConfig,
+) -> crate::DaemonResult<ServerConfig> {
+    let scrollback_bytes = usize::try_from(config.scrollback_bytes).map_err(|_| {
+        crate::DaemonError::Config("scrollback_bytes exceeds usize::MAX".to_owned())
+    })?;
+    let updated = {
+        let current = deps.config.lock();
+        let mut next = current.clone();
+        next.limits.scrollback_bytes = scrollback_bytes;
+        next
+    };
+    if let Some(path) = updated.config_path.clone() {
+        updated.save_to(&path)?;
+    }
+    *deps.config.lock() = updated;
+    Ok(config.clone())
 }
 
 async fn handle_terminal_attach(

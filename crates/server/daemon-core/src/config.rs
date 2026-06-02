@@ -12,6 +12,8 @@ pub struct DaemonConfig {
     pub listen: ListenConfig,
     #[serde(skip)]
     pub security: SecurityConfig,
+    #[serde(skip)]
+    pub config_path: Option<PathBuf>,
     pub relay: RelayConfig,
     #[serde(default)]
     pub app: AppConfig,
@@ -139,6 +141,7 @@ impl Default for DaemonConfig {
     fn default() -> Self {
         let mut cfg = daemon_build_template().clone();
         cfg.security = SecurityConfig::default();
+        cfg.config_path = None;
         cfg
     }
 }
@@ -150,6 +153,7 @@ impl DaemonConfig {
         let mut cfg = toml::from_str::<Self>(&text)
             .map_err(|error| crate::DaemonError::Config(error.to_string()))?;
         cfg.security = SecurityConfig::for_config_path(path);
+        cfg.config_path = Some(path.to_path_buf());
         Ok(cfg)
     }
 

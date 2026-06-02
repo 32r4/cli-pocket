@@ -9,7 +9,6 @@ fn quick_exit_params() -> TerminalCreateParams {
         cwd: None,
         cmd: cmd_command(),
         env: Vec::new(),
-        scrollback_bytes: None,
     }
 }
 
@@ -36,7 +35,10 @@ async fn create_increases_count() {
     let mgr = SessionManager::new(8);
     assert_eq!(mgr.count(), 0);
 
-    let info = mgr.create(quick_exit_params()).await.unwrap();
+    let info = mgr
+        .create(quick_exit_params(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(mgr.count(), 1);
     assert_eq!(info.cols, 80);
     assert_eq!(info.rows, 24);
@@ -64,7 +66,9 @@ async fn kill_unknown_terminal_returns_error() {
 #[tokio::test(flavor = "current_thread")]
 async fn reaper_removes_exited_terminal() {
     let mgr = SessionManager::new(8);
-    mgr.create(quick_exit_params()).await.unwrap();
+    mgr.create(quick_exit_params(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(mgr.count(), 1);
 
     // The echo command exits almost immediately; reaper polls at 100ms.
@@ -77,11 +81,13 @@ async fn enforces_max_terminals() {
     let mgr = SessionManager::new(1);
 
     // Create one terminal with quick-exit command.
-    mgr.create(quick_exit_params()).await.unwrap();
+    mgr.create(quick_exit_params(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
     assert_eq!(mgr.count(), 1);
 
     // While the terminal is still alive, creating a second should fail.
-    let result = mgr.create(quick_exit_params()).await;
+    let result = mgr.create(quick_exit_params(), 4 * 1024 * 1024).await;
     assert!(
         result.is_err(),
         "should not be able to exceed max_terminals"
@@ -97,7 +103,9 @@ async fn enforces_max_terminals() {
 async fn list_returns_terminal_info() {
     let mgr = SessionManager::new(8);
 
-    mgr.create(quick_exit_params()).await.unwrap();
+    mgr.create(quick_exit_params(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
 
     let list = mgr.list();
     assert_eq!(list.len(), 1);

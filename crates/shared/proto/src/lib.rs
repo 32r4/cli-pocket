@@ -20,8 +20,8 @@ pub use snapshot::{
     AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs, Snapshot, TerminalModes,
 };
 pub use terminal::{
-    ClientId, ExitInfo, KillSignal, ServerId, SessionId, StreamId, StreamSeq, TerminalCreateParams,
-    TerminalId, TerminalInfo,
+    ClientId, ExitInfo, KillSignal, ServerConfig, ServerId, SessionId, StreamId, StreamSeq,
+    TerminalCreateParams, TerminalId, TerminalInfo,
 };
 
 /// Wire protocol version negotiated in `Hello`.

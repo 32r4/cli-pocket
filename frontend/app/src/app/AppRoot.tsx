@@ -50,6 +50,9 @@ export function AppRoot({
 	);
 	const [pairingUrl, setPairingUrl] = useState("");
 	const [inlineError, setInlineError] = useState<string | null>(null);
+	const [serverScrollbackBytes, setServerScrollbackBytes] = useState<
+		number | null
+	>(null);
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
@@ -74,6 +77,35 @@ export function AppRoot({
 		registry.daemons.find(
 			(daemon) => daemon.id === workspace.activeConnectionServerId,
 		) ?? null;
+
+	useEffect(() => {
+		if (session == null || workspace.connectionState !== "connected") {
+			setServerScrollbackBytes(null);
+			return;
+		}
+
+		let cancelled = false;
+		void session
+			.getServerConfig()
+			.then((config) => {
+				if (!cancelled) {
+					setServerScrollbackBytes(config.scrollback_bytes);
+				}
+			})
+			.catch((error: unknown) => {
+				if (!cancelled) {
+					setInlineError(
+						error instanceof Error
+							? error.message
+							: "failed to load server scrollback",
+					);
+				}
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [session, workspace.connectionState]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
@@ -159,13 +191,28 @@ export function AppRoot({
 	const overlayDetailSection =
 		ui.overlaySection === "settings" ? (
 			<HostSettingsSection
-				hostAvailable={services?.host != null}
-				scrollbackBytes={ui.scrollbackBytes}
-				onScrollbackBytesChange={(scrollbackBytes) =>
-					ui.setScrollbackBytes(scrollbackBytes)
-				}
+				scrollbackBytes={serverScrollbackBytes}
+				onScrollbackBytesChange={(scrollbackBytes) => {
+					if (session == null) {
+						return;
+					}
+					void session
+						.setServerConfig({ scrollback_bytes: scrollbackBytes })
+						.then((config) => {
+							setServerScrollbackBytes(config.scrollback_bytes);
+							setInlineError(null);
+						})
+						.catch((error: unknown) => {
+							setInlineError(
+								error instanceof Error
+									? error.message
+									: "failed to update server scrollback",
+							);
+						});
+				}}
 				theme={ui.theme}
 				onCopyPairUrl={copyLocalPairUrl}
+				showPairControls={services?.host != null}
 				onRestartLocalDaemon={restartLocalDaemon}
 				onThemeChange={(theme) => ui.setTheme(theme)}
 			/>
@@ -218,7 +265,6 @@ export function AppRoot({
 						workspace={workspace}
 						workspaceState={workspaceState}
 						controller={terminalController}
-						scrollbackBytes={ui.scrollbackBytes}
 						theme={ui.theme}
 						onInlineError={setInlineError}
 					/>
