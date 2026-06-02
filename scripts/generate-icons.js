@@ -36,40 +36,55 @@ const SIZES = [
   { name: 'icon.png', size: 1024 },
 ];
 
-// ICO file contains multiple sizes
-const ICO_SIZES = [16, 32, 48, 64, 128, 256];
+// Windows picks taskbar icons from the nearest match in the ICO.
+const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256];
+const SMALL_ICON_MAX_SIZE = 40;
 
 /**
- * Generate a PNG from SVG at specified size using a reusable page
+ * Adjust tiny sizes so the braces stay legible in the Windows taskbar.
  */
-async function generatePng(page, svgContent, size, outputPath) {
-  console.log(`  Rendering ${size}x${size}...`);
+function getSvgContentForSize(svgContent, size) {
+  if (size > SMALL_ICON_MAX_SIZE) {
+    return svgContent;
+  }
 
-  // Set viewport to exact size needed
+  return svgContent
+    .replace(/\sfilter="url\(#braceGlow\)"/g, '')
+    .replace(/font-size="20"/g, 'font-size="22"')
+    .replace(/font-weight="700"/g, 'font-weight="800"');
+}
+
+/**
+ * Render the SVG at a specific size and preserve the alpha channel in the PNG.
+ */
+async function renderSvgToPng(page, svgContent, size) {
+  const sizedSvgContent = getSvgContentForSize(svgContent, size);
+
   await page.setViewportSize({
     width: size,
     height: size,
   });
 
-  // Create HTML with SVG embedded
   const html = `
     <!DOCTYPE html>
     <html>
       <head>
         <style>
           * { margin: 0; padding: 0; }
-          body {
+          html, body {
             width: ${size}px;
             height: ${size}px;
             overflow: hidden;
+            background: transparent;
           }
           svg {
             width: 100%;
             height: 100%;
+            display: block;
           }
         </style>
       </head>
-      <body>${svgContent}</body>
+      <body>${sizedSvgContent}</body>
     </html>
   `;
 
@@ -79,11 +94,18 @@ async function generatePng(page, svgContent, size, outputPath) {
   // Wait for fonts and filters to render
   await page.waitForTimeout(100);
 
-  // Take screenshot
-  const screenshot = await page.screenshot({
+  return page.screenshot({
     type: 'png',
-    omitBackground: false,
+    omitBackground: true,
   });
+}
+
+/**
+ * Generate a PNG from SVG at specified size using a reusable page
+ */
+async function generatePng(page, svgContent, size, outputPath) {
+  console.log(`  Rendering ${size}x${size}...`);
+  const screenshot = await renderSvgToPng(page, svgContent, size);
 
   await writeFile(outputPath, screenshot);
   console.log(`  ✓ Generated ${outputPath} (${size}x${size})`);
@@ -150,41 +172,7 @@ async function generateIconsForTarget(page, svgContent, targetDir) {
   const icoPngBuffers = [];
 
   for (const size of ICO_SIZES) {
-    await page.setViewportSize({
-      width: size,
-      height: size,
-    });
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <style>
-            * { margin: 0; padding: 0; }
-            body {
-              width: ${size}px;
-              height: ${size}px;
-              overflow: hidden;
-            }
-            svg {
-              width: 100%;
-              height: 100%;
-            }
-          </style>
-        </head>
-        <body>${svgContent}</body>
-      </html>
-    `;
-
-    await page.setContent(html);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(100);
-
-    const screenshot = await page.screenshot({
-      type: 'png',
-      omitBackground: false,
-    });
-
+    const screenshot = await renderSvgToPng(page, svgContent, size);
     icoPngBuffers.push({ size, buffer: screenshot });
   }
 
