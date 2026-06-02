@@ -222,8 +222,22 @@ export function AppRoot({
 	const errorMessage = inlineError ?? workspace.lastError ?? platformError;
 	const hasSavedServers = registry.daemons.length > 0;
 	const isMobileUi = platform.shell === "mobile" || isNarrowViewport;
+	const primaryNavigationMode = ui.isMenuOpen ? "back" : ("menu" as const);
+	const handlePrimaryNavigation = () => {
+		if (!ui.isMenuOpen) {
+			ui.openMenu("settings");
+			return;
+		}
+
+		if (ui.isMenuRoot) {
+			ui.closeMenu();
+			return;
+		}
+
+		uiState.getState().showMenuRoot();
+	};
 	const overlayDetailSection =
-		ui.overlaySection === "settings" ? (
+		ui.menuSection === "settings" ? (
 			<HostSettingsSection
 				scrollbackBytes={serverScrollbackBytes}
 				onScrollbackBytesChange={(scrollbackBytes) => {
@@ -251,7 +265,7 @@ export function AppRoot({
 				onRestartLocalDaemon={restartLocalDaemon}
 				onThemeChange={(theme) => ui.setTheme(theme)}
 			/>
-		) : ui.overlaySection === "diagnostics" ? (
+		) : ui.menuSection === "diagnostics" ? (
 			<div className="detail-stack">
 				<div className="detail-row">
 					<span className="detail-row__label">Endpoint</span>
@@ -282,12 +296,30 @@ export function AppRoot({
 			activeServerLabel={activeServer?.label ?? null}
 			connectionState={workspace.connectionState}
 			windowControls={windowControls}
-			isOverlayOpen={ui.isOverlayOpen}
-			onOpenOverlay={() => ui.openOverlay("settings")}
-			onCloseOverlay={ui.closeOverlay}
+			primaryNavigationMode={primaryNavigationMode}
+			onPrimaryNavigation={handlePrimaryNavigation}
 		>
 			<main className="app-shell__main">
-				{services == null ? (
+				{ui.isMenuOpen ? (
+					<ControlOverlay
+						isMobileUi={isMobileUi}
+						isMenuRoot={ui.isMenuRoot}
+						menuSection={ui.menuSection}
+						detailSection={overlayDetailSection}
+						servers={registry.daemons}
+						selectedServerId={ui.selectedServerId}
+						onSelectSection={(section) =>
+							uiState.getState().setMenuSection(section)
+						}
+						onConnectServer={(server) => {
+							void connectServer(server, { closeMenu: true });
+						}}
+						onDeleteServer={(serverId) => {
+							void deleteServer(serverId);
+						}}
+						onOpenAddServer={openAddServerChooser}
+					/>
+				) : services == null ? (
 					<section
 						className="connection-status-panel"
 						aria-label="Restoring saved servers"
@@ -340,28 +372,6 @@ export function AppRoot({
 
 				<ErrorBanner message={errorMessage} />
 			</main>
-
-			<ControlOverlay
-				isOpen={ui.isOverlayOpen}
-				isMobileUi={isMobileUi}
-				isMenuRoot={ui.isOverlayMenuRoot}
-				overlaySection={ui.overlaySection}
-				detailSection={overlayDetailSection}
-				servers={registry.daemons}
-				selectedServerId={ui.selectedServerId}
-				onClose={ui.closeOverlay}
-				onShowMenuRoot={() => uiState.getState().showOverlayMenuRoot()}
-				onSelectSection={(section) =>
-					uiState.getState().setOverlaySection(section)
-				}
-				onConnectServer={(server) => {
-					void connectServer(server, { closeOverlay: true });
-				}}
-				onDeleteServer={(serverId) => {
-					void deleteServer(serverId);
-				}}
-				onOpenAddServer={openAddServerChooser}
-			/>
 
 			<ServerModal
 				mode={serverModalMode}

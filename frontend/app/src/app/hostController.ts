@@ -6,19 +6,19 @@ import type {
 	PersistedDaemonRegistry,
 } from "@/state/daemon-registry/daemonRegistry";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
-import type { OverlaySection, ThemeName } from "@/state/ui/uiState";
+import type { MenuSection, ThemeName } from "@/state/ui/uiState";
 
 type UiStateStore = StoreApi<{
-	isOverlayOpen: boolean;
-	overlaySection: OverlaySection;
+	isMenuOpen: boolean;
+	menuSection: MenuSection;
 	selectedServerId: string | null;
-	isOverlayMenuRoot: boolean;
+	isMenuRoot: boolean;
 	theme: ThemeName;
-	openOverlay: (section?: OverlaySection) => void;
-	closeOverlay: () => void;
-	setOverlaySection: (section: OverlaySection) => void;
+	openMenu: (section?: MenuSection) => void;
+	closeMenu: () => void;
+	setMenuSection: (section: MenuSection) => void;
 	setSelectedServerId: (serverId: string | null) => void;
-	showOverlayMenuRoot: () => void;
+	showMenuRoot: () => void;
 	setTheme: (theme: ThemeName) => void;
 }>;
 

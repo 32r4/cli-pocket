@@ -1,6 +1,6 @@
 import { createStore } from "zustand/vanilla";
 
-export type OverlaySection = "settings" | "diagnostics" | "about";
+export type MenuSection = "settings" | "diagnostics" | "about";
 export type ThemeName = "light" | "dark";
 
 const THEME_STORAGE_KEY = "cli-pocket-theme";
@@ -35,16 +35,16 @@ function persistTheme(theme: ThemeName) {
 }
 
 interface UiState {
-	isOverlayOpen: boolean;
-	overlaySection: OverlaySection;
+	isMenuOpen: boolean;
+	menuSection: MenuSection;
 	selectedServerId: string | null;
-	isOverlayMenuRoot: boolean;
+	isMenuRoot: boolean;
 	theme: ThemeName;
-	openOverlay: (section?: OverlaySection) => void;
-	closeOverlay: () => void;
-	setOverlaySection: (section: OverlaySection) => void;
+	openMenu: (section?: MenuSection) => void;
+	closeMenu: () => void;
+	setMenuSection: (section: MenuSection) => void;
 	setSelectedServerId: (serverId: string | null) => void;
-	showOverlayMenuRoot: () => void;
+	showMenuRoot: () => void;
 	setTheme: (theme: ThemeName) => void;
 }
 
@@ -53,22 +53,22 @@ export function createUiStateStore() {
 	applyTheme(theme);
 
 	return createStore<UiState>((set) => ({
-		isOverlayOpen: false,
-		overlaySection: "settings",
+		isMenuOpen: false,
+		menuSection: "settings",
 		selectedServerId: null,
-		isOverlayMenuRoot: true,
+		isMenuRoot: true,
 		theme,
-		openOverlay: (section = "settings") =>
+		openMenu: (section = "settings") =>
 			set({
-				isOverlayOpen: true,
-				overlaySection: section,
-				isOverlayMenuRoot: true,
+				isMenuOpen: true,
+				menuSection: section,
+				isMenuRoot: true,
 			}),
-		closeOverlay: () => set({ isOverlayOpen: false, isOverlayMenuRoot: true }),
-		setOverlaySection: (section) =>
-			set({ overlaySection: section, isOverlayMenuRoot: false }),
+		closeMenu: () => set({ isMenuOpen: false, isMenuRoot: true }),
+		setMenuSection: (section) =>
+			set({ menuSection: section, isMenuRoot: false }),
 		setSelectedServerId: (serverId) => set({ selectedServerId: serverId }),
-		showOverlayMenuRoot: () => set({ isOverlayMenuRoot: true }),
+		showMenuRoot: () => set({ isMenuRoot: true }),
 		setTheme: (nextTheme) => {
 			persistTheme(nextTheme);
 			applyTheme(nextTheme);

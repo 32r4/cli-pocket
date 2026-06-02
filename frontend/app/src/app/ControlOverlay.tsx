@@ -1,29 +1,22 @@
-import { ArrowLeft, Cloud, Monitor, Plus, Trash2 } from "lucide-react";
+import { Cloud, Monitor, Plus, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
-import type { OverlaySection } from "@/state/ui/uiState";
+import type { MenuSection } from "@/state/ui/uiState";
 
 interface ControlOverlayProps {
-	isOpen: boolean;
 	isMobileUi: boolean;
 	isMenuRoot: boolean;
-	overlaySection: OverlaySection;
+	menuSection: MenuSection;
 	detailSection: ReactNode;
 	servers: DaemonRecord[];
 	selectedServerId: string | null;
-	onClose: () => void;
-	onShowMenuRoot: () => void;
-	onSelectSection: (section: OverlaySection) => void;
+	onSelectSection: (section: MenuSection) => void;
 	onConnectServer: (server: DaemonRecord) => void;
 	onDeleteServer: (serverId: string) => void;
 	onOpenAddServer: () => void;
 }
 
-function BackIcon() {
-	return <ArrowLeft aria-hidden="true" size={16} strokeWidth={1.75} />;
-}
-
-function sectionLabel(section: OverlaySection) {
+function sectionLabel(section: MenuSection) {
 	return section.charAt(0).toUpperCase() + section.slice(1);
 }
 
@@ -94,24 +87,22 @@ function SavedServers({
 }
 
 function OverlayNav({
-	overlaySection,
+	menuSection,
 	onSelectSection,
 	showActiveState,
 }: {
-	overlaySection: OverlaySection;
-	onSelectSection: (section: OverlaySection) => void;
+	menuSection: MenuSection;
+	onSelectSection: (section: MenuSection) => void;
 	showActiveState: boolean;
 }) {
 	return (
 		<nav className="overlay-nav" aria-label="Overlay sections">
-			{(["settings", "diagnostics", "about"] as OverlaySection[]).map(
+			{(["settings", "diagnostics", "about"] as MenuSection[]).map(
 				(section) => (
 					<button
 						type="button"
 						key={section}
-						data-active={
-							showActiveState ? overlaySection === section : undefined
-						}
+						data-active={showActiveState ? menuSection === section : undefined}
 						onClick={() => onSelectSection(section)}
 					>
 						{sectionLabel(section)}
@@ -123,54 +114,29 @@ function OverlayNav({
 }
 
 export function ControlOverlay({
-	isOpen,
 	isMobileUi,
 	isMenuRoot,
-	overlaySection,
+	menuSection,
 	detailSection,
 	servers,
 	selectedServerId,
-	onClose,
-	onShowMenuRoot,
 	onSelectSection,
 	onConnectServer,
 	onDeleteServer,
 	onOpenAddServer,
 }: ControlOverlayProps) {
-	if (!isOpen) {
-		return null;
-	}
-
 	if (isMobileUi) {
 		return (
-			<aside
+			<section
 				className="control-overlay control-overlay--mobile"
 				aria-label="Control overlay"
 			>
 				{!isMenuRoot ? (
-					<div className="control-overlay__mobile-page">
-						<button
-							type="button"
-							className="icon-button"
-							onClick={onShowMenuRoot}
-							aria-label="Back to menu"
-						>
-							<BackIcon />
-						</button>
-						{detailSection}
-					</div>
+					<div className="control-overlay__mobile-page">{detailSection}</div>
 				) : (
 					<div className="control-overlay__mobile-page">
-						<button
-							type="button"
-							className="icon-button"
-							onClick={onClose}
-							aria-label="Close menu"
-						>
-							<BackIcon />
-						</button>
 						<OverlayNav
-							overlaySection={overlaySection}
+							menuSection={menuSection}
 							onSelectSection={onSelectSection}
 							showActiveState={false}
 						/>
@@ -185,23 +151,15 @@ export function ControlOverlay({
 						/>
 					</div>
 				)}
-			</aside>
+			</section>
 		);
 	}
 
 	return (
-		<aside className="control-overlay" aria-label="Control overlay">
+		<section className="control-overlay" aria-label="Control overlay">
 			<div className="control-overlay__rail">
-				<button
-					type="button"
-					className="icon-button"
-					onClick={onClose}
-					aria-label="Close menu"
-				>
-					<BackIcon />
-				</button>
 				<OverlayNav
-					overlaySection={overlaySection}
+					menuSection={menuSection}
 					onSelectSection={onSelectSection}
 					showActiveState
 				/>
@@ -216,6 +174,6 @@ export function ControlOverlay({
 				/>
 			</div>
 			<div className="control-overlay__detail">{detailSection}</div>
-		</aside>
+		</section>
 	);
 }

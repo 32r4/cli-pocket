@@ -1,16 +1,17 @@
-import { Menu, Minus, Square, X } from "lucide-react";
+import { ArrowLeft, Menu, Minus, Square, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import type { DesktopWindowControls } from "./useDesktopWindowControls";
+
+type PrimaryNavigationMode = "menu" | "back";
 
 interface ShellProps {
 	children: ReactNode;
 	activeServerLabel: string | null;
 	connectionState: "idle" | "connecting" | "connected" | "failed";
 	windowControls: DesktopWindowControls | null;
-	isOverlayOpen: boolean;
-	onOpenOverlay: () => void;
-	onCloseOverlay: () => void;
+	primaryNavigationMode: PrimaryNavigationMode;
+	onPrimaryNavigation: () => void;
 }
 
 export function Shell({
@@ -18,9 +19,8 @@ export function Shell({
 	activeServerLabel,
 	connectionState,
 	windowControls,
-	isOverlayOpen,
-	onOpenOverlay,
-	onCloseOverlay,
+	primaryNavigationMode,
+	onPrimaryNavigation,
 }: ShellProps) {
 	const isDesktopWindow = windowControls != null;
 	const indicatorState =
@@ -76,12 +76,24 @@ export function Shell({
 				<button
 					type="button"
 					className="icon-button"
-					onClick={isOverlayOpen ? onCloseOverlay : onOpenOverlay}
+					onMouseDown={(event) => {
+						event.stopPropagation();
+					}}
+					onDoubleClick={(event) => {
+						event.stopPropagation();
+					}}
+					onClick={onPrimaryNavigation}
 					aria-label={
-						isOverlayOpen ? "Close control overlay" : "Open control overlay"
+						primaryNavigationMode === "back"
+							? "Go back"
+							: "Open control overlay"
 					}
 				>
-					<Menu aria-hidden="true" size={16} strokeWidth={1.75} />
+					{primaryNavigationMode === "back" ? (
+						<ArrowLeft aria-hidden="true" size={16} strokeWidth={1.75} />
+					) : (
+						<Menu aria-hidden="true" size={16} strokeWidth={1.75} />
+					)}
 				</button>
 				<div className="app-shell__host">
 					{activeServerLabel != null ? (

@@ -1,5 +1,9 @@
 :root {
 	font-family: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+	--safe-area-top: env(safe-area-inset-top, 0px);
+	--safe-area-right: env(safe-area-inset-right, 0px);
+	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
+	--safe-area-left: env(safe-area-inset-left, 0px);
 }
 
 :root,
@@ -276,6 +280,14 @@ strong {
 	overflow: hidden;
 }
 
+@supports (height: 100dvh) {
+	#root,
+	.app-shell {
+		height: 100dvh;
+		min-height: 100dvh;
+	}
+}
+
 .app-shell::before {
 	content: "";
 	position: fixed;
@@ -303,7 +315,9 @@ strong {
 	display: flex;
 	align-items: center;
 	gap: 1rem;
-	padding: 0.75rem;
+	padding: calc(var(--safe-area-top) + 0.75rem)
+		calc(var(--safe-area-right) + 0.75rem) 0.75rem
+		calc(var(--safe-area-left) + 0.75rem);
 	border-bottom: 1px solid var(--line-strong);
 	background: var(--surface-header);
 	backdrop-filter: blur(18px);
@@ -313,6 +327,10 @@ strong {
 	padding-block: 0.5rem;
 	padding-inline: 0.5rem 0.3rem;
 	-webkit-app-region: drag;
+}
+
+.app-shell[data-window-chrome="desktop"] .app-shell__header .icon-button {
+	-webkit-app-region: no-drag;
 }
 
 .connection-status-panel h2 {
@@ -563,7 +581,7 @@ strong {
 	display: flex;
 	flex: 1 1 auto;
 	align-items: stretch;
-	min-height: 2.5rem;
+	min-height: 2.25rem;
 	min-width: 0;
 	overflow-x: auto;
 }
@@ -574,7 +592,7 @@ strong {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: stretch;
-	min-height: 2.5rem;
+	min-height: 2.25rem;
 	min-width: 6rem;
 	max-width: 12rem;
 	--terminal-tab-bg: var(--surface-panel);
@@ -582,6 +600,7 @@ strong {
 	border: 1px solid var(--line);
 	border-bottom: 0;
 	box-shadow: var(--shadow-inset);
+  font-size: 0.9rem;
 }
 
 .terminal-tab__button {
@@ -711,24 +730,32 @@ strong {
 }
 
 .control-overlay {
-	position: fixed;
-	inset: 0;
 	display: grid;
+	height: 100%;
+	min-height: 0;
+	min-width: 0;
 	grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
 	gap: 1rem;
 	padding: 0;
 	background: var(--surface-overlay);
 	backdrop-filter: blur(20px);
+	overflow: hidden;
 }
 
 .control-overlay__rail,
 .control-overlay__detail {
-	padding: 1.5rem;
+	min-height: 0;
+	padding: 1.5rem calc(var(--safe-area-right) + 1.5rem)
+		calc(var(--safe-area-bottom) + 1.5rem) calc(var(--safe-area-left) + 1.5rem);
+	overflow: auto;
 }
 
 .control-overlay__mobile-page {
-	padding: 1.5rem;
-	min-height: 100vh;
+	height: 100%;
+	min-height: 0;
+	padding: 1.5rem calc(var(--safe-area-right) + 1.5rem)
+		calc(var(--safe-area-bottom) + 1.5rem) calc(var(--safe-area-left) + 1.5rem);
+	overflow: auto;
 }
 
 .control-overlay__rail {
@@ -736,10 +763,6 @@ strong {
 	grid-template-rows: auto auto auto minmax(0, 1fr);
 	gap: 0;
 	border-right: 1px solid var(--line-strong);
-}
-
-.control-overlay__rail > .icon-button {
-	margin-bottom: 1rem;
 }
 
 .overlay-nav,
@@ -818,7 +841,6 @@ strong {
 }
 
 .control-overlay__detail {
-	overflow: auto;
 	border-left: 0;
 }
 
@@ -908,10 +930,6 @@ strong {
 
 	.control-overlay--mobile {
 		display: block;
-	}
-
-	.control-overlay--mobile .control-overlay__mobile-page > .icon-button {
-		margin-bottom: 1rem;
 	}
 
 	.terminal-footer {

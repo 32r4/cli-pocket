@@ -21,7 +21,7 @@ interface UseAppRuntimeResult {
 	terminalController: TerminalController;
 	connectServer: (
 		server: DaemonRecord,
-		options?: { closeOverlay?: boolean },
+		options?: { closeMenu?: boolean },
 	) => Promise<void>;
 	disconnectCurrentServer: () => Promise<void>;
 	copyLocalPairUrl: () => Promise<boolean>;
@@ -125,7 +125,7 @@ export function useAppRuntime({
 
 	const connectServer = async (
 		server: DaemonRecord,
-		options?: { closeOverlay?: boolean },
+		options?: { closeMenu?: boolean },
 	) => {
 		try {
 			await controllerRef.current?.connectServer(server, options);
