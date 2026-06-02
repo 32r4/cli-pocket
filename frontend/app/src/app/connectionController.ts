@@ -115,6 +115,7 @@ export class ConnectionController {
 	private connectionGeneration = 0;
 	private bootstrapped = false;
 	private terminalRefreshTimer: number | null = null;
+	private initialTerminalBootstrapPending = false;
 	private readonly terminalRefreshIntervalMs = 1000;
 
 	constructor(private readonly deps: ControllerDeps) {}
@@ -274,6 +275,7 @@ export class ConnectionController {
 					.updateDaemonLabel(activeServerId, serverLabel);
 			}
 			this.deps.workspaceState.getState().markConnected();
+			this.initialTerminalBootstrapPending = true;
 			void this.refreshTerminalsOnce();
 			this.startTerminalPolling();
 			return;
@@ -301,6 +303,12 @@ export class ConnectionController {
 					: null;
 			if (terminals != null) {
 				this.deps.workspaceState.getState().syncTerminalList(terminals);
+				if (this.initialTerminalBootstrapPending) {
+					this.initialTerminalBootstrapPending = false;
+					if (terminals.length === 0) {
+						void this.createInitialTerminal();
+					}
+				}
 			}
 			return;
 		}
@@ -401,6 +409,29 @@ export class ConnectionController {
 			await session.refreshTerminals();
 		} catch {
 			// Best-effort polling. Connection lifecycle events handle disconnects.
+		}
+	}
+
+	private async createInitialTerminal() {
+		const session = this.session;
+		if (session == null) {
+			return;
+		}
+
+		try {
+			const createdTerminal = await session.createTerminal({
+				cols: 120,
+				rows: 36,
+			});
+			if (createdTerminal != null) {
+				this.deps.workspaceState
+					.getState()
+					.setActiveSessionId(createdTerminal.terminal);
+			}
+		} catch (error: unknown) {
+			this.deps.onInlineError(
+				error instanceof Error ? error.message : "failed to create terminal",
+			);
 		}
 	}
 }

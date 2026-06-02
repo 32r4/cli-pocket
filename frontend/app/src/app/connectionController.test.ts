@@ -1,9 +1,11 @@
+import { waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
 	ConnectConfig,
 	PlatformServices,
 	ServerConfigRecord,
 	SessionActor,
+	TerminalInfoRecord,
 	TerminalSnapshotRecord,
 } from "@/platform/bridge/types";
 import { createDaemonRegistryStore } from "@/state/daemon-registry/daemonRegistry";
@@ -42,7 +44,9 @@ function makeActor(events: unknown[]) {
 						snapshot_bytes_b64: "",
 					}) as TerminalSnapshotRecord,
 			),
-			createTerminal: vi.fn(async () => null),
+			createTerminal: vi.fn(
+				async (): Promise<TerminalInfoRecord | null> => null,
+			),
 			getServerConfig: vi.fn(
 				async () =>
 					({
@@ -97,6 +101,14 @@ describe("ConnectionController", () => {
 						label: "shell",
 						attached_clients: 1,
 					},
+					{
+						terminal: "t2",
+						cols: 100,
+						rows: 30,
+						created_at_unix_ms: 2,
+						label: "shell-2",
+						attached_clients: 1,
+					},
 				],
 			},
 		]);
@@ -143,8 +155,80 @@ describe("ConnectionController", () => {
 		expect(services.sessionFactory.connect).toHaveBeenCalledTimes(1);
 		expect(workspaceState.getState().connectionState).toBe("connected");
 		expect(workspaceState.getState().activeConnectionServerId).toBe("server-a");
-		expect(workspaceState.getState().terminals).toHaveLength(1);
-		expect(workspaceState.getState().terminals[0]?.id).toBe("t1");
+		expect(workspaceState.getState().terminals).toHaveLength(2);
+		expect(workspaceState.getState().activeSessionId).toBe("t2");
+		expect(workspaceState.getState().terminals[1]?.id).toBe("t2");
+	});
+
+	it("creates a terminal when the connected server has none", async () => {
+		const createdTerminal = {
+			terminal: "t-new",
+			cols: 120,
+			rows: 36,
+			created_at_unix_ms: 3,
+			label: null,
+			attached_clients: 1,
+		};
+		const { actor } = makeActor([
+			{ kind: "Connecting" },
+			{
+				kind: "Connected",
+				server_label: "server-a",
+			},
+			{
+				kind: "TerminalList",
+				terminals: [],
+			},
+		]);
+		actor.createTerminal = vi.fn(
+			async (): Promise<TerminalInfoRecord | null> => createdTerminal,
+		);
+		const services = makeServices(actor);
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const workspaceState = createWorkspaceStore();
+		daemonRegistry.hydratePersistedState({
+			version: 1,
+			daemons: [
+				{
+					id: "server-a",
+					label: "server-a",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:9999",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: "server-a",
+		});
+		uiState.getState().setSelectedServerId("server-a");
+
+		const controller = new ConnectionController({
+			services,
+			daemonRegistry,
+			uiState,
+			workspaceState,
+			onInlineError: vi.fn(),
+			onConnectionReset: vi.fn(),
+			onTerminalOutput: vi.fn(),
+			onTerminalRemoved: vi.fn(),
+		});
+
+		const server = daemonRegistry.getState().daemons[0];
+		expect(server).toBeDefined();
+		if (server == null) {
+			throw new Error("expected seeded daemon");
+		}
+
+		await controller.connectServer(server);
+
+		await waitFor(() => {
+			expect(actor.createTerminal).toHaveBeenCalledWith({
+				cols: 120,
+				rows: 36,
+			});
+			expect(workspaceState.getState().activeSessionId).toBe("t-new");
+		});
 	});
 
 	it("polls terminal list after connecting", async () => {

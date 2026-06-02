@@ -140,6 +140,8 @@ export function TerminalArea({
 		workspace.terminals.find(
 			(terminal) => terminal.id === workspace.activeSessionId,
 		) ?? null;
+	const isConnecting = activeSession?.status === "connecting";
+	const isError = activeSession?.status === "error";
 
 	useEffect(() => {
 		controller.setTheme(theme);
@@ -307,9 +309,7 @@ export function TerminalArea({
 				</div>
 			</div>
 			<div className="terminal-stage">
-				{activeSession == null ? (
-					<div className="xterm-server">Select a terminal</div>
-				) : activeSession.status === "connecting" ? (
+				{activeSession == null ? null : isConnecting ? (
 					<div className="xterm-server xterm-server--spinner">
 						<LoaderCircle
 							className="connection-spinner"
@@ -319,7 +319,7 @@ export function TerminalArea({
 						/>
 						<span className="sr-only">Connecting terminal</span>
 					</div>
-				) : activeSession.status === "error" ? (
+				) : isError ? (
 					<div className="xterm-server">
 						{activeSession.error ?? "Terminal attach failed"}
 					</div>
