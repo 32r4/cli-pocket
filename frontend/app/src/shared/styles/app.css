@@ -239,6 +239,11 @@ select:focus-visible {
 	box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
+.icon-button[data-copied="true"] {
+	background: var(--surface-hover);
+	color: var(--status-connected);
+}
+
 strong {
 	font-weight: 600;
 }
@@ -304,8 +309,7 @@ strong {
 	backdrop-filter: blur(18px);
 }
 
-.connection-status-panel h2,
-.server-modal__title {
+.connection-status-panel h2 {
 	margin: 0;
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
 	font-size: 1.05rem;
@@ -448,12 +452,12 @@ strong {
 	gap: 0.75rem;
 }
 
-.settings-stack {
+.detail-stack {
 	display: grid;
 	gap: 0;
 }
 
-.settings-row {
+.detail-row {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -463,31 +467,32 @@ strong {
 	border-bottom: 1px solid var(--line);
 }
 
-.settings-row__label {
-	color: var(--text-soft);
-	font-size: 0.9rem;
+.detail-row__label {
+	color: var(--text-strong);
 }
 
-.settings-row__value {
+.detail-row__value {
 	display: flex;
 	align-items: center;
 	justify-content: flex-end;
 	min-width: 0;
 	text-align: right;
-}
-
-.settings-row__scrollback-unit {
 	color: var(--text-soft);
 	font-size: 0.9rem;
 }
 
-.settings-row__scrollback-field {
+.detail-row__scrollback-unit {
+	color: var(--text-soft);
+	font-size: 0.9rem;
+}
+
+.detail-row__scrollback-field {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.4rem;
 }
 
-.settings-row__scrollback-input {
+.detail-row__scrollback-input {
 	width: 4.5rem;
 	height: 1.75rem;
 	padding: 0.35rem 0.5rem;
@@ -506,6 +511,7 @@ strong {
 
 .appearance-toggle__button[data-active="true"] {
 	color: var(--text-strong);
+	border: 1px solid var(--line);
 }
 
 [role="alert"] {
@@ -800,10 +806,10 @@ strong {
 }
 
 .server-modal {
-	width: min(100%, 34rem);
+	width: min(100%, 20rem);
 	padding: 1.5rem;
 	border: 1px solid var(--surface-panel-border);
-	border-radius: 0.3rem;
+	border-radius: 0.6rem;
 	background: var(--surface-shell);
 	box-shadow: var(--shadow-panel);
 	backdrop-filter: blur(22px);
@@ -817,20 +823,13 @@ strong {
 .server-option-buttons__button {
 	display: flex;
 	align-items: center;
-	width: min(100%, 16rem);
+	width: min(100%, 12rem);
 	justify-content: center;
 	padding: 1rem 1.25rem;
 	border: 1px solid var(--surface-panel-border);
 	border-radius: 0.3rem;
 	background: var(--surface-panel);
 	box-shadow: var(--shadow-elevated);
-}
-
-.detail-section {
-	display: grid;
-	align-content: start;
-	gap: 1rem;
-	min-height: 100%;
 }
 
 .status-chip {
@@ -846,24 +845,6 @@ strong {
 .status-chip[data-state="failed"] {
 	background: var(--status-chip-failed-bg);
 	border-color: var(--status-chip-failed-border);
-}
-
-.detail-grid {
-	display: grid;
-	grid-template-columns: 1fr;
-	gap: 0.9rem;
-}
-
-.detail-grid > div {
-	display: grid;
-	gap: 0.35rem;
-	padding: 0.9rem 0;
-	border-bottom: 1px solid var(--line);
-}
-
-.detail-grid span {
-	color: var(--text-soft);
-	font-size: 0.9rem;
 }
 
 @media (max-width: 900px) {

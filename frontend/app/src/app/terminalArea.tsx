@@ -304,7 +304,7 @@ export function TerminalArea({
 							void createSession();
 						}}
 					>
-						<Plus aria-hidden="true" size={16} strokeWidth={1.75} />
+						<Plus aria-hidden="true" size={14} strokeWidth={1.75} />
 					</button>
 				</div>
 			</div>

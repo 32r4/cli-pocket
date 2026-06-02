@@ -36,7 +36,7 @@ export function Shell({
 						isOverlayOpen ? "Close control overlay" : "Open control overlay"
 					}
 				>
-					<Menu aria-hidden="true" size={18} strokeWidth={1.75} />
+					<Menu aria-hidden="true" size={16} strokeWidth={1.75} />
 				</button>
 				<div className="app-shell__host">
 					{activeServerLabel != null ? (

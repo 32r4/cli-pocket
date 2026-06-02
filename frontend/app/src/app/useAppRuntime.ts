@@ -24,7 +24,7 @@ interface UseAppRuntimeResult {
 		options?: { closeOverlay?: boolean },
 	) => Promise<void>;
 	disconnectCurrentServer: () => Promise<void>;
-	copyLocalPairUrl: () => Promise<void>;
+	copyLocalPairUrl: () => Promise<boolean>;
 	restartLocalDaemon: () => Promise<void>;
 	importPairingLink: (rawUrl: string) => Promise<void>;
 }
@@ -144,7 +144,7 @@ export function useAppRuntime({
 	const copyLocalPairUrl = async () => {
 		const host = services?.host;
 		if (host == null) {
-			return;
+			return false;
 		}
 
 		try {
@@ -154,10 +154,12 @@ export function useAppRuntime({
 			}
 			await navigator.clipboard.writeText(nextPairUrl);
 			onInlineError(null);
+			return true;
 		} catch (error: unknown) {
 			onInlineError(
 				error instanceof Error ? error.message : "failed to copy pair url",
 			);
+			return false;
 		}
 	};
 

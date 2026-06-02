@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { DismissibleLayer } from "@/shared/components/DismissibleLayer";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
 import { ServerOptionButtons } from "./ServerOptionButtons";
 
@@ -67,14 +67,6 @@ interface ServerModalProps {
 	) => void;
 }
 
-function modalTitle(mode: ServerModalMode) {
-	return mode === "direct"
-		? "Direct connection"
-		: mode === "pairing"
-			? "Pairing link"
-			: null;
-}
-
 export function ServerModal({
 	mode,
 	serverForm,
@@ -87,38 +79,19 @@ export function ServerModal({
 	onImportPairingLink,
 	onServerFormChange,
 }: ServerModalProps) {
-	const modalRef = useRef<HTMLDivElement | null>(null);
-
-	useEffect(() => {
-		if (mode !== "closed") {
-			modalRef.current?.focus();
-		}
-	}, [mode]);
-
 	if (mode === "closed") {
 		return null;
 	}
 
 	return (
 		<div className="server-modal-backdrop">
-			<div
-				ref={modalRef}
+			<DismissibleLayer
 				className="server-modal"
-				role="dialog"
 				aria-modal="true"
 				aria-label="Server modal"
-				tabIndex={-1}
-				onBlur={(event) => {
-					if (event.currentTarget.contains(event.relatedTarget)) {
-						return;
-					}
-					onClose();
-				}}
+				focusKey={mode}
+				onDismiss={onClose}
 			>
-				{modalTitle(mode) ? (
-					<h2 className="server-modal__title">{modalTitle(mode)}</h2>
-				) : null}
-
 				{mode === "chooser" ? (
 					<div className="server-option-buttons">
 						<ServerOptionButtons
@@ -183,7 +156,7 @@ export function ServerModal({
 						</div>
 					</div>
 				) : null}
-			</div>
+			</DismissibleLayer>
 		</div>
 	);
 }

@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { PlatformServices } from "@/platform/bridge/types";
 import {
@@ -49,6 +49,7 @@ export function AppRoot({
 		initialFormState(),
 	);
 	const [pairingUrl, setPairingUrl] = useState("");
+	const [isPairUrlCopied, setIsPairUrlCopied] = useState(false);
 	const [inlineError, setInlineError] = useState<string | null>(null);
 	const [serverScrollbackBytes, setServerScrollbackBytes] = useState<
 		number | null
@@ -72,6 +73,9 @@ export function AppRoot({
 		stores,
 		onInlineError: setInlineError,
 	});
+	const pairUrlCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+		null,
+	);
 
 	const activeServer =
 		registry.daemons.find(
@@ -123,14 +127,24 @@ export function AppRoot({
 		};
 	}, []);
 
+	useEffect(() => {
+		return () => {
+			if (pairUrlCopyTimerRef.current != null) {
+				clearTimeout(pairUrlCopyTimerRef.current);
+			}
+		};
+	}, []);
+
 	const closeServerModal = () => {
 		setServerModalMode("closed");
 		setInlineError(null);
+		setIsPairUrlCopied(false);
 	};
 
 	const openAddServerChooser = () => {
 		setInlineError(null);
 		setPairingUrl("");
+		setIsPairUrlCopied(false);
 		setServerModalMode("chooser");
 	};
 
@@ -138,12 +152,14 @@ export function AppRoot({
 		setInlineError(null);
 		setServerForm(initialFormState());
 		setPairingUrl("");
+		setIsPairUrlCopied(false);
 		setServerModalMode("direct");
 	};
 
 	const openPairingServerModal = () => {
 		setInlineError(null);
 		setPairingUrl("");
+		setIsPairUrlCopied(false);
 		setServerModalMode("pairing");
 	};
 
@@ -185,6 +201,22 @@ export function AppRoot({
 		}
 	};
 
+	const copyPairUrl = async () => {
+		const copied = await copyLocalPairUrl();
+		if (!copied) {
+			return;
+		}
+
+		setIsPairUrlCopied(true);
+		if (pairUrlCopyTimerRef.current != null) {
+			clearTimeout(pairUrlCopyTimerRef.current);
+		}
+		pairUrlCopyTimerRef.current = setTimeout(() => {
+			setIsPairUrlCopied(false);
+			pairUrlCopyTimerRef.current = null;
+		}, 3000);
+	};
+
 	const errorMessage = inlineError ?? workspace.lastError ?? platformError;
 	const hasSavedServers = registry.daemons.length > 0;
 	const isMobileUi = platform.shell === "mobile" || isNarrowViewport;
@@ -211,35 +243,36 @@ export function AppRoot({
 						});
 				}}
 				theme={ui.theme}
-				onCopyPairUrl={copyLocalPairUrl}
+				onCopyPairUrl={copyPairUrl}
+				isPairUrlCopied={isPairUrlCopied}
 				showPairControls={services?.host != null}
 				onRestartLocalDaemon={restartLocalDaemon}
 				onThemeChange={(theme) => ui.setTheme(theme)}
 			/>
 		) : ui.overlaySection === "diagnostics" ? (
-			<section className="detail-section">
-				<div className="detail-grid">
-					<div>
-						<span>Endpoint</span>
-						<strong>
-							{activeServer ? endpointLabel(activeServer) : "none"}
-						</strong>
-					</div>
-					<div>
-						<span>Last error</span>
-						<strong>{workspace.lastError ?? "none"}</strong>
+			<div className="detail-stack">
+				<div className="detail-row">
+					<span className="detail-row__label">Endpoint</span>
+					<div className="detail-row__value">
+						<span>{activeServer ? endpointLabel(activeServer) : "none"}</span>
 					</div>
 				</div>
-			</section>
+				<div className="detail-row">
+					<span className="detail-row__label">Last error</span>
+					<div className="detail-row__value">
+						<span>{workspace.lastError ?? "none"}</span>
+					</div>
+				</div>
+			</div>
 		) : (
-			<section className="detail-section">
-				<div className="detail-grid">
-					<div>
-						<span>Version</span>
-						<strong>0.1.0</strong>
+			<div className="detail-stack">
+				<div className="detail-row">
+					<span className="detail-row__label">Version</span>
+					<div className="detail-row__value">
+						<span>0.1.0</span>
 					</div>
 				</div>
-			</section>
+			</div>
 		);
 
 	return (
