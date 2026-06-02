@@ -309,6 +309,12 @@ strong {
 	backdrop-filter: blur(18px);
 }
 
+.app-shell[data-window-chrome="desktop"] .app-shell__header {
+	padding-block: 0.5rem;
+	padding-inline: 0.5rem 0.3rem;
+	-webkit-app-region: drag;
+}
+
 .connection-status-panel h2 {
 	margin: 0;
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
@@ -322,6 +328,7 @@ strong {
 	align-items: center;
 	gap: 0.75rem;
 	min-width: 0;
+	flex: 0 0 auto;
 }
 
 .app-shell__host strong {
@@ -684,6 +691,25 @@ strong {
 	white-space: nowrap;
 }
 
+.app-shell__window-controls {
+	display: inline-flex;
+	align-items: stretch;
+	gap: 0.5rem;
+	margin-left: auto;
+}
+
+.app-shell__window-button {
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 0.3rem;
+}
+
+.app-shell__window-button--danger:hover:enabled,
+.app-shell__window-button--danger:focus-visible {
+	background: rgba(220, 38, 38, 0.16);
+	color: var(--alert-text);
+}
+
 .control-overlay {
 	position: fixed;
 	inset: 0;
@@ -855,6 +881,10 @@ strong {
 	.app-shell__header {
 		flex-wrap: wrap;
 		align-items: center;
+	}
+
+	.app-shell[data-window-chrome="desktop"] .app-shell__header {
+		padding-inline: 0.75rem;
 	}
 
 	.connection-status-panel,

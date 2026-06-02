@@ -11,7 +11,15 @@
   },
   "app": {
     "windows": [
-      { "title": "cli-pocket", "width": 1100, "height": 720, "minWidth": 480, "minHeight": 320 }
+      {
+        "title": "cli-pocket",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 480,
+        "minHeight": 320,
+        "decorations": false,
+        "shadow": true
+      }
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost"

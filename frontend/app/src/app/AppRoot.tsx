@@ -19,6 +19,7 @@ import {
 } from "./ServerModal";
 import { ServerOptionButtons } from "./ServerOptionButtons";
 import { Shell } from "./shell/Shell";
+import { useDesktopWindowControls } from "./shell/useDesktopWindowControls";
 import { createAppStores } from "./stores";
 import { TerminalArea } from "./terminalArea";
 import { useAppRuntime } from "./useAppRuntime";
@@ -57,6 +58,7 @@ export function AppRoot({
 	const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
 		typeof window !== "undefined" ? window.innerWidth <= 900 : false,
 	);
+	const windowControls = useDesktopWindowControls(platform.id === "desktop");
 	const {
 		services,
 		platformError,
@@ -279,6 +281,7 @@ export function AppRoot({
 		<Shell
 			activeServerLabel={activeServer?.label ?? null}
 			connectionState={workspace.connectionState}
+			windowControls={windowControls}
 			isOverlayOpen={ui.isOverlayOpen}
 			onOpenOverlay={() => ui.openOverlay("settings")}
 			onCloseOverlay={ui.closeOverlay}
