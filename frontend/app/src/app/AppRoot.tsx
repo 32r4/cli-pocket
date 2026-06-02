@@ -1,3 +1,4 @@
+import { LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { PlatformServices } from "@/platform/bridge/types";
@@ -16,6 +17,7 @@ import {
 	ServerModal,
 	type ServerModalMode,
 } from "./ServerModal";
+import { ServerOptionButtons } from "./ServerOptionButtons";
 import { Shell } from "./shell/Shell";
 import { createAppStores } from "./stores";
 import { TerminalArea } from "./terminalArea";
@@ -68,15 +70,10 @@ export function AppRoot({
 		onInlineError: setInlineError,
 	});
 
-	const selectedServer =
-		registry.daemons.find((daemon) => daemon.id === ui.selectedServerId) ??
-		null;
 	const activeServer =
 		registry.daemons.find(
 			(daemon) => daemon.id === workspace.activeConnectionServerId,
 		) ?? null;
-	const mainServer =
-		selectedServer ?? activeServer ?? registry.daemons[0] ?? null;
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
@@ -225,32 +222,37 @@ export function AppRoot({
 						theme={ui.theme}
 						onInlineError={setInlineError}
 					/>
+				) : workspace.connectionState === "connecting" ? (
+					<section
+						className="connection-spinner-panel"
+						aria-label="Connecting to server"
+					>
+						<LoaderCircle
+							className="connection-spinner"
+							aria-hidden="true"
+							size={32}
+							strokeWidth={1.75}
+						/>
+						<span className="sr-only">Connecting</span>
+					</section>
 				) : hasSavedServers ? (
 					<section
 						className="connection-status-panel"
 						aria-label="Connection status"
 					>
-						<h2>
-							{workspace.connectionState === "failed"
-								? "Connection failed"
-								: "Connecting"}
-						</h2>
-						<p>{mainServer?.label ?? "No server"}</p>
+						<h2>Connection failed</h2>
 					</section>
 				) : (
 					<section
 						className="empty-hosts-panel"
 						aria-label="Add server options"
 					>
-						<button type="button" onClick={openDirectServerModal}>
-							Direct connection
-						</button>
-						<button type="button" onClick={openPairingServerModal}>
-							Pairing link
-						</button>
-						<button type="button" disabled>
-							QR code
-						</button>
+						<div className="server-option-buttons">
+							<ServerOptionButtons
+								onOpenDirect={openDirectServerModal}
+								onOpenPairing={openPairingServerModal}
+							/>
+						</div>
 					</section>
 				)}
 

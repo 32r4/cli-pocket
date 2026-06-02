@@ -1,4 +1,4 @@
-import { Plus, X } from "lucide-react";
+import { LoaderCircle, Plus, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { TerminalViewport } from "@/features/terminals/TerminalViewport";
@@ -296,22 +296,32 @@ export function TerminalArea({
 						</div>
 					))}
 				</div>
-				<button
-					className="icon-button terminal-tabs__add"
-					type="button"
-					aria-label="Create terminal"
-					onClick={() => {
-						void createSession();
-					}}
-				>
-					<Plus aria-hidden="true" size={16} strokeWidth={1.75} />
-				</button>
+				<div className="terminal-tabs__actions">
+					<button
+						className="icon-button terminal-tabs__add"
+						type="button"
+						aria-label="Create terminal"
+						onClick={() => {
+							void createSession();
+						}}
+					>
+						<Plus aria-hidden="true" size={16} strokeWidth={1.75} />
+					</button>
+				</div>
 			</div>
 			<div className="terminal-stage">
 				{activeSession == null ? (
 					<div className="xterm-server">Select a terminal</div>
 				) : activeSession.status === "connecting" ? (
-					<div className="xterm-server">Connecting terminal...</div>
+					<div className="xterm-server xterm-server--spinner">
+						<LoaderCircle
+							className="connection-spinner"
+							aria-hidden="true"
+							size={32}
+							strokeWidth={1.75}
+						/>
+						<span className="sr-only">Connecting terminal</span>
+					</div>
 				) : activeSession.status === "error" ? (
 					<div className="xterm-server">
 						{activeSession.error ?? "Terminal attach failed"}
@@ -321,13 +331,17 @@ export function TerminalArea({
 				)}
 			</div>
 			<footer className="terminal-footer">
-				<span>{activeSession?.title ?? "No terminal"}</span>
-				<span>
+				<span className="terminal-footer__title">
+					{activeSession?.title ?? "No terminal"}
+				</span>
+				<span className="terminal-footer__size">
 					{activeSession == null
 						? "--"
 						: `${activeSession.cols}x${activeSession.rows}`}
 				</span>
-				<span>{activeSession?.status ?? workspace.connectionState}</span>
+				<span className="terminal-footer__state">
+					{activeSession?.status ?? workspace.connectionState}
+				</span>
 			</footer>
 		</section>
 	);

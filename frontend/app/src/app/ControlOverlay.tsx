@@ -52,7 +52,6 @@ function SavedServers({
 }) {
 	return (
 		<div className="server-list">
-			<p className="server-list__heading">Saved servers</p>
 			{servers.map((server) => (
 				<div className="server-list__row" key={server.id}>
 					<button
@@ -64,7 +63,7 @@ function SavedServers({
 						onClick={() => onConnectServer(server)}
 					>
 						<ServerKindIcon kind={server.kind} />
-						<span>{server.label}</span>
+						<span className="server-list__label">{server.label}</span>
 						<span className="sr-only">
 							{server.kind === "direct" ? "Local server" : "Remote server"}
 						</span>

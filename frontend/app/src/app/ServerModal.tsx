@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
+import { ServerOptionButtons } from "./ServerOptionButtons";
 
 export type ServerModalMode = "closed" | "chooser" | "direct" | "pairing";
 
@@ -66,11 +68,11 @@ interface ServerModalProps {
 }
 
 function modalTitle(mode: ServerModalMode) {
-	return mode === "chooser"
-		? "Add server"
-		: mode === "direct"
-			? "Direct connection"
-			: "Pairing link";
+	return mode === "direct"
+		? "Direct connection"
+		: mode === "pairing"
+			? "Pairing link"
+			: null;
 }
 
 export function ServerModal({
@@ -85,6 +87,14 @@ export function ServerModal({
 	onImportPairingLink,
 	onServerFormChange,
 }: ServerModalProps) {
+	const modalRef = useRef<HTMLDivElement | null>(null);
+
+	useEffect(() => {
+		if (mode !== "closed") {
+			modalRef.current?.focus();
+		}
+	}, [mode]);
+
 	if (mode === "closed") {
 		return null;
 	}
@@ -92,24 +102,29 @@ export function ServerModal({
 	return (
 		<div className="server-modal-backdrop">
 			<div
+				ref={modalRef}
 				className="server-modal"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Add server modal"
+				aria-label="Server modal"
+				tabIndex={-1}
+				onBlur={(event) => {
+					if (event.currentTarget.contains(event.relatedTarget)) {
+						return;
+					}
+					onClose();
+				}}
 			>
-				<h2>{modalTitle(mode)}</h2>
+				{modalTitle(mode) ? (
+					<h2 className="server-modal__title">{modalTitle(mode)}</h2>
+				) : null}
 
 				{mode === "chooser" ? (
-					<div className="server-option-list">
-						<button type="button" onClick={onOpenDirect}>
-							Direct connection
-						</button>
-						<button type="button" onClick={onOpenPairing}>
-							Pairing link
-						</button>
-						<button type="button" disabled>
-							QR code
-						</button>
+					<div className="server-option-buttons">
+						<ServerOptionButtons
+							onOpenDirect={onOpenDirect}
+							onOpenPairing={onOpenPairing}
+						/>
 					</div>
 				) : null}
 

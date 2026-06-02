@@ -39,7 +39,9 @@ export function Shell({
 					<Menu aria-hidden="true" size={18} strokeWidth={1.75} />
 				</button>
 				<div className="app-shell__host">
-					<strong>{activeServerLabel ?? "No server"}</strong>
+					{activeServerLabel != null ? (
+						<strong>{activeServerLabel}</strong>
+					) : null}
 					<span className="sr-only">{`Status ${indicatorState}`}</span>
 					<span
 						className="app-shell__status-light"
