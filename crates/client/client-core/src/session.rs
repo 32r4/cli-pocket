@@ -16,6 +16,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::rc::Rc;
+use tracing::trace;
 
 use crate::events::ClientEvent;
 use crate::history::TerminalHistoryPage;
@@ -393,7 +394,7 @@ async fn run_session_loop<T, C, R, K>(
                     .await;
             }
             Err(err) => {
-                let will_retry = !matches!(err, ClientError::Rejected(_));
+                let will_retry = should_retry_after_disconnect(&err);
                 let _ = events_tx
                     .clone()
                     .send(ClientEvent::Disconnected {
@@ -551,7 +552,7 @@ where
                 {
                     Either::Left((cmd, _)) => {
                         let Some(cmd) = cmd else {
-                            return Ok(());
+                            return Err(ClientError::Closed);
                         };
                         if matches!(cmd, SessionCommand::Shutdown) {
                             return Ok(());
@@ -567,7 +568,7 @@ where
                     }
                     Either::Right((Either::Left((cmd, _)), _)) => {
                         let Some(cmd) = cmd else {
-                            return Ok(());
+                            return Err(ClientError::Closed);
                         };
                         let active = state.terminal.borrow().clone();
                         let frame = frame_for_command(
@@ -1078,6 +1079,7 @@ async fn send_encrypted<T: Transport>(
     session: &mut NoiseSession,
     frame: &Frame,
 ) -> ClientResult<()> {
+    trace!(direction = "send", ?frame, "client wire frame");
     let plaintext = encode_frame(frame)?;
     let ciphertext = session.encrypt(&plaintext)?;
     transport.send(ciphertext).await?;
@@ -1090,7 +1092,9 @@ async fn recv_encrypted<T: Transport>(
 ) -> ClientResult<Frame> {
     let ciphertext = recv_transport(transport).await?;
     let plaintext = session.decrypt(&ciphertext)?;
-    Ok(decode_frame(&plaintext)?)
+    let frame = decode_frame(&plaintext)?;
+    trace!(direction = "recv", ?frame, "client wire frame");
+    Ok(frame)
 }
 
 async fn recv_transport<T: Transport>(transport: &mut T) -> ClientResult<Vec<u8>> {
@@ -1757,6 +1761,10 @@ fn is_recoverable_bye(reason: &ByeReason) -> bool {
     )
 }
 
+fn should_retry_after_disconnect(error: &ClientError) -> bool {
+    !matches!(error, ClientError::Rejected(_) | ClientError::Closed)
+}
+
 fn parse_psk_hex(psk_hex: &str) -> ClientResult<[u8; 32]> {
     let bytes = hex::decode(psk_hex)
         .map_err(|error| ClientError::Transport(format!("relay psk_hex: {error}")))?;
@@ -2138,5 +2146,20 @@ mod tests {
         assert!(matches!(history_reply, Err(ClientError::Closed)));
         assert!(runtime.pending_requests.is_empty());
         assert!(runtime.active_streams.is_empty());
+    }
+
+    #[test]
+    fn closed_and_rejected_disconnects_do_not_retry() {
+        assert!(!should_retry_after_disconnect(&ClientError::Closed));
+        assert!(!should_retry_after_disconnect(&ClientError::Rejected(
+            ByeReason::Revoked,
+        )));
+    }
+
+    #[test]
+    fn transport_disconnects_do_retry() {
+        assert!(should_retry_after_disconnect(&ClientError::Transport(
+            "socket reset".to_owned(),
+        )));
     }
 }

@@ -7,7 +7,6 @@ import {
 } from "./terminalSessionActor";
 
 interface WorkspaceStoreShape {
-	activeSessionId: string | null;
 	updateTerminalSize: (terminalId: string, cols: number, rows: number) => void;
 }
 
@@ -21,21 +20,10 @@ interface TerminalSessionRegistryDeps {
 export class TerminalSessionRegistry {
 	private actors = new Map<string, TerminalSessionActor>();
 	private runtimeStates = new Map<string, TerminalRuntimeState>();
-	private selectedTerminalId: string | null;
+	private selectedTerminalId: string | null = null;
 	private connectionGeneration: number | null = null;
-	private readonly unsubscribeWorkspace: () => void;
 
-	constructor(private readonly deps: TerminalSessionRegistryDeps) {
-		this.selectedTerminalId = deps.workspaceState.getState().activeSessionId;
-		this.unsubscribeWorkspace = deps.workspaceState.subscribe(
-			(state, previousState) => {
-				if (state.activeSessionId === previousState.activeSessionId) {
-					return;
-				}
-				this.selectTerminal(state.activeSessionId);
-			},
-		);
-	}
+	constructor(private readonly deps: TerminalSessionRegistryDeps) {}
 
 	applyOutput(
 		terminalId: string,
@@ -69,9 +57,7 @@ export class TerminalSessionRegistry {
 		}
 	}
 
-	dispose() {
-		this.unsubscribeWorkspace();
-	}
+	dispose() {}
 
 	mountActive(host: HTMLElement) {
 		if (this.selectedTerminalId == null) {
@@ -108,7 +94,7 @@ export class TerminalSessionRegistry {
 		return this.runtimeStates.get(this.selectedTerminalId) ?? null;
 	}
 
-	private selectTerminal(terminalId: string | null) {
+	setSelectedTerminal(terminalId: string | null) {
 		if (
 			this.selectedTerminalId != null &&
 			this.selectedTerminalId !== terminalId

@@ -99,6 +99,7 @@ function makeTerminalRegistry(): TerminalSessionRegistry {
 		applyOutput: vi.fn(),
 		disconnect: vi.fn(),
 		removeTerminal: vi.fn(),
+		setSelectedTerminal: vi.fn(),
 		dispose: vi.fn(),
 		mountActive: vi.fn(async () => undefined),
 		unmountActive: vi.fn(),
@@ -323,6 +324,80 @@ describe("ConnectionController", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("does not start a second connect while the same server is already connecting", async () => {
+		let releaseFirstConnect: (() => void) | undefined;
+		const actor = makeActor([]).actor;
+		const services: PlatformServices = {
+			sessionFactory: {
+				connect: vi.fn(
+					() =>
+						new Promise<SessionActor>((resolve) => {
+							releaseFirstConnect = () => resolve(actor);
+						}),
+				),
+			},
+			registry: {
+				load: vi.fn(async () => ({
+					version: 1 as const,
+					daemons: [],
+					selectedDaemonId: null,
+				})),
+				save: vi.fn(async () => undefined),
+				exportIdentity: vi.fn(async () => new Uint8Array()),
+				importIdentity: vi.fn(async () => undefined),
+			},
+			host: null,
+		};
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const workspaceState = createWorkspaceStore();
+		daemonRegistry.hydratePersistedState({
+			version: 1,
+			daemons: [
+				{
+					id: "server-a",
+					label: "server-a",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:9999",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: "server-a",
+		});
+		uiState.getState().setSelectedServerId("server-a");
+
+		const controller = new ConnectionController({
+			services,
+			daemonRegistry,
+			uiState,
+			workspaceState,
+			onInlineError: vi.fn(),
+			onConnectionReset: vi.fn(),
+			onTerminalRemoved: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
+		});
+
+		const server = daemonRegistry.getState().daemons[0];
+		expect(server).toBeDefined();
+		if (server == null) {
+			throw new Error("expected seeded daemon");
+		}
+
+		const firstConnect = controller.connectServer(server);
+		const secondConnect = controller.connectServer(server);
+		await Promise.resolve();
+
+		expect(services.sessionFactory.connect).toHaveBeenCalledTimes(1);
+
+		if (releaseFirstConnect == null) {
+			throw new Error("expected first connect to be pending");
+		}
+		releaseFirstConnect();
+		await firstConnect;
+		await secondConnect;
 	});
 
 	it("disconnects the active server and clears workspace state", async () => {

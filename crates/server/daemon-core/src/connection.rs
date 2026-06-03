@@ -18,7 +18,7 @@ use cli_pocket_pty::Terminal;
 use cli_pocket_transport::Transport;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::client_db::{ClientDb, ClientRecord};
 use crate::handshake::{anonymous_responder_handshake, responder_handshake, AcceptedHandshake};
@@ -180,6 +180,7 @@ impl<T: Transport> EncryptedChannel<T> {
     }
 
     async fn send_frame(&mut self, frame: &Frame) -> crate::DaemonResult<()> {
+        trace!(direction = "send", ?frame, "daemon wire frame");
         let plaintext = encode_frame(frame).map_err(crate::DaemonError::Proto)?;
         let ciphertext = self
             .session
@@ -204,7 +205,9 @@ impl<T: Transport> EncryptedChannel<T> {
             .session
             .decrypt(&ciphertext)
             .map_err(crate::DaemonError::Crypto)?;
-        decode_frame(&plaintext).map_err(crate::DaemonError::Proto)
+        let frame = decode_frame(&plaintext).map_err(crate::DaemonError::Proto)?;
+        trace!(direction = "recv", ?frame, "daemon wire frame");
+        Ok(frame)
     }
 }
 

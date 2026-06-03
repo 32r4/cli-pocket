@@ -151,8 +151,13 @@ export class HostController {
 				lastConnectedAt: existing?.lastConnectedAt ?? null,
 			};
 			this.deps.daemonRegistry.getState().upsertDaemon(localDaemon);
-			this.deps.daemonRegistry.getState().selectDaemon(localDaemon.id);
-			this.deps.uiState.getState().setSelectedServerId(localDaemon.id);
+			const selectedServerId = this.deps.uiState.getState().selectedServerId;
+			const selectedDaemonId =
+				this.deps.daemonRegistry.getState().selectedDaemonId;
+			if (selectedServerId == null && selectedDaemonId == null) {
+				this.deps.daemonRegistry.getState().selectDaemon(localDaemon.id);
+				this.deps.uiState.getState().setSelectedServerId(localDaemon.id);
+			}
 		} catch (error: unknown) {
 			this.deps.onInlineError(
 				error instanceof Error

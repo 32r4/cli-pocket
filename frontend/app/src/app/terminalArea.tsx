@@ -53,6 +53,10 @@ export function TerminalArea({
 		controller.setTheme(theme);
 	}, [controller, theme]);
 
+	useEffect(() => {
+		registry.setSelectedTerminal(workspace.activeSessionId);
+	}, [registry, workspace.activeSessionId]);
+
 	if (workspace.connectionState !== "connected") {
 		return null;
 	}

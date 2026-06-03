@@ -66,6 +66,7 @@ function makeRegistry(): TerminalSessionRegistry {
 		applyOutput: vi.fn(),
 		disconnect: vi.fn(),
 		removeTerminal: vi.fn(),
+		setSelectedTerminal: vi.fn(),
 		dispose: vi.fn(),
 		mountActive: vi.fn(async () => undefined),
 		unmountActive: vi.fn(),

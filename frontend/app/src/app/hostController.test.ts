@@ -66,8 +66,26 @@ describe("HostController", () => {
 		expect(
 			daemonRegistry.getState().daemons.map((daemon) => daemon.id),
 		).toEqual(["saved", "local-daemon"]);
-		expect(uiState.getState().selectedServerId).toBe("local-daemon");
+		expect(uiState.getState().selectedServerId).toBe("saved");
+		expect(daemonRegistry.getState().selectedDaemonId).toBe("saved");
 		expect(onInlineError).not.toHaveBeenCalledWith(expect.any(String));
+	});
+
+	it("selects embedded daemon only when no saved selection exists", async () => {
+		const services = makeServices();
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const controller = new HostController({
+			services,
+			daemonRegistry,
+			uiState,
+			onInlineError: vi.fn(),
+		});
+
+		await controller.bootstrap();
+
+		expect(daemonRegistry.getState().selectedDaemonId).toBe("local-daemon");
+		expect(uiState.getState().selectedServerId).toBe("local-daemon");
 	});
 
 	it("owns daemon restart", async () => {

@@ -112,6 +112,7 @@ export class ConnectionController {
 	private bootstrapped = false;
 	private terminalRefreshTimer: number | null = null;
 	private initialTerminalBootstrapPending = false;
+	private pendingConnectServerId: string | null = null;
 	private readonly terminalRefreshIntervalMs = 1000;
 
 	constructor(private readonly deps: ControllerDeps) {}
@@ -165,13 +166,24 @@ export class ConnectionController {
 
 		const workspace = this.deps.workspaceState.getState();
 		if (
-			workspace.connectionState === "connected" &&
+			(workspace.connectionState === "connected" ||
+				workspace.connectionState === "connecting") &&
 			workspace.activeConnectionServerId === server.id
 		) {
 			return;
 		}
+		if (this.pendingConnectServerId === server.id) {
+			return;
+		}
 
-		await this.connect(server.id, daemonRecordToConnectConfig(server));
+		this.pendingConnectServerId = server.id;
+		try {
+			await this.connect(server.id, daemonRecordToConnectConfig(server));
+		} finally {
+			if (this.pendingConnectServerId === server.id) {
+				this.pendingConnectServerId = null;
+			}
+		}
 	}
 
 	private async autoConnectSelectedServer() {
@@ -196,6 +208,7 @@ export class ConnectionController {
 		}
 
 		try {
+			this.pendingConnectServerId = selectedServer.id;
 			await this.connect(
 				selectedServer.id,
 				daemonRecordToConnectConfig(selectedServer),
@@ -205,6 +218,10 @@ export class ConnectionController {
 				error instanceof Error ? error.message : "connection failed";
 			this.deps.workspaceState.getState().markConnectionFailed(message);
 			this.deps.onInlineError(message);
+		} finally {
+			if (this.pendingConnectServerId === selectedServer.id) {
+				this.pendingConnectServerId = null;
+			}
 		}
 	}
 
