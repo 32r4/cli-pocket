@@ -14,8 +14,8 @@ pub use codec::{
 };
 pub use error::{ByeReason, ProtocolError};
 pub use frame::{
-    EventBody, EventFrame, EventKind, Frame, FrameBody, RequestBody, RequestFrame, RequestOp,
-    ResponseBody, ResponseError, ResponseFrame, StreamDataFrame, StreamKind,
+    EventBody, EventFrame, Frame, FrameBody, RequestBody, RequestFrame, ResponseBody,
+    ResponseError, ResponseFrame, StreamDataFrame,
 };
 pub use hello::{Hello, HelloOk, ResumeAttachment, ResumeToken, ServerInfo};
 pub use relay::{PairCloseReason, PairId, RelayCtrl, RelayData, RELAY_DISC_CTRL, RELAY_DISC_DATA};

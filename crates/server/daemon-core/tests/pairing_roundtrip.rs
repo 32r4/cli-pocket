@@ -23,8 +23,8 @@ use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Hello, ServerInfo};
 use cli_pocket_proto::{
-    ClientId, RequestBody, RequestFrame, RequestId, RequestOp, ResponseBody, StreamId, StreamKind,
-    TerminalCreateParams, TerminalId, PROTOCOL_VERSION,
+    ClientId, RequestBody, RequestFrame, RequestId, ResponseBody, StreamId, TerminalCreateParams,
+    TerminalId, PROTOCOL_VERSION,
 };
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
 use parking_lot::Mutex;
@@ -141,7 +141,6 @@ async fn paired_client_creates_terminal_end_to_end() {
     let request_id = 1u32;
     let create = request_frame(
         request_id,
-        RequestOp::CreateTerminal,
         RequestBody::CreateTerminal {
             params: TerminalCreateParams {
                 cols: 80,
@@ -167,8 +166,8 @@ async fn paired_client_creates_terminal_end_to_end() {
                 RequestId(request_id),
                 "request_id should match"
             );
-            match response.body.as_ref() {
-                Some(ResponseBody::CreateTerminal { info }) => info.terminal,
+            match &response.result {
+                Ok(ResponseBody::CreateTerminal { info }) => info.terminal,
                 other => panic!("expected CreateTerminal response body, got {other:?}"),
             }
         }
@@ -258,7 +257,6 @@ async fn paired_client_receives_live_output_after_input() {
         &mut session,
         &request_frame(
             3,
-            RequestOp::SendInput,
             RequestBody::SendInput {
                 terminal_id,
                 bytes: input.into(),
@@ -345,7 +343,6 @@ async fn paired_client_pages_history() {
         &mut session,
         &request_frame(
             3,
-            RequestOp::SendInput,
             RequestBody::SendInput {
                 terminal_id,
                 bytes: live_output_input().into(),
@@ -369,7 +366,6 @@ async fn paired_client_pages_history() {
         &mut session,
         &request_frame(
             4,
-            RequestOp::ReadHistory,
             RequestBody::ReadHistory {
                 terminal_id,
                 before: None,
@@ -385,11 +381,11 @@ async fn paired_client_pages_history() {
             .await
             .expect("recv history response");
         match history_response.body {
-            FrameBody::Response(response) if response.id == RequestId(4) => match response.body {
-                Some(ResponseBody::ReadHistory { stream_id, .. }) => break stream_id,
+            FrameBody::Response(response) if response.id == RequestId(4) => match response.result {
+                Ok(ResponseBody::ReadHistory { stream_id, .. }) => break stream_id,
                 other => panic!("expected ReadHistory response body, got {other:?}"),
             },
-            FrameBody::StreamData(chunk) if chunk.kind == StreamKind::Output => {}
+            FrameBody::StreamData(_) => {}
             other => panic!("expected history Response, got {other:?}"),
         }
     };
@@ -400,7 +396,7 @@ async fn paired_client_pages_history() {
             .await
             .expect("recv history chunk");
         match frame.body {
-            FrameBody::StreamData(chunk) if chunk.kind == StreamKind::History => {
+            FrameBody::StreamData(chunk) => {
                 assert_eq!(chunk.stream_id, history_stream);
                 assert!(chunk.offset.is_some());
                 let start_seq = chunk.seq;
@@ -413,7 +409,6 @@ async fn paired_client_pages_history() {
                     break;
                 }
             }
-            FrameBody::StreamData(chunk) if chunk.kind == StreamKind::Output => {}
             other => panic!("expected history StreamData, got {other:?}"),
         }
     }
@@ -577,7 +572,6 @@ async fn paired_client_attach_unknown_terminal_returns_error_response() {
         &mut session,
         &request_frame(
             2,
-            RequestOp::AttachTerminal,
             RequestBody::AttachTerminal {
                 terminal_id: TerminalId::new(),
             },
@@ -593,9 +587,9 @@ async fn paired_client_attach_unknown_terminal_returns_error_response() {
     match response.body {
         FrameBody::Response(response) => {
             assert_eq!(response.id, RequestId(2));
-            assert!(!response.ok, "unknown terminal attach should fail");
-            assert!(response.body.is_none());
-            let error = response.error.expect("error body");
+            let Err(error) = response.result else {
+                panic!("unknown terminal attach should fail");
+            };
             assert_eq!(error.code, cli_pocket_proto::ProtocolError::UnknownTerminal);
         }
         other => panic!("expected error response, got {other:?}"),
@@ -668,7 +662,6 @@ async fn create_terminal(
 ) -> Result<TerminalId, String> {
     let create = request_frame(
         1,
-        RequestOp::CreateTerminal,
         RequestBody::CreateTerminal {
             params: TerminalCreateParams {
                 cols: 80,
@@ -683,8 +676,8 @@ async fn create_terminal(
 
     let create_ok = recv_frame(client_transport, session).await?;
     match create_ok.body {
-        FrameBody::Response(response) => match response.body {
-            Some(ResponseBody::CreateTerminal { info }) => Ok(info.terminal),
+        FrameBody::Response(response) => match response.result {
+            Ok(ResponseBody::CreateTerminal { info }) => Ok(info.terminal),
             other => Err(format!(
                 "expected CreateTerminal response body, got {other:?}"
             )),
@@ -698,11 +691,7 @@ async fn attach_terminal(
     session: &mut NoiseSession,
     terminal_id: TerminalId,
 ) -> Result<StreamId, String> {
-    let attach = request_frame(
-        2,
-        RequestOp::AttachTerminal,
-        RequestBody::AttachTerminal { terminal_id },
-    );
+    let attach = request_frame(2, RequestBody::AttachTerminal { terminal_id });
     send_frame(client_transport, session, &attach).await?;
 
     let stream_id = loop {
@@ -712,8 +701,8 @@ async fn attach_terminal(
                 if response.id != RequestId(2) {
                     return Err(format!("unexpected attach request id {:?}", response.id));
                 }
-                match response.body {
-                    Some(ResponseBody::AttachTerminal { stream_id, .. }) => break stream_id,
+                match response.result {
+                    Ok(ResponseBody::AttachTerminal { stream_id, .. }) => break stream_id,
                     other => {
                         return Err(format!(
                             "expected AttachTerminal response body, got {other:?}"
@@ -721,7 +710,7 @@ async fn attach_terminal(
                     }
                 }
             }
-            FrameBody::StreamData(chunk) if chunk.kind == StreamKind::Output => {}
+            FrameBody::StreamData(_) => {}
             other => return Err(format!("expected AttachTerminal response, got {other:?}")),
         }
     };
@@ -729,7 +718,7 @@ async fn attach_terminal(
     loop {
         let frame = recv_frame(client_transport, session).await?;
         match frame.body {
-            FrameBody::StreamData(chunk) if chunk.kind == StreamKind::Baseline => {
+            FrameBody::StreamData(chunk) => {
                 if chunk.stream_id != stream_id {
                     return Err(format!(
                         "baseline chunk for unexpected stream {:?}",
@@ -757,8 +746,7 @@ async fn recv_output_containing(
         loop {
             let frame = recv_frame_inner(client_transport, session).await?;
             if let FrameBody::StreamData(chunk) = frame.body {
-                if chunk.kind == StreamKind::Output
-                    && chunk.stream_id == stream_id
+                if chunk.stream_id == stream_id
                     && chunk
                         .bytes
                         .as_ref()
@@ -795,9 +783,6 @@ async fn recv_output_for_active_stream_only(
             {
                 Ok(Ok(frame)) => {
                     if let FrameBody::StreamData(chunk) = frame.body {
-                        if chunk.kind != StreamKind::Output {
-                            continue;
-                        }
                         if chunk.stream_id == inactive_stream_id
                             && chunk
                                 .bytes
@@ -833,10 +818,9 @@ async fn recv_output_for_active_stream_only(
     .map_err(|_| "timed out waiting for active-only live output".to_string())?
 }
 
-fn request_frame(request_id: u32, op: RequestOp, body: RequestBody) -> Frame {
+fn request_frame(request_id: u32, body: RequestBody) -> Frame {
     Frame::body(FrameBody::Request(RequestFrame {
         id: RequestId(request_id),
-        op,
         body,
     }))
 }

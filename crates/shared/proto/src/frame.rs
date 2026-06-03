@@ -38,22 +38,7 @@ impl Frame {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestFrame {
     pub id: RequestId,
-    pub op: RequestOp,
     pub body: RequestBody,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RequestOp {
-    ListTerminals,
-    CreateTerminal,
-    AttachTerminal,
-    ReadHistory,
-    KillTerminal,
-    GetServerConfig,
-    SetServerConfig,
-    SendInput,
-    ResizeTerminal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,9 +76,7 @@ pub enum RequestBody {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResponseFrame {
     pub id: RequestId,
-    pub ok: bool,
-    pub body: Option<ResponseBody>,
-    pub error: Option<ResponseError>,
+    pub result: Result<ResponseBody, ResponseError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,35 +120,15 @@ pub struct ResponseError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StreamDataFrame {
     pub stream_id: StreamId,
-    pub kind: StreamKind,
     pub seq: StreamSeq,
     pub offset: Option<u32>,
     pub bytes: ByteBuf,
     pub last: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StreamKind {
-    Baseline,
-    Output,
-    History,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventFrame {
-    pub kind: EventKind,
     pub body: EventBody,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EventKind {
-    Connected,
-    Disconnected,
-    TerminalCreated,
-    TerminalExited,
-    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

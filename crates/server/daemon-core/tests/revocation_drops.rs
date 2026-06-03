@@ -25,8 +25,8 @@ use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Hello, ServerInfo};
 use cli_pocket_proto::{
-    ByeReason, ClientId, RequestBody, RequestFrame, RequestId, RequestOp, ResponseBody,
-    TerminalCreateParams, PROTOCOL_VERSION,
+    ByeReason, ClientId, RequestBody, RequestFrame, RequestId, ResponseBody, TerminalCreateParams,
+    PROTOCOL_VERSION,
 };
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
 use parking_lot::Mutex;
@@ -143,7 +143,6 @@ async fn revocation_drops_live_session() {
     let request_id = 1u32;
     let create = request_frame(
         request_id,
-        RequestOp::CreateTerminal,
         RequestBody::CreateTerminal {
             params: TerminalCreateParams {
                 cols: 80,
@@ -169,8 +168,8 @@ async fn revocation_drops_live_session() {
                 RequestId(request_id),
                 "request_id should match"
             );
-            match response.body.as_ref() {
-                Some(ResponseBody::CreateTerminal { info }) => info.terminal,
+            match &response.result {
+                Ok(ResponseBody::CreateTerminal { info }) => info.terminal,
                 other => panic!("expected CreateTerminal response body, got {other:?}"),
             }
         }
@@ -258,10 +257,9 @@ async fn recv_with_timeout(t: &mut InMemoryTransport) -> Option<Vec<u8>> {
         .expect("transport recv error")
 }
 
-fn request_frame(request_id: u32, op: RequestOp, body: RequestBody) -> Frame {
+fn request_frame(request_id: u32, body: RequestBody) -> Frame {
     Frame::body(FrameBody::Request(RequestFrame {
         id: RequestId(request_id),
-        op,
         body,
     }))
 }

@@ -2,10 +2,9 @@ use bytes::Bytes;
 use cli_pocket_crypto::{NoiseAnonymousInitiator, NoiseInitiator, NoiseSession};
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
-    ByeReason, EventBody, EventFrame, EventKind, Frame, FrameBody, Hello, ProtocolError,
-    RequestBody, RequestFrame, RequestId, RequestOp, ResponseBody, ResponseFrame, ResumeToken,
-    ServerConfig, ServerId, StreamId, StreamKind, StreamSeq, TerminalCreateParams, TerminalId,
-    TerminalInfo, PROTOCOL_VERSION,
+    ByeReason, EventBody, EventFrame, Frame, FrameBody, Hello, ProtocolError, RequestBody,
+    RequestFrame, RequestId, ResponseBody, ResponseFrame, ResumeToken, ServerConfig, ServerId,
+    StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo, PROTOCOL_VERSION,
 };
 use futures_channel::{mpsc, oneshot};
 use futures_util::{
@@ -663,12 +662,12 @@ fn handle_event_frame(
     runtime: &mut RuntimeState,
     state: &ConnectionState<'_>,
 ) -> Action {
-    match (event.kind, event.body) {
-        (EventKind::TerminalCreated, EventBody::TerminalCreated { info }) => {
+    match event.body {
+        EventBody::TerminalCreated { info } => {
             runtime.store_info(info.clone());
             Action::Emit(ClientEvent::TerminalCreated(info))
         }
-        (EventKind::TerminalExited, EventBody::TerminalExited { terminal_id, exit }) => {
+        EventBody::TerminalExited { terminal_id, exit } => {
             if runtime.active_terminal() == Some(terminal_id) {
                 clear_active_terminal(state.terminal, runtime);
             }
@@ -677,16 +676,12 @@ fn handle_event_frame(
                 info: exit,
             })
         }
-        (EventKind::Error, EventBody::Error { message, .. }) => {
-            Action::Emit(ClientEvent::Error(message))
-        }
-        (EventKind::Disconnected, EventBody::Disconnected { reason }) => {
-            Action::Emit(ClientEvent::Disconnected {
-                will_retry: true,
-                reason,
-            })
-        }
-        _ => Action::None,
+        EventBody::Error { message, .. } => Action::Emit(ClientEvent::Error(message)),
+        EventBody::Disconnected { reason } => Action::Emit(ClientEvent::Disconnected {
+            will_retry: true,
+            reason,
+        }),
+        EventBody::Connected => Action::None,
     }
 }
 
@@ -697,20 +692,13 @@ fn handle_response_frame(
     state: &ConnectionState<'_>,
 ) -> ClientResult<Action> {
     let request_id = response.id.0;
-    if !response.ok {
-        let error = response
-            .error
-            .map_or_else(|| "request failed".to_owned(), |error| error.message);
-        fail_request(request_id, &ClientError::Proto(error), runtime)?;
-        return Ok(Action::None);
-    }
-
-    let Some(body) = response.body else {
-        return Err(ClientError::Proto(format!(
-            "response {request_id} succeeded without a body"
-        )));
+    let body = match response.result {
+        Ok(body) => body,
+        Err(error) => {
+            fail_request(request_id, &ClientError::Proto(error.message), runtime)?;
+            return Ok(Action::None);
+        }
     };
-
     match body {
         ResponseBody::ListTerminals { terminals } => {
             for terminal in &terminals {
@@ -910,8 +898,8 @@ fn handle_stream_data_frame(
     runtime: &mut RuntimeState,
     state: &ConnectionState<'_>,
 ) -> ClientResult<Action> {
-    match stream.kind {
-        StreamKind::Baseline => {
+    match runtime.active_streams.get(&stream.stream_id).cloned() {
+        Some(StreamState::Baseline { .. }) => {
             let offset = stream
                 .offset
                 .ok_or_else(|| ClientError::Proto("baseline chunk missing offset".to_owned()))?;
@@ -926,19 +914,15 @@ fn handle_stream_data_frame(
                 .map_err(ClientError::Proto)?;
             Ok(Action::None)
         }
-        StreamKind::Output => {
+        Some(StreamState::Output {
+            terminal_id,
+            last_seq,
+        }) => {
             if stream.offset.is_some() {
                 return Err(ClientError::Proto(
                     "output stream chunk must not include offset".to_owned(),
                 ));
             }
-            let Some(StreamState::Output {
-                terminal_id,
-                last_seq,
-            }) = runtime.active_streams.get(&stream.stream_id).cloned()
-            else {
-                return Err(ClientError::Proto("output on unknown stream".to_owned()));
-            };
             if runtime.active_stream() != Some(stream.stream_id) {
                 return Ok(Action::None);
             }
@@ -971,27 +955,15 @@ fn handle_stream_data_frame(
                 Ok(Action::None)
             }
         }
-        StreamKind::History => {
+        Some(StreamState::History {
+            request_id,
+            terminal_id,
+            expected_next_offset,
+            next_seq: expected_next_seq,
+        }) => {
             let offset = stream
                 .offset
                 .ok_or_else(|| ClientError::Proto("history chunk missing offset".to_owned()))?;
-            let (request_id, terminal_id, expected_next_offset, expected_next_seq) =
-                match runtime.active_streams.get(&stream.stream_id) {
-                    Some(StreamState::History {
-                        request_id,
-                        terminal_id,
-                        expected_next_offset,
-                        next_seq,
-                    }) => (*request_id, *terminal_id, *expected_next_offset, *next_seq),
-                    Some(_) => {
-                        return Err(ClientError::Proto(
-                            "history chunk arrived on non-history stream".to_owned(),
-                        ));
-                    }
-                    None => {
-                        return Err(ClientError::Proto("history on unknown stream".to_owned()));
-                    }
-                };
             if offset != expected_next_offset {
                 return Err(ClientError::Proto(
                     "history chunk offset mismatch".to_owned(),
@@ -1058,6 +1030,9 @@ fn handle_stream_data_frame(
             }
             Ok(Action::None)
         }
+        None => Err(ClientError::Proto(
+            "stream data on unknown stream".to_owned(),
+        )),
     }
 }
 
@@ -1137,7 +1112,6 @@ fn frame_for_command(
                 runtime.record_send_input_ack(request_id);
                 request_frame(
                     request_id,
-                    RequestOp::SendInput,
                     RequestBody::SendInput {
                         terminal_id: handle.terminal_id(),
                         bytes: bytes.to_vec().into(),
@@ -1156,7 +1130,6 @@ fn frame_for_command(
                 runtime.record_resize_ack(request_id);
                 request_frame(
                     request_id,
-                    RequestOp::ResizeTerminal,
                     RequestBody::ResizeTerminal {
                         terminal_id: handle.terminal_id(),
                         cols,
@@ -1172,7 +1145,6 @@ fn frame_for_command(
                 runtime.record_kill_ack(request_id);
                 request_frame(
                     request_id,
-                    RequestOp::KillTerminal,
                     RequestBody::KillTerminal {
                         terminal_id: handle.terminal_id(),
                     },
@@ -1193,11 +1165,7 @@ fn frame_for_session_command(
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
             runtime.record_create(request_id);
-            request_frame(
-                request_id,
-                RequestOp::CreateTerminal,
-                RequestBody::CreateTerminal { params },
-            )
+            request_frame(request_id, RequestBody::CreateTerminal { params })
         }
         SessionCommand::ActivateTerminal {
             terminal: target,
@@ -1211,7 +1179,6 @@ fn frame_for_session_command(
                 clear_active_terminal(active_terminal, runtime);
                 request_frame(
                     request_id,
-                    RequestOp::AttachTerminal,
                     RequestBody::AttachTerminal {
                         terminal_id: target,
                     },
@@ -1219,7 +1186,6 @@ fn frame_for_session_command(
             } else {
                 request_frame(
                     request_id,
-                    RequestOp::AttachTerminal,
                     RequestBody::AttachTerminal {
                         terminal_id: target,
                     },
@@ -1230,11 +1196,7 @@ fn frame_for_session_command(
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
             runtime.record_list(request_id, reply);
-            request_frame(
-                request_id,
-                RequestOp::ListTerminals,
-                RequestBody::ListTerminals,
-            )
+            request_frame(request_id, RequestBody::ListTerminals)
         }
         SessionCommand::ReadHistory {
             terminal,
@@ -1247,7 +1209,6 @@ fn frame_for_session_command(
             runtime.begin_history_with_reply(request_id, terminal, reply);
             request_frame(
                 request_id,
-                RequestOp::ReadHistory,
                 RequestBody::ReadHistory {
                     terminal_id: terminal,
                     before,
@@ -1259,21 +1220,13 @@ fn frame_for_session_command(
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
             runtime.record_get_config(request_id, reply);
-            request_frame(
-                request_id,
-                RequestOp::GetServerConfig,
-                RequestBody::GetServerConfig,
-            )
+            request_frame(request_id, RequestBody::GetServerConfig)
         }
         SessionCommand::SetServerConfig { config, reply } => {
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
             runtime.record_set_config(request_id, reply);
-            request_frame(
-                request_id,
-                RequestOp::SetServerConfig,
-                RequestBody::SetServerConfig { config },
-            )
+            request_frame(request_id, RequestBody::SetServerConfig { config })
         }
         SessionCommand::KillTerminal { terminal, reply } => {
             let request_id = *next_request_id;
@@ -1284,7 +1237,6 @@ fn frame_for_session_command(
             }
             request_frame(
                 request_id,
-                RequestOp::KillTerminal,
                 RequestBody::KillTerminal {
                     terminal_id: terminal,
                 },
@@ -1294,10 +1246,9 @@ fn frame_for_session_command(
     }
 }
 
-fn request_frame(request_id: u32, op: RequestOp, body: RequestBody) -> Frame {
+fn request_frame(request_id: u32, body: RequestBody) -> Frame {
     Frame::body(FrameBody::Request(RequestFrame {
         id: RequestId(request_id),
-        op,
         body,
     }))
 }
@@ -1851,15 +1802,13 @@ mod tests {
         let action = handle_response_frame(
             ResponseFrame {
                 id: RequestId(1),
-                ok: true,
-                body: Some(ResponseBody::AttachTerminal {
+                result: Ok(ResponseBody::AttachTerminal {
                     stream_id: StreamId(9),
                     terminal_info: info.clone(),
                     baseline_start_seq: StreamSeq(10),
                     baseline_end_seq: StreamSeq(18),
                     render_prefix: "\x1b[0m".to_owned(),
                 }),
-                error: None,
             },
             &mut runtime,
             &state,
@@ -1870,7 +1819,6 @@ mod tests {
         handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(9),
-                kind: StreamKind::Baseline,
                 seq: StreamSeq(18),
                 offset: Some(0),
                 bytes: b"abcd".to_vec().into(),
@@ -1883,7 +1831,6 @@ mod tests {
         handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(9),
-                kind: StreamKind::Baseline,
                 seq: StreamSeq(18),
                 offset: Some(4),
                 bytes: b"efgh".to_vec().into(),
@@ -1929,15 +1876,13 @@ mod tests {
         handle_response_frame(
             ResponseFrame {
                 id: RequestId(1),
-                ok: true,
-                body: Some(ResponseBody::AttachTerminal {
+                result: Ok(ResponseBody::AttachTerminal {
                     stream_id: StreamId(9),
                     terminal_info: info.clone(),
                     baseline_start_seq: StreamSeq(10),
                     baseline_end_seq: StreamSeq(10),
                     render_prefix: String::new(),
                 }),
-                error: None,
             },
             &mut runtime,
             &state,
@@ -1947,7 +1892,6 @@ mod tests {
         handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(9),
-                kind: StreamKind::Baseline,
                 seq: StreamSeq(10),
                 offset: Some(0),
                 bytes: Vec::<u8>::new().into(),
@@ -1988,7 +1932,6 @@ mod tests {
         handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(44),
-                kind: StreamKind::History,
                 seq: StreamSeq(100),
                 offset: Some(0),
                 bytes: b"old ".to_vec().into(),
@@ -2001,7 +1944,6 @@ mod tests {
         handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(44),
-                kind: StreamKind::History,
                 seq: StreamSeq(104),
                 offset: Some(4),
                 bytes: b"text".to_vec().into(),
@@ -2042,9 +1984,7 @@ mod tests {
         handle_response_frame(
             ResponseFrame {
                 id: RequestId(5),
-                ok: false,
-                body: None,
-                error: Some(ResponseError {
+                result: Err(ResponseError {
                     code: ProtocolError::UnknownTerminal,
                     message: "unknown terminal".to_owned(),
                 }),
@@ -2080,9 +2020,7 @@ mod tests {
         handle_response_frame(
             ResponseFrame {
                 id: RequestId(5),
-                ok: false,
-                body: None,
-                error: Some(ResponseError {
+                result: Err(ResponseError {
                     code: ProtocolError::UnknownTerminal,
                     message: "unknown terminal".to_owned(),
                 }),
@@ -2115,7 +2053,6 @@ mod tests {
         let result = handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(404),
-                kind: StreamKind::Output,
                 seq: StreamSeq(1),
                 offset: None,
                 bytes: b"x".to_vec().into(),
@@ -2159,7 +2096,6 @@ mod tests {
         let result = handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(9),
-                kind: StreamKind::Baseline,
                 seq: StreamSeq(5),
                 offset: Some(0),
                 bytes: b"x".to_vec().into(),

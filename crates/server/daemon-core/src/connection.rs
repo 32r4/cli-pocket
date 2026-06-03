@@ -9,9 +9,9 @@ use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::HelloOk;
 use cli_pocket_proto::{
-    ByeReason, Hello, KillSignal, ProtocolError, RequestBody, RequestFrame, RequestId, RequestOp,
+    ByeReason, Hello, KillSignal, ProtocolError, RequestBody, RequestFrame, RequestId,
     ResponseBody, ResponseError, ResponseFrame, ServerConfig, SessionId, StreamDataFrame, StreamId,
-    StreamKind, StreamSeq, TerminalBaseline, TerminalId, PROTOCOL_VERSION,
+    StreamSeq, TerminalBaseline, TerminalId, PROTOCOL_VERSION,
 };
 use cli_pocket_pty::output::{OutputChunk, OutputRecv};
 use cli_pocket_pty::Terminal;
@@ -231,16 +231,6 @@ async fn handle_request(
     request: RequestFrame,
     streams: &mut StreamContext,
 ) -> crate::DaemonResult<()> {
-    if !request_body_matches_op(request.op, &request.body) {
-        send_error_response(
-            chan,
-            request.id,
-            ProtocolError::InvalidParam("request op/body mismatch".to_owned()),
-        )
-        .await?;
-        return Ok(());
-    }
-
     match request.body {
         RequestBody::ListTerminals => {
             send_ok_response(
@@ -338,33 +328,6 @@ async fn handle_request(
     }
 }
 
-fn request_body_matches_op(op: RequestOp, body: &RequestBody) -> bool {
-    matches!(
-        (op, body),
-        (RequestOp::ListTerminals, RequestBody::ListTerminals)
-            | (
-                RequestOp::CreateTerminal,
-                RequestBody::CreateTerminal { .. }
-            )
-            | (
-                RequestOp::AttachTerminal,
-                RequestBody::AttachTerminal { .. }
-            )
-            | (RequestOp::ReadHistory, RequestBody::ReadHistory { .. })
-            | (RequestOp::KillTerminal, RequestBody::KillTerminal { .. })
-            | (RequestOp::GetServerConfig, RequestBody::GetServerConfig)
-            | (
-                RequestOp::SetServerConfig,
-                RequestBody::SetServerConfig { .. }
-            )
-            | (RequestOp::SendInput, RequestBody::SendInput { .. })
-            | (
-                RequestOp::ResizeTerminal,
-                RequestBody::ResizeTerminal { .. }
-            )
-    )
-}
-
 async fn send_ok_response(
     chan: &mut EncryptedChannel<impl Transport>,
     id: RequestId,
@@ -372,9 +335,7 @@ async fn send_ok_response(
 ) -> crate::DaemonResult<()> {
     chan.send_frame(&Frame::body(FrameBody::Response(ResponseFrame {
         id,
-        ok: true,
-        body: Some(body),
-        error: None,
+        result: Ok(body),
     })))
     .await
 }
@@ -387,9 +348,7 @@ async fn send_error_response(
     let message = code.to_string();
     chan.send_frame(&Frame::body(FrameBody::Response(ResponseFrame {
         id,
-        ok: false,
-        body: None,
-        error: Some(ResponseError { code, message }),
+        result: Err(ResponseError { code, message }),
     })))
     .await
 }
@@ -445,11 +404,11 @@ async fn handle_attach_request(
     send_stream_chunks(
         chan,
         stream_id,
-        StreamKind::Baseline,
         baseline.head_seq,
         Some(0),
         snapshot.bytes.as_ref(),
         SNAPSHOT_CHUNK_BYTES,
+        false,
     )
     .await?;
 
@@ -498,11 +457,11 @@ async fn handle_history_read_request(
     send_stream_chunks(
         chan,
         stream_id,
-        StreamKind::History,
         page.start_seq,
         Some(0),
         page.bytes.as_ref(),
         HISTORY_CHUNK_BYTES,
+        true,
     )
     .await
 }
@@ -510,16 +469,15 @@ async fn handle_history_read_request(
 async fn send_stream_chunks(
     chan: &mut EncryptedChannel<impl Transport>,
     stream_id: StreamId,
-    kind: StreamKind,
     seq: StreamSeq,
     first_offset: Option<u32>,
     bytes: &[u8],
     chunk_size: usize,
+    advance_seq_per_chunk: bool,
 ) -> crate::DaemonResult<()> {
     if bytes.is_empty() {
         chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
             stream_id,
-            kind,
             seq,
             offset: first_offset,
             bytes: Vec::new().into(),
@@ -532,17 +490,17 @@ async fn send_stream_chunks(
     for (index, chunk) in bytes.chunks(chunk_size).enumerate() {
         let offset = index.saturating_mul(chunk_size);
         let last = offset + chunk.len() >= bytes.len();
-        let seq = match kind {
-            StreamKind::History | StreamKind::Output => StreamSeq(
+        let chunk_seq = if advance_seq_per_chunk {
+            StreamSeq(
                 seq.0
                     .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
-            ),
-            StreamKind::Baseline => seq,
+            )
+        } else {
+            seq
         };
         chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
             stream_id,
-            kind,
-            seq,
+            seq: chunk_seq,
             offset: first_offset
                 .map(|base| base.saturating_add(u32::try_from(offset).unwrap_or(u32::MAX))),
             bytes: chunk.to_vec().into(),
@@ -581,7 +539,6 @@ async fn send_live_output(
         let seq = StreamSeq(start_seq.saturating_add(u64::try_from(sent).unwrap_or(u64::MAX)));
         chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
             stream_id: stream,
-            kind: StreamKind::Output,
             seq,
             offset: None,
             bytes: piece.to_vec().into(),

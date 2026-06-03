@@ -75,20 +75,6 @@ fn arb_server_config() -> impl Strategy<Value = ServerConfig> {
     any::<u32>().prop_map(|scrollback_bytes| ServerConfig { scrollback_bytes })
 }
 
-fn arb_request_op() -> impl Strategy<Value = RequestOp> {
-    prop_oneof![
-        Just(RequestOp::ListTerminals),
-        Just(RequestOp::CreateTerminal),
-        Just(RequestOp::AttachTerminal),
-        Just(RequestOp::ReadHistory),
-        Just(RequestOp::KillTerminal),
-        Just(RequestOp::GetServerConfig),
-        Just(RequestOp::SetServerConfig),
-        Just(RequestOp::SendInput),
-        Just(RequestOp::ResizeTerminal),
-    ]
-}
-
 fn arb_request_body() -> impl Strategy<Value = RequestBody> {
     prop_oneof![
         Just(RequestBody::ListTerminals),
@@ -186,24 +172,6 @@ fn arb_response_error() -> impl Strategy<Value = ResponseError> {
         .prop_map(|(code, message)| ResponseError { code, message })
 }
 
-fn arb_stream_kind() -> impl Strategy<Value = StreamKind> {
-    prop_oneof![
-        Just(StreamKind::Baseline),
-        Just(StreamKind::Output),
-        Just(StreamKind::History),
-    ]
-}
-
-fn arb_event_kind() -> impl Strategy<Value = EventKind> {
-    prop_oneof![
-        Just(EventKind::Connected),
-        Just(EventKind::Disconnected),
-        Just(EventKind::TerminalCreated),
-        Just(EventKind::TerminalExited),
-        Just(EventKind::Error),
-    ]
-}
-
 fn arb_event_body() -> impl Strategy<Value = EventBody> {
     prop_oneof![
         Just(EventBody::Connected),
@@ -220,47 +188,43 @@ fn arb_event_body() -> impl Strategy<Value = EventBody> {
 
 fn arb_generic_frame_body() -> impl Strategy<Value = FrameBody> {
     prop_oneof![
-        (any::<u32>(), arb_request_op(), arb_request_body()).prop_map(|(id, op, body)| {
+        (any::<u32>(), arb_request_body()).prop_map(|(id, body)| {
             FrameBody::Request(RequestFrame {
                 id: RequestId(id),
-                op,
                 body,
             })
         }),
-        (
-            any::<u32>(),
-            any::<bool>(),
-            prop::option::of(arb_response_body()),
-            prop::option::of(arb_response_error()),
-        )
-            .prop_map(|(id, ok, body, error)| {
+        prop_oneof![
+            (any::<u32>(), arb_response_body()).prop_map(|(id, body)| {
                 FrameBody::Response(ResponseFrame {
                     id: RequestId(id),
-                    ok,
-                    body,
-                    error,
+                    result: Ok(body),
                 })
             }),
+            (any::<u32>(), arb_response_error()).prop_map(|(id, error)| {
+                FrameBody::Response(ResponseFrame {
+                    id: RequestId(id),
+                    result: Err(error),
+                })
+            }),
+        ],
         (
             any::<u32>(),
-            arb_stream_kind(),
             any::<u64>(),
             prop::option::of(any::<u32>()),
             arb_bytes(256),
             any::<bool>(),
         )
-            .prop_map(|(stream_id, kind, seq, offset, bytes, last)| {
+            .prop_map(|(stream_id, seq, offset, bytes, last)| {
                 FrameBody::StreamData(StreamDataFrame {
                     stream_id: StreamId(stream_id),
-                    kind,
                     seq: StreamSeq(seq),
                     offset,
                     bytes,
                     last,
                 })
             }),
-        (arb_event_kind(), arb_event_body())
-            .prop_map(|(kind, body)| { FrameBody::Event(EventFrame { kind, body }) }),
+        arb_event_body().prop_map(|body| FrameBody::Event(EventFrame { body })),
     ]
 }
 
@@ -384,7 +348,6 @@ fn relay_decode_reports_empty_and_unknown_discriminator() {
 fn empty_stream_chunk_roundtrips() {
     let frame = Frame::body(FrameBody::StreamData(StreamDataFrame {
         stream_id: StreamId(7),
-        kind: StreamKind::History,
         seq: StreamSeq(55),
         offset: Some(0),
         bytes: ByteBuf::from(Vec::new()),
@@ -401,7 +364,6 @@ fn empty_stream_chunk_roundtrips() {
 fn large_request_offset_and_seq_roundtrip() {
     let frame = Frame::body(FrameBody::StreamData(StreamDataFrame {
         stream_id: StreamId(u32::MAX),
-        kind: StreamKind::Baseline,
         seq: StreamSeq(u64::MAX),
         offset: Some(u32::MAX),
         bytes: ByteBuf::from(vec![1, 2, 3]),
@@ -409,7 +371,6 @@ fn large_request_offset_and_seq_roundtrip() {
     }));
     let request = Frame::body(FrameBody::Request(RequestFrame {
         id: RequestId(u32::MAX),
-        op: RequestOp::ReadHistory,
         body: RequestBody::ReadHistory {
             terminal_id: TerminalId(Uuid::nil()),
             before: Some(StreamSeq(u64::MAX)),
@@ -428,9 +389,7 @@ fn large_request_offset_and_seq_roundtrip() {
 fn error_response_roundtrips() {
     let frame = Frame::body(FrameBody::Response(ResponseFrame {
         id: RequestId(42),
-        ok: false,
-        body: None,
-        error: Some(ResponseError {
+        result: Err(ResponseError {
             code: ProtocolError::UnknownTerminal,
             message: "terminal not found".to_owned(),
         }),
