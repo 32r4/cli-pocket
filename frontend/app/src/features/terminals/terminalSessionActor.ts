@@ -19,9 +19,6 @@ type Phase =
 	| "detached";
 
 interface WorkspaceStoreShape {
-	markTerminalConnecting: (terminalId: string) => void;
-	markTerminalReady: (info: TerminalSnapshotRecord["info"]) => void;
-	markTerminalError: (terminalId: string, message: string) => void;
 	updateTerminalSize: (terminalId: string, cols: number, rows: number) => void;
 }
 
@@ -31,6 +28,15 @@ interface TerminalSessionActorDeps {
 	workspaceState: StoreApi<WorkspaceStoreShape>;
 	session: () => SessionActor | null;
 	onInlineError: (message: string | null) => void;
+	onRuntimeStateChange: (
+		terminalId: string,
+		runtimeState: TerminalRuntimeState,
+	) => void;
+}
+
+export interface TerminalRuntimeState {
+	phase: Phase;
+	error: string | null;
 }
 
 interface BufferedLiveOutput {
@@ -140,17 +146,25 @@ export class TerminalSessionActor {
 
 	constructor(private readonly deps: TerminalSessionActorDeps) {}
 
+	getRuntimeState(): TerminalRuntimeState {
+		return {
+			phase: this.phase,
+			error: this.phase === "failed" ? this.lastError : null,
+		};
+	}
+
+	private lastError: string | null = null;
+
 	activateTerminal(connectionGeneration: number) {
 		this.connectionGeneration = connectionGeneration;
 		this.terminalGeneration += 1;
 		const terminalGeneration = this.terminalGeneration;
 		this.phase = "opening";
+		this.lastError = null;
 		this.historyExhausted = false;
 		this.liveBuffer = [];
 		this.deps.controller.setActiveTerminal(this.deps.terminalId);
-		this.deps.workspaceState
-			.getState()
-			.markTerminalConnecting(this.deps.terminalId);
+		this.emitRuntimeState();
 
 		const open = this.open(connectionGeneration, terminalGeneration);
 		this.pendingOpen = open;
@@ -245,6 +259,8 @@ export class TerminalSessionActor {
 
 	detach() {
 		this.phase = "detached";
+		this.lastError = null;
+		this.emitRuntimeState();
 		this.terminalGeneration += 1;
 	}
 
@@ -256,6 +272,8 @@ export class TerminalSessionActor {
 		this.liveBuffer = [];
 		this.loadedRange = { startSeq: null, endSeq: null };
 		this.phase = "detached";
+		this.lastError = null;
+		this.emitRuntimeState();
 	}
 
 	mount(host: HTMLElement) {
@@ -303,7 +321,6 @@ export class TerminalSessionActor {
 				return;
 			}
 
-			this.deps.workspaceState.getState().markTerminalReady(parsed.info);
 			this.loadedRange = {
 				startSeq: initialWindow.startSeq,
 				endSeq: parsed.end_seq,
@@ -314,6 +331,8 @@ export class TerminalSessionActor {
 				initialWindow.startSeq,
 			);
 			this.phase = "ready";
+			this.lastError = null;
+			this.emitRuntimeState();
 			this.replayBufferedOutput(connectionGeneration);
 		} catch (error: unknown) {
 			if (!this.isCurrent(connectionGeneration, terminalGeneration)) {
@@ -322,9 +341,8 @@ export class TerminalSessionActor {
 			const message =
 				error instanceof Error ? error.message : "failed to open terminal";
 			this.phase = "failed";
-			this.deps.workspaceState
-				.getState()
-				.markTerminalError(this.deps.terminalId, message);
+			this.lastError = message;
+			this.emitRuntimeState();
 			this.deps.onInlineError(message);
 		}
 	}
@@ -373,6 +391,13 @@ export class TerminalSessionActor {
 				this.replayBufferedOutput(connectionGeneration);
 			}
 		}
+	}
+
+	private emitRuntimeState() {
+		this.deps.onRuntimeStateChange(
+			this.deps.terminalId,
+			this.getRuntimeState(),
+		);
 	}
 
 	private async applyHistoryPage(

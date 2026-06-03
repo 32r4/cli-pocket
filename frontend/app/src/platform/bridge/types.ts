@@ -18,12 +18,10 @@ export type ConnectConfig =
 export interface TerminalSummary {
 	id: string;
 	title: string;
-	status: "idle" | "connecting" | "ready" | "error";
 	cols: number;
 	rows: number;
 	createdAtUnixMs: number;
 	attachedClients: number;
-	error: string | null;
 }
 
 export interface TerminalInfoRecord {

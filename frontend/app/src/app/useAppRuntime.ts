@@ -21,7 +21,6 @@ interface UseAppRuntimeResult {
 	session: SessionActor | null;
 	terminalController: TerminalController;
 	terminalRegistry: TerminalSessionRegistry;
-	connectionGeneration: number;
 	connectServer: (
 		server: DaemonRecord,
 		options?: { closeMenu?: boolean },
@@ -44,7 +43,6 @@ export function useAppRuntime({
 	const hostControllerRef = useRef<HostController | null>(null);
 	const controllerRef = useRef<ConnectionController | null>(null);
 	const terminalRegistryRef = useRef<TerminalSessionRegistry | null>(null);
-	const [connectionGeneration, setConnectionGeneration] = useState(0);
 	const [terminalController] = useState(
 		() =>
 			new TerminalController({
@@ -114,7 +112,6 @@ export function useAppRuntime({
 					onTerminalRemoved: (terminalId) => {
 						terminalController.removeTerminal(terminalId);
 					},
-					onConnectionGenerationChange: setConnectionGeneration,
 					terminalRegistry,
 				});
 				controllerRef.current = controller;
@@ -137,6 +134,7 @@ export function useAppRuntime({
 
 		return () => {
 			active = false;
+			terminalRegistry.dispose();
 			hostControllerRef.current = null;
 			const controller = controllerRef.current;
 			controllerRef.current = null;
@@ -213,7 +211,6 @@ export function useAppRuntime({
 		session: controllerRef.current?.getSession() ?? null,
 		terminalController,
 		terminalRegistry,
-		connectionGeneration,
 		connectServer,
 		disconnectCurrentServer,
 		copyLocalPairUrl,

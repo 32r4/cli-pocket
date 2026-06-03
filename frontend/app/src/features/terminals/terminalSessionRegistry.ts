@@ -1,15 +1,13 @@
 import type { StoreApi } from "zustand/vanilla";
-import type {
-	SessionActor,
-	TerminalSnapshotRecord,
-} from "@/platform/bridge/types";
+import type { SessionActor } from "@/platform/bridge/types";
 import type { TerminalController } from "./terminalController";
-import { TerminalSessionActor } from "./terminalSessionActor";
+import {
+	type TerminalRuntimeState,
+	TerminalSessionActor,
+} from "./terminalSessionActor";
 
 interface WorkspaceStoreShape {
-	markTerminalConnecting: (terminalId: string) => void;
-	markTerminalReady: (info: TerminalSnapshotRecord["info"]) => void;
-	markTerminalError: (terminalId: string, message: string) => void;
+	activeSessionId: string | null;
 	updateTerminalSize: (terminalId: string, cols: number, rows: number) => void;
 }
 
@@ -22,16 +20,21 @@ interface TerminalSessionRegistryDeps {
 
 export class TerminalSessionRegistry {
 	private actors = new Map<string, TerminalSessionActor>();
-	private activeTerminalId: string | null = null;
+	private runtimeStates = new Map<string, TerminalRuntimeState>();
+	private selectedTerminalId: string | null;
+	private connectionGeneration: number | null = null;
+	private readonly unsubscribeWorkspace: () => void;
 
-	constructor(private readonly deps: TerminalSessionRegistryDeps) {}
-
-	activateTerminal(terminalId: string, connectionGeneration: number) {
-		if (this.activeTerminalId != null && this.activeTerminalId !== terminalId) {
-			this.actors.get(this.activeTerminalId)?.detach();
-		}
-		this.activeTerminalId = terminalId;
-		this.actor(terminalId).activateTerminal(connectionGeneration);
+	constructor(private readonly deps: TerminalSessionRegistryDeps) {
+		this.selectedTerminalId = deps.workspaceState.getState().activeSessionId;
+		this.unsubscribeWorkspace = deps.workspaceState.subscribe(
+			(state, previousState) => {
+				if (state.activeSessionId === previousState.activeSessionId) {
+					return;
+				}
+				this.selectTerminal(state.activeSessionId);
+			},
+		);
 	}
 
 	applyOutput(
@@ -45,51 +48,84 @@ export class TerminalSessionRegistry {
 			?.applyOutput(terminalId, seq, chunk, connectionGeneration);
 	}
 
+	connect(connectionGeneration: number) {
+		this.connectionGeneration = connectionGeneration;
+		this.activateSelectedTerminal();
+	}
+
 	disconnect(connectionGeneration: number) {
 		for (const actor of this.actors.values()) {
 			actor.disconnect(connectionGeneration);
 		}
-		this.activeTerminalId = null;
+		this.connectionGeneration = null;
 	}
 
 	removeTerminal(terminalId: string) {
 		this.actors.get(terminalId)?.detach();
 		this.actors.delete(terminalId);
-		if (this.activeTerminalId === terminalId) {
-			this.activeTerminalId = null;
+		this.runtimeStates.delete(terminalId);
+		if (this.selectedTerminalId === terminalId) {
+			this.selectedTerminalId = null;
 		}
 	}
 
-	setActiveTerminalId(terminalId: string | null) {
-		this.activeTerminalId = terminalId;
+	dispose() {
+		this.unsubscribeWorkspace();
 	}
 
 	mountActive(host: HTMLElement) {
-		if (this.activeTerminalId == null) {
+		if (this.selectedTerminalId == null) {
 			return Promise.resolve();
 		}
-		return this.actor(this.activeTerminalId).mount(host);
+		return this.actor(this.selectedTerminalId).mount(host);
 	}
 
 	unmountActive() {
-		if (this.activeTerminalId == null) {
+		if (this.selectedTerminalId == null) {
 			return;
 		}
-		this.actor(this.activeTerminalId).unmount();
+		this.actor(this.selectedTerminalId).unmount();
 	}
 
 	resizeActive(cols: number, rows: number) {
-		if (this.activeTerminalId == null) {
+		if (this.selectedTerminalId == null) {
 			return;
 		}
-		this.actor(this.activeTerminalId).resize(cols, rows);
+		this.actor(this.selectedTerminalId).resize(cols, rows);
 	}
 
 	loadOlderHistoryActive() {
-		if (this.activeTerminalId == null) {
+		if (this.selectedTerminalId == null) {
 			return;
 		}
-		this.actor(this.activeTerminalId).loadOlderHistory();
+		this.actor(this.selectedTerminalId).loadOlderHistory();
+	}
+
+	activeRuntimeState() {
+		if (this.selectedTerminalId == null) {
+			return null;
+		}
+		return this.runtimeStates.get(this.selectedTerminalId) ?? null;
+	}
+
+	private selectTerminal(terminalId: string | null) {
+		if (
+			this.selectedTerminalId != null &&
+			this.selectedTerminalId !== terminalId
+		) {
+			this.actors.get(this.selectedTerminalId)?.detach();
+		}
+		this.selectedTerminalId = terminalId;
+		this.activateSelectedTerminal();
+	}
+
+	private activateSelectedTerminal() {
+		if (this.selectedTerminalId == null || this.connectionGeneration == null) {
+			return;
+		}
+		this.actor(this.selectedTerminalId).activateTerminal(
+			this.connectionGeneration,
+		);
 	}
 
 	private actor(terminalId: string) {
@@ -103,8 +139,12 @@ export class TerminalSessionRegistry {
 			workspaceState: this.deps.workspaceState,
 			session: this.deps.session,
 			onInlineError: this.deps.onInlineError,
+			onRuntimeStateChange: (updatedTerminalId, runtimeState) => {
+				this.runtimeStates.set(updatedTerminalId, runtimeState);
+			},
 		});
 		this.actors.set(terminalId, actor);
+		this.runtimeStates.set(terminalId, actor.getRuntimeState());
 		return actor;
 	}
 }

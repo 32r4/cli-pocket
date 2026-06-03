@@ -61,11 +61,12 @@ function makeController(): TerminalController {
 
 function makeRegistry(): TerminalSessionRegistry {
 	return {
-		activateTerminal: vi.fn(),
+		connect: vi.fn(),
+		activeRuntimeState: vi.fn(() => null),
 		applyOutput: vi.fn(),
 		disconnect: vi.fn(),
 		removeTerminal: vi.fn(),
-		setActiveTerminalId: vi.fn(),
+		dispose: vi.fn(),
 		mountActive: vi.fn(async () => undefined),
 		unmountActive: vi.fn(),
 		resizeActive: vi.fn(),
@@ -91,33 +92,6 @@ const terminalTwo: TerminalInfoRecord = {
 };
 
 describe("TerminalArea", () => {
-	it("activates the selected terminal through the registry", async () => {
-		const session = makeSession();
-		const workspaceState = createWorkspaceStore();
-		workspaceState.getState().markConnected();
-		workspaceState.getState().syncTerminalList([terminalOne, terminalTwo]);
-		workspaceState.getState().setActiveSessionId("t2");
-		const registry = makeRegistry();
-
-		render(
-			<TerminalArea
-				session={session}
-				workspace={workspaceState.getState()}
-				workspaceState={workspaceState}
-				controller={makeController()}
-				registry={registry}
-				connectionGeneration={7}
-				theme="dark"
-				onInlineError={vi.fn()}
-			/>,
-		);
-
-		await waitFor(() => {
-			expect(registry.activateTerminal).toHaveBeenCalledWith("t2", 7);
-		});
-		expect(session.activateTerminal).not.toHaveBeenCalled();
-	});
-
 	it("mounts and unmounts the active viewport through the registry", async () => {
 		const workspaceState = createWorkspaceStore();
 		workspaceState.getState().markConnected();
@@ -132,7 +106,6 @@ describe("TerminalArea", () => {
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
-				connectionGeneration={1}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -168,7 +141,6 @@ describe("TerminalArea", () => {
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
-				connectionGeneration={3}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -187,7 +159,6 @@ describe("TerminalArea", () => {
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
-				connectionGeneration={3}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -198,7 +169,6 @@ describe("TerminalArea", () => {
 				cols: 120,
 				rows: 36,
 			});
-			expect(registry.activateTerminal).toHaveBeenCalledWith("t2", 3);
 		});
 	});
 
@@ -217,7 +187,6 @@ describe("TerminalArea", () => {
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
-				connectionGeneration={1}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,
@@ -231,7 +200,6 @@ describe("TerminalArea", () => {
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
-				connectionGeneration={1}
 				theme="dark"
 				onInlineError={vi.fn()}
 			/>,

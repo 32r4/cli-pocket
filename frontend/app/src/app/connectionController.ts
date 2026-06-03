@@ -34,12 +34,10 @@ type WorkspaceStore = StoreApi<{
 	terminals: Array<{
 		id: string;
 		title: string;
-		status: "idle" | "connecting" | "ready" | "error";
 		cols: number;
 		rows: number;
 		createdAtUnixMs: number;
 		attachedClients: number;
-		error: string | null;
 	}>;
 	activeSessionId: string | null;
 	lastError: string | null;
@@ -51,9 +49,6 @@ type WorkspaceStore = StoreApi<{
 	}) => void;
 	markConnectionFailed: (message: string) => void;
 	syncTerminalList: (terminals: TerminalInfoRecord[]) => void;
-	markTerminalConnecting: (terminalId: string) => void;
-	markTerminalReady: (info: TerminalInfoRecord) => void;
-	markTerminalError: (terminalId: string, message: string) => void;
 	updateTerminalSize: (terminalId: string, cols: number, rows: number) => void;
 	removeTerminal: (terminalId: string) => void;
 	setActiveSessionId: (terminalId: string | null) => void;
@@ -68,7 +63,6 @@ interface ControllerDeps {
 	onInlineError: (message: string | null) => void;
 	onConnectionReset: () => void;
 	onTerminalRemoved: (terminalId: string) => void;
-	onConnectionGenerationChange: (generation: number) => void;
 	terminalRegistry: TerminalSessionRegistry;
 }
 
@@ -124,7 +118,6 @@ export class ConnectionController {
 
 	private bumpConnectionGeneration() {
 		this.connectionGeneration += 1;
-		this.deps.onConnectionGenerationChange(this.connectionGeneration);
 		return this.connectionGeneration;
 	}
 
@@ -281,6 +274,7 @@ export class ConnectionController {
 					.updateDaemonLabel(activeServerId, serverLabel);
 			}
 			this.deps.workspaceState.getState().markConnected();
+			this.deps.terminalRegistry.connect(this.connectionGeneration);
 			this.initialTerminalBootstrapPending = true;
 			void this.refreshTerminalsOnce();
 			this.startTerminalPolling();
@@ -327,7 +321,6 @@ export class ConnectionController {
 					: null;
 			const parsed = parseTerminalInfo(info);
 			if (parsed != null) {
-				this.deps.workspaceState.getState().markTerminalReady(parsed);
 				this.deps.workspaceState.getState().setActiveSessionId(parsed.terminal);
 				void this.session?.refreshTerminals();
 			}

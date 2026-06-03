@@ -10,10 +10,8 @@ import type { ConnectionState } from "@/state/workspace/workspaceState";
 interface TerminalSummaryView {
 	id: string;
 	title: string;
-	status: "idle" | "connecting" | "ready" | "error";
 	cols: number;
 	rows: number;
-	error: string | null;
 }
 
 interface TerminalAreaProps {
@@ -30,7 +28,6 @@ interface TerminalAreaProps {
 	}>;
 	controller: TerminalController;
 	registry: TerminalSessionRegistry;
-	connectionGeneration: number;
 	theme: "light" | "dark";
 	onInlineError: (message: string | null) => void;
 }
@@ -41,7 +38,6 @@ export function TerminalArea({
 	workspaceState,
 	controller,
 	registry,
-	connectionGeneration,
 	theme,
 	onInlineError,
 }: TerminalAreaProps) {
@@ -49,23 +45,13 @@ export function TerminalArea({
 		workspace.terminals.find(
 			(terminal) => terminal.id === workspace.activeSessionId,
 		) ?? null;
-	const isConnecting = activeSession?.status === "connecting";
-	const isError = activeSession?.status === "error";
+	const activeRuntimeState = registry.activeRuntimeState();
+	const isConnecting = activeRuntimeState?.phase === "opening";
+	const isError = activeRuntimeState?.phase === "failed";
 
 	useEffect(() => {
 		controller.setTheme(theme);
 	}, [controller, theme]);
-
-	useEffect(() => {
-		if (activeSession == null || session == null) {
-			registry.setActiveTerminalId(null);
-			return;
-		}
-		if (activeSession.status === "connecting") {
-			return;
-		}
-		registry.activateTerminal(activeSession.id, connectionGeneration);
-	}, [activeSession, connectionGeneration, registry, session]);
 
 	if (workspace.connectionState !== "connected") {
 		return null;
@@ -173,7 +159,7 @@ export function TerminalArea({
 					</div>
 				) : isError ? (
 					<div className="xterm-server">
-						{activeSession.error ?? "Terminal attach failed"}
+						{activeRuntimeState?.error ?? "Terminal attach failed"}
 					</div>
 				) : (
 					<TerminalViewport registry={registry} />
@@ -189,7 +175,7 @@ export function TerminalArea({
 						: `${activeSession.cols}x${activeSession.rows}`}
 				</span>
 				<span className="terminal-footer__state">
-					{activeSession?.status ?? workspace.connectionState}
+					{activeRuntimeState?.phase ?? workspace.connectionState}
 				</span>
 			</footer>
 		</section>

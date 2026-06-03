@@ -94,11 +94,12 @@ function makeServices(actor: SessionActor): PlatformServices {
 
 function makeTerminalRegistry(): TerminalSessionRegistry {
 	return {
-		activateTerminal: vi.fn(),
+		connect: vi.fn(),
+		activeRuntimeState: vi.fn(() => null),
 		applyOutput: vi.fn(),
 		disconnect: vi.fn(),
 		removeTerminal: vi.fn(),
-		setActiveTerminalId: vi.fn(),
+		dispose: vi.fn(),
 		mountActive: vi.fn(async () => undefined),
 		unmountActive: vi.fn(),
 		resizeActive: vi.fn(),
@@ -163,7 +164,6 @@ describe("ConnectionController", () => {
 			onInlineError: vi.fn(),
 			onConnectionReset: vi.fn(),
 			onTerminalRemoved: vi.fn(),
-			onConnectionGenerationChange: vi.fn(),
 			terminalRegistry: makeTerminalRegistry(),
 		});
 
@@ -235,7 +235,6 @@ describe("ConnectionController", () => {
 			onInlineError: vi.fn(),
 			onConnectionReset: vi.fn(),
 			onTerminalRemoved: vi.fn(),
-			onConnectionGenerationChange: vi.fn(),
 			terminalRegistry: makeTerminalRegistry(),
 		});
 
@@ -294,7 +293,6 @@ describe("ConnectionController", () => {
 				onInlineError: vi.fn(),
 				onConnectionReset: vi.fn(),
 				onTerminalRemoved: vi.fn(),
-				onConnectionGenerationChange: vi.fn(),
 				terminalRegistry: makeTerminalRegistry(),
 			});
 
@@ -361,7 +359,6 @@ describe("ConnectionController", () => {
 			onInlineError: vi.fn(),
 			onConnectionReset,
 			onTerminalRemoved: vi.fn(),
-			onConnectionGenerationChange: vi.fn(),
 			terminalRegistry: makeTerminalRegistry(),
 		});
 

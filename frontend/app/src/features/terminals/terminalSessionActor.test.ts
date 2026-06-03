@@ -117,6 +117,7 @@ function makeDeps(overrides?: {
 			workspaceState,
 			session: () => session as never,
 			onInlineError,
+			onRuntimeStateChange: vi.fn(),
 		}),
 	};
 }
@@ -129,7 +130,7 @@ describe("TerminalSessionActor", () => {
 			.fn<(terminalId: string) => Promise<unknown>>()
 			.mockImplementationOnce(async () => firstOpen.promise)
 			.mockImplementationOnce(async () => secondOpen.promise);
-		const { actor, controller, workspaceState } = makeDeps({
+		const { actor, controller } = makeDeps({
 			activateTerminal,
 		});
 
@@ -148,7 +149,6 @@ describe("TerminalSessionActor", () => {
 			"second",
 			0,
 		);
-		expect(workspaceState.getState().terminals[0]?.status).toBe("ready");
 	});
 
 	it("ignores duplicate history loads while one is in flight", async () => {
@@ -305,7 +305,7 @@ describe("TerminalSessionActor", () => {
 			.fn<(terminalId: string) => Promise<unknown>>()
 			.mockImplementationOnce(async () => firstOpen.promise)
 			.mockImplementationOnce(async () => secondOpen.promise);
-		const { actor, controller, workspaceState } = makeDeps({
+		const { actor, controller } = makeDeps({
 			activateTerminal,
 		});
 
@@ -324,7 +324,6 @@ describe("TerminalSessionActor", () => {
 			"fresh",
 			0,
 		);
-		expect(workspaceState.getState().terminals[0]?.status).toBe("ready");
 	});
 
 	it("keeps the last activation rendered across rapid out-of-order switches", async () => {
@@ -400,6 +399,7 @@ describe("TerminalSessionActor", () => {
 			workspaceState,
 			session: () => session as never,
 			onInlineError: vi.fn(),
+			onRuntimeStateChange: vi.fn(),
 		});
 		const actorB = new TerminalSessionActor({
 			terminalId: "b",
@@ -407,6 +407,7 @@ describe("TerminalSessionActor", () => {
 			workspaceState,
 			session: () => session as never,
 			onInlineError: vi.fn(),
+			onRuntimeStateChange: vi.fn(),
 		});
 
 		const switchCount = 20;
