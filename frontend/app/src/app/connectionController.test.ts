@@ -734,7 +734,7 @@ describe("ConnectionController", () => {
 		expect(workspaceState.getState().terminals).toHaveLength(0);
 	});
 
-	it("does not refresh terminals again after a terminal exit event", async () => {
+	it("refreshes terminals again after a terminal exit event", async () => {
 		const { actor, refreshTerminals } = makeActor([
 			{ kind: "Connecting" },
 			{ kind: "Connected", server_label: "server-a" },
@@ -793,7 +793,7 @@ describe("ConnectionController", () => {
 		await controller.connectServer(server);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		expect(refreshTerminals).toHaveBeenCalledTimes(1);
+		expect(refreshTerminals).toHaveBeenCalledTimes(2);
 		expect(workspaceState.getState().terminals).toHaveLength(0);
 	});
 });

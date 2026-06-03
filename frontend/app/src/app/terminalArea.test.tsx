@@ -56,6 +56,7 @@ function makeSession(): SessionActor {
 function makeController(): TerminalController {
 	return {
 		setTheme: vi.fn(),
+		removeTerminal: vi.fn(),
 	} as unknown as TerminalController;
 }
 
@@ -173,12 +174,13 @@ describe("TerminalArea", () => {
 		});
 	});
 
-	it("waits for backend terminal removal instead of optimistically removing it", async () => {
+	it("optimistically removes a killed terminal", async () => {
 		const workspaceState = createWorkspaceStore();
 		workspaceState.getState().markConnected();
 		workspaceState.getState().syncTerminalList([terminalOne]);
 		workspaceState.getState().setActiveSessionId("t1");
 		const session = makeSession();
+		const controller = makeController();
 		const registry = makeRegistry();
 
 		const view = render(
@@ -186,7 +188,7 @@ describe("TerminalArea", () => {
 				session={session}
 				workspace={workspaceState.getState()}
 				workspaceState={workspaceState}
-				controller={makeController()}
+				controller={controller}
 				registry={registry}
 				theme="dark"
 				onInlineError={vi.fn()}
@@ -198,7 +200,44 @@ describe("TerminalArea", () => {
 		await waitFor(() => {
 			expect(session.kill).toHaveBeenCalledWith("t1", "TERM");
 		});
-		expect(workspaceState.getState().terminals).toHaveLength(1);
-		expect(registry.removeTerminal).not.toHaveBeenCalled();
+		expect(workspaceState.getState().terminals).toHaveLength(0);
+		expect(registry.removeTerminal).toHaveBeenCalledWith("t1");
+		expect(controller.removeTerminal).toHaveBeenCalledWith("t1");
+		expect(session.refreshTerminals).not.toHaveBeenCalled();
+	});
+
+	it("restores an optimistically removed terminal when kill fails", async () => {
+		const workspaceState = createWorkspaceStore();
+		workspaceState.getState().markConnected();
+		workspaceState.getState().syncTerminalList([terminalOne]);
+		workspaceState.getState().setActiveSessionId("t1");
+		const session = makeSession();
+		session.kill = vi.fn(async () => {
+			throw new Error("kill failed");
+		});
+		session.refreshTerminals = vi.fn(async () => {
+			workspaceState.getState().syncTerminalList([terminalOne]);
+		});
+		const onInlineError = vi.fn();
+
+		const view = render(
+			<TerminalArea
+				session={session}
+				workspace={workspaceState.getState()}
+				workspaceState={workspaceState}
+				controller={makeController()}
+				registry={makeRegistry()}
+				theme="dark"
+				onInlineError={onInlineError}
+			/>,
+		);
+
+		fireEvent.click(view.getByLabelText("Kill old shell"));
+
+		await waitFor(() => {
+			expect(workspaceState.getState().terminals).toHaveLength(1);
+		});
+		expect(session.refreshTerminals).toHaveBeenCalledTimes(1);
+		expect(onInlineError).toHaveBeenCalledWith("kill failed");
 	});
 });

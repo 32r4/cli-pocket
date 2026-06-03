@@ -292,7 +292,7 @@ export class ConnectionController {
 				this.handleTerminalOutput(run, event);
 				return;
 			case "TerminalExited":
-				this.handleTerminalExited(event);
+				this.handleTerminalExited(run, event);
 				return;
 			case "Error":
 				this.failRun(
@@ -408,7 +408,7 @@ export class ConnectionController {
 		);
 	}
 
-	private handleTerminalExited(event: object) {
+	private handleTerminalExited(run: ConnectionRun, event: object) {
 		const terminalId =
 			"terminal_id" in event && typeof event.terminal_id === "string"
 				? event.terminal_id
@@ -420,6 +420,7 @@ export class ConnectionController {
 		this.deps.workspaceState.getState().removeTerminal(terminalId);
 		this.deps.terminalRegistry.removeTerminal(terminalId);
 		this.deps.onTerminalRemoved(terminalId);
+		void this.refreshTerminalsOnce(run);
 	}
 
 	private finishRun(
