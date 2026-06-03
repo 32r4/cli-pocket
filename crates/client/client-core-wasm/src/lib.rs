@@ -126,31 +126,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_exited_event_serializes_for_web_bridge() {
-        let value = event_to_json_value(&ClientEvent::TerminalExited {
-            terminal_id: cli_pocket_proto::TerminalId(uuid::Uuid::nil()),
-            info: cli_pocket_proto::ExitInfo {
-                code: Some(0),
-                signal: None,
-                at_unix_ms: 2,
-            },
-        });
-
-        assert_eq!(
-            value,
-            serde_json::json!({
-                "kind": "TerminalExited",
-                "terminal_id": uuid::Uuid::nil().to_string(),
-                "info": {
-                    "code": 0,
-                    "signal": null,
-                    "at_unix_ms": 2,
-                },
-            })
-        );
-    }
-
-    #[test]
     fn relay_config_parses_into_relay_endpoint() {
         let expected_server_id = uuid::Uuid::now_v7();
         let config = parse_connect_config_json(&serde_json::json!({
@@ -883,15 +858,6 @@ fn event_to_json_value(event: &ClientEvent) -> serde_json::Value {
             "terminal_id": terminal_id.0.to_string(),
             "stream_seq": stream_seq.0,
             "bytes_b64": BASE64.encode(bytes),
-        }),
-        ClientEvent::TerminalExited { terminal_id, info } => serde_json::json!({
-            "kind": "TerminalExited",
-            "terminal_id": terminal_id.0.to_string(),
-            "info": {
-                "code": info.code,
-                "signal": info.signal,
-                "at_unix_ms": info.at_unix_ms,
-            },
         }),
         ClientEvent::Error(message) => {
             serde_json::json!({ "kind": "Error", "message": message })

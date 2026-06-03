@@ -37,19 +37,6 @@ fn arb_terminal_create_params() -> impl Strategy<Value = TerminalCreateParams> {
         })
 }
 
-fn arb_exit_info() -> impl Strategy<Value = ExitInfo> {
-    (
-        prop::option::of(any::<i32>()),
-        prop::option::of(any::<u32>()),
-        any::<u64>(),
-    )
-        .prop_map(|(code, signal, at_unix_ms)| ExitInfo {
-            code,
-            signal,
-            at_unix_ms,
-        })
-}
-
 fn arb_terminal_info() -> impl Strategy<Value = TerminalInfo> {
     (
         arb_uuid(),
@@ -177,10 +164,6 @@ fn arb_event_body() -> impl Strategy<Value = EventBody> {
         Just(EventBody::Connected),
         arb_string(64).prop_map(|reason| EventBody::Disconnected { reason }),
         arb_terminal_info().prop_map(|info| EventBody::TerminalCreated { info }),
-        (arb_uuid(), arb_exit_info()).prop_map(|(terminal_id, exit)| EventBody::TerminalExited {
-            terminal_id: TerminalId(terminal_id),
-            exit,
-        }),
         (arb_protocol_error(), arb_string(64))
             .prop_map(|(error, message)| EventBody::Error { error, message }),
     ]

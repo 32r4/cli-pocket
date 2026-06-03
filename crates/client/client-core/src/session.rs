@@ -643,7 +643,7 @@ fn handle_inbound_frame(
     let action = match frame.body {
         FrameBody::Response(response) => handle_response_frame(response, runtime, state)?,
         FrameBody::StreamData(stream) => handle_stream_data_frame(stream, runtime, state)?,
-        FrameBody::Event(event) => handle_event_frame(event, runtime, state),
+        FrameBody::Event(event) => handle_event_frame(event, runtime),
         FrameBody::Bye { reason } => {
             if is_recoverable_bye(&reason) {
                 Action::Return(Err(ClientError::Closed))
@@ -658,24 +658,11 @@ fn handle_inbound_frame(
     Ok(action)
 }
 
-fn handle_event_frame(
-    event: EventFrame,
-    runtime: &mut RuntimeState,
-    state: &ConnectionState<'_>,
-) -> Action {
+fn handle_event_frame(event: EventFrame, runtime: &mut RuntimeState) -> Action {
     match event.body {
         EventBody::TerminalCreated { info } => {
             runtime.store_info(info.clone());
             Action::Emit(ClientEvent::TerminalCreated(info))
-        }
-        EventBody::TerminalExited { terminal_id, exit } => {
-            if runtime.active_terminal() == Some(terminal_id) {
-                clear_active_terminal(state.terminal, runtime);
-            }
-            Action::Emit(ClientEvent::TerminalExited {
-                terminal_id,
-                info: exit,
-            })
         }
         EventBody::Error { message, .. } => Action::Emit(ClientEvent::Error(message)),
         EventBody::Disconnected { reason } => Action::Emit(ClientEvent::Disconnected {

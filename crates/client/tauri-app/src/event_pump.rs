@@ -52,15 +52,6 @@ fn serialize_event(event: &ClientEvent) -> serde_json::Value {
             "stream_seq": stream_seq.0,
             "bytes_b64": BASE64.encode(bytes),
         }),
-        ClientEvent::TerminalExited { terminal_id, info } => json!({
-            "kind": "TerminalExited",
-            "terminal_id": terminal_id.0.to_string(),
-            "info": {
-                "code": info.code,
-                "signal": info.signal,
-                "at_unix_ms": info.at_unix_ms,
-            }
-        }),
         ClientEvent::Error(message) => json!({
             "kind": "Error",
             "message": message,

@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use cli_pocket_proto::{ExitInfo, SessionId, StreamSeq, TerminalId, TerminalInfo};
+use cli_pocket_proto::{SessionId, StreamSeq, TerminalId, TerminalInfo};
 
 #[derive(Debug, Clone)]
 pub enum ClientEvent {
@@ -17,10 +17,6 @@ pub enum ClientEvent {
         terminal_id: TerminalId,
         stream_seq: StreamSeq,
         bytes: Bytes,
-    },
-    TerminalExited {
-        terminal_id: TerminalId,
-        info: ExitInfo,
     },
     Error(String),
 }

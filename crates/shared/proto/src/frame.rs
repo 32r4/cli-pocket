@@ -2,7 +2,7 @@ use crate::error::{ByeReason, ProtocolError};
 use crate::hello::{Hello, HelloOk};
 use crate::terminal::ServerConfig;
 use crate::terminal::{
-    ExitInfo, RequestId, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
+    RequestId, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
@@ -139,10 +139,6 @@ pub enum EventBody {
     },
     TerminalCreated {
         info: TerminalInfo,
-    },
-    TerminalExited {
-        terminal_id: TerminalId,
-        exit: ExitInfo,
     },
     Error {
         error: ProtocolError,

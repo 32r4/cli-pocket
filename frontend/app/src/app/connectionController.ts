@@ -291,9 +291,6 @@ export class ConnectionController {
 			case "TerminalOutput":
 				this.handleTerminalOutput(run, event);
 				return;
-			case "TerminalExited":
-				this.handleTerminalExited(run, event);
-				return;
 			case "Error":
 				this.failRun(
 					run,
@@ -406,21 +403,6 @@ export class ConnectionController {
 			decodeBase64Bytes(bytesB64),
 			run.id,
 		);
-	}
-
-	private handleTerminalExited(run: ConnectionRun, event: object) {
-		const terminalId =
-			"terminal_id" in event && typeof event.terminal_id === "string"
-				? event.terminal_id
-				: null;
-		if (terminalId == null) {
-			return;
-		}
-
-		this.deps.workspaceState.getState().removeTerminal(terminalId);
-		this.deps.terminalRegistry.removeTerminal(terminalId);
-		this.deps.onTerminalRemoved(terminalId);
-		void this.refreshTerminalsOnce(run);
 	}
 
 	private finishRun(
