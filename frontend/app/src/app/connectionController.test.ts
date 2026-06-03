@@ -14,7 +14,10 @@ import { createUiStateStore } from "@/state/ui/uiState";
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { ConnectionController } from "./connectionController";
 
-function makeActor(events: unknown[]) {
+function makeActor(
+	events: unknown[],
+	options?: { closeAfterEvents?: boolean },
+) {
 	const iterator = events[Symbol.iterator]();
 	const refreshTerminals = vi.fn(async () => undefined);
 
@@ -24,9 +27,13 @@ function makeActor(events: unknown[]) {
 				[Symbol.asyncIterator]: () => ({
 					next: async () => {
 						const next = iterator.next();
-						return next.done
-							? { value: undefined, done: true }
-							: { value: next.value, done: false };
+						if (!next.done) {
+							return { value: next.value, done: false };
+						}
+						if (options?.closeAfterEvents === true) {
+							return { value: undefined, done: true };
+						}
+						return await new Promise<IteratorResult<unknown>>(() => undefined);
 					},
 				}),
 			}),
@@ -398,6 +405,279 @@ describe("ConnectionController", () => {
 		releaseFirstConnect();
 		await firstConnect;
 		await secondConnect;
+	});
+
+	it("keeps consuming events while the session actor retries", async () => {
+		const { actor } = makeActor([
+			{ kind: "Connecting" },
+			{
+				kind: "Disconnected",
+				will_retry: true,
+				reason: "relay closed pair before open",
+			},
+			{ kind: "Connecting" },
+			{ kind: "Connected", server_label: "server-a" },
+			{
+				kind: "TerminalList",
+				terminals: [
+					{
+						terminal: "t1",
+						cols: 80,
+						rows: 24,
+						created_at_unix_ms: 1,
+						label: "shell",
+						attached_clients: 1,
+					},
+				],
+			},
+		]);
+		const services = makeServices(actor);
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const workspaceState = createWorkspaceStore();
+		daemonRegistry.hydratePersistedState({
+			version: 1,
+			daemons: [
+				{
+					id: "server-a",
+					label: "server-a",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:9999",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: "server-a",
+		});
+		uiState.getState().setSelectedServerId("server-a");
+
+		const controller = new ConnectionController({
+			services,
+			daemonRegistry,
+			uiState,
+			workspaceState,
+			onInlineError: vi.fn(),
+			onConnectionReset: vi.fn(),
+			onTerminalRemoved: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
+		});
+
+		const server = daemonRegistry.getState().daemons[0];
+		expect(server).toBeDefined();
+		if (server == null) {
+			throw new Error("expected seeded daemon");
+		}
+
+		await controller.connectServer(server);
+
+		await waitFor(() => {
+			expect(workspaceState.getState().connectionState).toBe("connected");
+			expect(workspaceState.getState().terminals).toHaveLength(1);
+		});
+	});
+
+	it("ignores stale connect failures after switching servers", async () => {
+		let rejectServerA: ((error: Error) => void) | undefined;
+		const serverBActor = makeActor([
+			{ kind: "Connecting" },
+			{ kind: "Connected", server_label: "server-b" },
+		]).actor;
+		const services: PlatformServices = {
+			sessionFactory: {
+				connect: vi.fn((config: ConnectConfig) => {
+					if (config.kind === "direct" && config.endpointUrl.endsWith("1001")) {
+						return new Promise<SessionActor>((_resolve, reject) => {
+							rejectServerA = reject;
+						});
+					}
+					return Promise.resolve(serverBActor);
+				}),
+			},
+			registry: {
+				load: vi.fn(async () => ({
+					version: 1 as const,
+					daemons: [],
+					selectedDaemonId: null,
+				})),
+				save: vi.fn(async () => undefined),
+				exportIdentity: vi.fn(async () => new Uint8Array()),
+				importIdentity: vi.fn(async () => undefined),
+			},
+			host: null,
+		};
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const workspaceState = createWorkspaceStore();
+		daemonRegistry.hydratePersistedState({
+			version: 1,
+			daemons: [
+				{
+					id: "server-a",
+					label: "server-a",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:1001",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+				{
+					id: "server-b",
+					label: "server-b",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:1002",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: "server-a",
+		});
+		uiState.getState().setSelectedServerId("server-a");
+
+		const controller = new ConnectionController({
+			services,
+			daemonRegistry,
+			uiState,
+			workspaceState,
+			onInlineError: vi.fn(),
+			onConnectionReset: vi.fn(),
+			onTerminalRemoved: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
+		});
+
+		const [serverA, serverB] = daemonRegistry.getState().daemons;
+		expect(serverA).toBeDefined();
+		expect(serverB).toBeDefined();
+		if (serverA == null || serverB == null) {
+			throw new Error("expected seeded daemons");
+		}
+
+		void controller.connectServer(serverA).catch((error: unknown) => {
+			workspaceState
+				.getState()
+				.markConnectionFailed(
+					error instanceof Error ? error.message : "connection failed",
+				);
+		});
+		await Promise.resolve();
+		await controller.connectServer(serverB);
+
+		await waitFor(() => {
+			expect(workspaceState.getState().connectionState).toBe("connected");
+			expect(workspaceState.getState().activeConnectionServerId).toBe(
+				"server-b",
+			);
+		});
+
+		if (rejectServerA == null) {
+			throw new Error("expected server-a connect to be pending");
+		}
+		rejectServerA(new Error("server-a unavailable"));
+		await Promise.resolve();
+
+		expect(workspaceState.getState().connectionState).toBe("connected");
+		expect(workspaceState.getState().activeConnectionServerId).toBe("server-b");
+	});
+
+	it("clears connection state when the current event stream ends", async () => {
+		const { actor } = makeActor(
+			[{ kind: "Connecting" }, { kind: "Connected", server_label: "server-a" }],
+			{ closeAfterEvents: true },
+		);
+		const services = makeServices(actor);
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const workspaceState = createWorkspaceStore();
+		daemonRegistry.hydratePersistedState({
+			version: 1,
+			daemons: [
+				{
+					id: "server-a",
+					label: "server-a",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:9999",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: "server-a",
+		});
+		uiState.getState().setSelectedServerId("server-a");
+
+		const controller = new ConnectionController({
+			services,
+			daemonRegistry,
+			uiState,
+			workspaceState,
+			onInlineError: vi.fn(),
+			onConnectionReset: vi.fn(),
+			onTerminalRemoved: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
+		});
+
+		const server = daemonRegistry.getState().daemons[0];
+		expect(server).toBeDefined();
+		if (server == null) {
+			throw new Error("expected seeded daemon");
+		}
+
+		await controller.connectServer(server);
+
+		await waitFor(() => {
+			expect(workspaceState.getState().connectionState).toBe("idle");
+			expect(workspaceState.getState().activeConnectionServerId).toBeNull();
+			expect(controller.getSession()).toBeNull();
+		});
+	});
+
+	it("cleans up the active session when a runtime error event arrives", async () => {
+		const { actor } = makeActor([
+			{ kind: "Connecting" },
+			{ kind: "Connected", server_label: "server-a" },
+			{ kind: "Error", message: "server protocol error" },
+		]);
+		const services = makeServices(actor);
+		const daemonRegistry = createDaemonRegistryStore();
+		const uiState = createUiStateStore();
+		const workspaceState = createWorkspaceStore();
+		daemonRegistry.hydratePersistedState({
+			version: 1,
+			daemons: [
+				{
+					id: "server-a",
+					label: "server-a",
+					kind: "direct",
+					endpointUrl: "ws://127.0.0.1:9999",
+					resumeTokenHex: null,
+					lastConnectedAt: null,
+				},
+			],
+			selectedDaemonId: "server-a",
+		});
+		uiState.getState().setSelectedServerId("server-a");
+
+		const controller = new ConnectionController({
+			services,
+			daemonRegistry,
+			uiState,
+			workspaceState,
+			onInlineError: vi.fn(),
+			onConnectionReset: vi.fn(),
+			onTerminalRemoved: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
+		});
+
+		const server = daemonRegistry.getState().daemons[0];
+		expect(server).toBeDefined();
+		if (server == null) {
+			throw new Error("expected seeded daemon");
+		}
+
+		await controller.connectServer(server);
+
+		await waitFor(() => {
+			expect(workspaceState.getState().connectionState).toBe("failed");
+			expect(workspaceState.getState().activeConnectionServerId).toBeNull();
+			expect(controller.getSession()).toBeNull();
+		});
 	});
 
 	it("disconnects the active server and clears workspace state", async () => {

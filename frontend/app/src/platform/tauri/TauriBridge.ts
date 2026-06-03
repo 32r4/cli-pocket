@@ -38,6 +38,10 @@ class TauriEventSource {
 		});
 	}
 
+	async ready() {
+		await this.unlistenPromise;
+	}
+
 	push(value: unknown) {
 		this.queue.push(value);
 	}
@@ -144,6 +148,7 @@ export class TauriBridge implements PlatformServices {
 			const eventChannel = `cli_pocket:event:${crypto.randomUUID()}`;
 			const events = new TauriEventSource(eventChannel);
 			try {
+				await events.ready();
 				await invoke("cli_pocket_connect", { config, eventChannel });
 				return new TauriSessionActor(events);
 			} catch (error: unknown) {
