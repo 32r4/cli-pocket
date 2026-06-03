@@ -2,6 +2,7 @@
 
 use std::env;
 use std::net::SocketAddr;
+use std::process::Command;
 use std::sync::Arc;
 
 use cli_pocket_proto::ServerInfo;
@@ -191,7 +192,7 @@ impl Daemon {
         build_pairing_offer_url(
             &self.config.app.base_url,
             &PairingOffer {
-                label: None,
+                label: self.server_info.server_label.clone(),
                 server_id: self.identity.server_id,
                 server_public_hex: self.public_key_hex(),
                 relay_url,
@@ -203,11 +204,24 @@ impl Daemon {
 
 fn detect_server_label() -> Option<String> {
     for key in ["COMPUTERNAME", "HOSTNAME"] {
-        let value = env::var(key).ok()?;
+        let Ok(value) = env::var(key) else {
+            continue;
+        };
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             return Some(trimmed.to_owned());
         }
+    }
+
+    let output = Command::new("hostname").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let value = String::from_utf8(output.stdout).ok()?;
+    let trimmed = value.trim();
+    if !trimmed.is_empty() {
+        return Some(trimmed.to_owned());
     }
 
     None

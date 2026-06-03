@@ -126,7 +126,49 @@ pub async fn cli_pocket_daemon_restart(state: State<'_, AppState>) -> Result<(),
 pub async fn cli_pocket_load_daemon_registry(
     state: State<'_, AppState>,
 ) -> Result<Option<serde_json::Value>, String> {
-    shared_commands::load_daemon_registry(state.kv()).await
+    let endpoint_url = state.daemon().local_endpoint_url().await?;
+    let label = state
+        .daemon()
+        .server_label()
+        .await?
+        .unwrap_or_else(|| "Local".to_owned());
+    let mut registry = shared_commands::load_daemon_registry(state.kv())
+        .await?
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "version": 1,
+                "daemons": [],
+                "selectedDaemonId": null,
+            })
+        });
+    let Some(daemons) = registry
+        .get_mut("daemons")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Ok(Some(registry));
+    };
+
+    if let Some(daemon) = daemons.iter_mut().find(|daemon| {
+        daemon
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|id| id == "local-daemon")
+    }) {
+        daemon["label"] = serde_json::Value::String(label);
+        daemon["endpointUrl"] = serde_json::Value::String(endpoint_url);
+        return Ok(Some(registry));
+    }
+
+    daemons.push(serde_json::json!({
+        "id": "local-daemon",
+        "label": label,
+        "kind": "direct",
+        "endpointUrl": endpoint_url,
+        "resumeTokenHex": null,
+        "lastConnectedAt": null,
+    }));
+
+    Ok(Some(registry))
 }
 
 #[tauri::command]

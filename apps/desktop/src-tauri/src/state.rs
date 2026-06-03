@@ -143,4 +143,15 @@ impl EmbeddedDaemonRuntime {
             state.config.listen.port
         ))
     }
+
+    pub async fn server_label(&self) -> Result<Option<String>, String> {
+        self.ensure_enabled()?;
+        self.start().await?;
+
+        let state = self.inner.lock().await;
+        Ok(state
+            .daemon
+            .as_ref()
+            .and_then(|daemon| daemon.server_info.server_label.clone()))
+    }
 }

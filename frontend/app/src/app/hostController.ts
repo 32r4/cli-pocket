@@ -144,7 +144,7 @@ export class HostController {
 				.daemons.find((daemon) => daemon.id === "local-daemon");
 			const localDaemon: DaemonRecord = {
 				id: "local-daemon",
-				label: existing?.label ?? "This desktop",
+				label: existing?.label ?? "Local",
 				kind: "direct",
 				endpointUrl,
 				resumeTokenHex: existing?.resumeTokenHex ?? null,

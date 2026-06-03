@@ -61,17 +61,19 @@ function SavedServers({
 							{server.kind === "direct" ? "Local server" : "Remote server"}
 						</span>
 					</button>
-					<button
-						type="button"
-						className="icon-button server-list__delete"
-						aria-label={`Delete ${server.label}`}
-						onClick={(event) => {
-							event.stopPropagation();
-							onDeleteServer(server.id);
-						}}
-					>
-						<Trash2 aria-hidden="true" size={14} strokeWidth={1.75} />
-					</button>
+					{server.id !== "local-daemon" ? (
+						<button
+							type="button"
+							className="icon-button server-list__delete"
+							aria-label={`Delete ${server.label}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								onDeleteServer(server.id);
+							}}
+						>
+							<Trash2 aria-hidden="true" size={14} strokeWidth={1.75} />
+						</button>
+					) : null}
 				</div>
 			))}
 			<button
