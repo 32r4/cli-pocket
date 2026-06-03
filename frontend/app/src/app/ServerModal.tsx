@@ -6,7 +6,8 @@ export type ServerModalMode = "closed" | "chooser" | "direct" | "pairing";
 
 export interface ServerFormState {
 	kind: "direct" | "relay";
-	endpointUrl: string;
+	directHost: string;
+	directPort: string;
 	relayUrl: string;
 	serverId: string;
 	relayPskHex: string;
@@ -16,7 +17,8 @@ export interface ServerFormState {
 export function initialFormState(): ServerFormState {
 	return {
 		kind: "direct",
-		endpointUrl: "",
+		directHost: "127.0.0.1",
+		directPort: "7842",
 		relayUrl: "wss://relay.example/ws/client?server=",
 		serverId: "",
 		relayPskHex: "",
@@ -27,11 +29,13 @@ export function initialFormState(): ServerFormState {
 export function makeServerRecord(form: ServerFormState): DaemonRecord {
 	if (form.kind === "direct") {
 		const id = crypto.randomUUID();
+		const host = form.directHost.trim() || "127.0.0.1";
+		const port = form.directPort.trim() || "7842";
 		return {
 			id,
 			label: id,
 			kind: "direct",
-			endpointUrl: form.endpointUrl.trim(),
+			endpointUrl: `ws://${host}:${port}/session`,
 			resumeTokenHex: null,
 			lastConnectedAt: null,
 		};
@@ -109,19 +113,37 @@ export function ServerModal({
 							onSaveServer();
 						}}
 					>
-						<label className="field">
-							<span>Endpoint URL</span>
-							<input
-								value={serverForm.endpointUrl}
-								onChange={(event) =>
-									onServerFormChange((state) => ({
-										...state,
-										kind: "direct",
-										endpointUrl: event.target.value,
-									}))
-								}
-							/>
-						</label>
+						<div className="direct-endpoint-fields">
+							<label className="field">
+								<span>Address</span>
+								<input
+									value={serverForm.directHost}
+									autoComplete="off"
+									onChange={(event) =>
+										onServerFormChange((state) => ({
+											...state,
+											kind: "direct",
+											directHost: event.target.value,
+										}))
+									}
+								/>
+							</label>
+							<label className="field">
+								<span>Port</span>
+								<input
+									value={serverForm.directPort}
+									inputMode="numeric"
+									autoComplete="off"
+									onChange={(event) =>
+										onServerFormChange((state) => ({
+											...state,
+											kind: "direct",
+											directPort: event.target.value,
+										}))
+									}
+								/>
+							</label>
+						</div>
 						<div className="action-row">
 							<button type="submit">Save server</button>
 							<button type="button" onClick={onClose}>
