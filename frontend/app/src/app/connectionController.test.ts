@@ -1,5 +1,6 @@
 import { waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
 import type {
 	ConnectConfig,
 	PlatformServices,
@@ -30,7 +31,7 @@ function makeActor(events: unknown[]) {
 				}),
 			}),
 			refreshTerminals,
-			openTerminal: vi.fn(
+			activateTerminal: vi.fn(
 				async () =>
 					({
 						info: {
@@ -91,6 +92,19 @@ function makeServices(actor: SessionActor): PlatformServices {
 	};
 }
 
+function makeTerminalRegistry(): TerminalSessionRegistry {
+	return {
+		activateTerminal: vi.fn(),
+		applyOutput: vi.fn(),
+		disconnect: vi.fn(),
+		removeTerminal: vi.fn(),
+		setActiveTerminalId: vi.fn(),
+		mountActive: vi.fn(async () => undefined),
+		unmountActive: vi.fn(),
+		resizeActive: vi.fn(),
+	} as unknown as TerminalSessionRegistry;
+}
+
 describe("ConnectionController", () => {
 	it("owns connect and consumes session actor events", async () => {
 		const { actor } = makeActor([
@@ -148,8 +162,9 @@ describe("ConnectionController", () => {
 			workspaceState,
 			onInlineError: vi.fn(),
 			onConnectionReset: vi.fn(),
-			onTerminalOutput: vi.fn(),
 			onTerminalRemoved: vi.fn(),
+			onConnectionGenerationChange: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
 		});
 
 		const server = daemonRegistry.getState().daemons[0];
@@ -219,8 +234,9 @@ describe("ConnectionController", () => {
 			workspaceState,
 			onInlineError: vi.fn(),
 			onConnectionReset: vi.fn(),
-			onTerminalOutput: vi.fn(),
 			onTerminalRemoved: vi.fn(),
+			onConnectionGenerationChange: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
 		});
 
 		const server = daemonRegistry.getState().daemons[0];
@@ -277,8 +293,9 @@ describe("ConnectionController", () => {
 				workspaceState,
 				onInlineError: vi.fn(),
 				onConnectionReset: vi.fn(),
-				onTerminalOutput: vi.fn(),
 				onTerminalRemoved: vi.fn(),
+				onConnectionGenerationChange: vi.fn(),
+				terminalRegistry: makeTerminalRegistry(),
 			});
 
 			const server = daemonRegistry.getState().daemons[0];
@@ -343,8 +360,9 @@ describe("ConnectionController", () => {
 			workspaceState,
 			onInlineError: vi.fn(),
 			onConnectionReset,
-			onTerminalOutput: vi.fn(),
 			onTerminalRemoved: vi.fn(),
+			onConnectionGenerationChange: vi.fn(),
+			terminalRegistry: makeTerminalRegistry(),
 		});
 
 		const server = daemonRegistry.getState().daemons[0];

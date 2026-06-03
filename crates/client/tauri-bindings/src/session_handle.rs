@@ -35,7 +35,7 @@ enum SessionCommand {
         params: TerminalCreateParams,
         reply: oneshot::Sender<Result<(), String>>,
     },
-    OpenTerminal {
+    ActivateTerminal {
         terminal_id: TerminalId,
         reply: oneshot::Sender<Result<TerminalSnapshot, String>>,
     },
@@ -171,10 +171,13 @@ impl SessionHandle {
             .map_err(|_| "actor dropped reply".to_owned())?
     }
 
-    pub async fn open_terminal(&self, terminal_id: TerminalId) -> Result<TerminalSnapshot, String> {
+    pub async fn activate_terminal(
+        &self,
+        terminal_id: TerminalId,
+    ) -> Result<TerminalSnapshot, String> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
-            .send(SessionCommand::OpenTerminal {
+            .send(SessionCommand::ActivateTerminal {
                 terminal_id,
                 reply: reply_tx,
             })
@@ -408,10 +411,10 @@ async fn handle_command(
             };
             let _ = reply.send(result);
         }
-        SessionCommand::OpenTerminal { terminal_id, reply } => {
+        SessionCommand::ActivateTerminal { terminal_id, reply } => {
             let result = match &state.session {
                 Some(session) => session
-                    .open_terminal(terminal_id)
+                    .activate_terminal(terminal_id)
                     .await
                     .map_err(|error| error.to_string()),
                 None => Err("not connected".to_owned()),

@@ -95,8 +95,8 @@ class WebSessionActor implements SessionActor {
 		this.queue.push(terminalListEvent(terminals));
 	}
 
-	async openTerminal(terminalId: string): Promise<TerminalSnapshotRecord> {
-		return (await this.client.open_terminal(
+	async activateTerminal(terminalId: string): Promise<TerminalSnapshotRecord> {
+		return (await this.client.activate_terminal(
 			terminalId,
 		)) as TerminalSnapshotRecord;
 	}

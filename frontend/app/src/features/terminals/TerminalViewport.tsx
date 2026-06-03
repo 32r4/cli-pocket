@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
-import type { TerminalController } from "./terminalController";
+import type { TerminalSessionRegistry } from "./terminalSessionRegistry";
 
 export function TerminalViewport({
-	controller,
+	registry,
 }: {
-	controller: TerminalController;
+	registry: TerminalSessionRegistry;
 }) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 
@@ -15,11 +15,11 @@ export function TerminalViewport({
 			return;
 		}
 
-		void controller.mount(host);
+		void registry.mountActive(host);
 		return () => {
-			controller.unmount();
+			registry.unmountActive();
 		};
-	}, [controller]);
+	}, [registry]);
 
 	return (
 		<div className="xterm-shell">

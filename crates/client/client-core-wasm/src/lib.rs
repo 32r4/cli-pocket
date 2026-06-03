@@ -350,10 +350,10 @@ impl CliPocketClient {
     }
 
     #[wasm_bindgen]
-    pub fn open_terminal(&self, terminal_id: String) -> Promise {
+    pub fn activate_terminal(&self, terminal_id: String) -> Promise {
         let client = self.clone();
         future_to_promise(async move {
-            let value = client.open_terminal_inner(terminal_id).await?;
+            let value = client.activate_terminal_inner(terminal_id).await?;
             Ok(value)
         })
     }
@@ -548,7 +548,7 @@ impl CliPocketClient {
         session.create_terminal(params).await.map_err(js_error)
     }
 
-    async fn open_terminal_inner(&self, terminal_id: String) -> Result<JsValue, JsValue> {
+    async fn activate_terminal_inner(&self, terminal_id: String) -> Result<JsValue, JsValue> {
         let session = self
             .inner
             .borrow()
@@ -557,7 +557,7 @@ impl CliPocketClient {
             .clone();
 
         let snapshot = session
-            .open_terminal(parse_terminal_id(&terminal_id)?)
+            .activate_terminal(parse_terminal_id(&terminal_id)?)
             .await
             .map_err(js_error)?;
 

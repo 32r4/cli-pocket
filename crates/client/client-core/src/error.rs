@@ -1,6 +1,6 @@
 use cli_pocket_proto::ByeReason;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ClientError {
     #[error("transport: {0}")]
     Transport(String),

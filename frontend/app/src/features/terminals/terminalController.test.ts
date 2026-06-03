@@ -87,10 +87,9 @@ describe("TerminalController", () => {
 	it("creates xterm with a large scrollback buffer", async () => {
 		MockTerminal.instances = [];
 		const controller = new TerminalController({
-			session: () => null,
-			onError: vi.fn(),
 			onInput: vi.fn(),
 			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
 		});
 		const host = document.createElement("div");
 
@@ -103,10 +102,9 @@ describe("TerminalController", () => {
 
 	it("tracks loaded seq range from the snapshot", async () => {
 		const controller = new TerminalController({
-			session: () => null,
-			onError: vi.fn(),
 			onInput: vi.fn(),
 			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
 		});
 		const host = document.createElement("div");
 
@@ -127,10 +125,9 @@ describe("TerminalController", () => {
 
 	it("replays a snapshot that arrives before the terminal mounts", async () => {
 		const controller = new TerminalController({
-			session: () => null,
-			onError: vi.fn(),
 			onInput: vi.fn(),
 			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
 		});
 		const host = document.createElement("div");
 
@@ -156,10 +153,9 @@ describe("TerminalController", () => {
 
 	it("replays live output buffered before the terminal mounts", async () => {
 		const controller = new TerminalController({
-			session: () => null,
-			onError: vi.fn(),
 			onInput: vi.fn(),
 			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
 		});
 		const host = document.createElement("div");
 
@@ -191,21 +187,51 @@ describe("TerminalController", () => {
 		});
 	});
 
-	it("buffers live output while redrawing history and replays it after redraw", async () => {
-		const readHistory = vi.fn(async () => ({
-			terminal_id: "t1",
-			start_seq: 0,
-			end_seq: 5,
-			bytes_b64: btoa("old\n"),
-		}));
+	it("preserves snapshot and detached live output across unmount and remount", async () => {
 		const controller = new TerminalController({
-			session: () =>
-				({
-					readHistory,
-				}) as never,
-			onError: vi.fn(),
 			onInput: vi.fn(),
 			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+		const firstHost = document.createElement("div");
+		const secondHost = document.createElement("div");
+
+		await controller.mount(firstHost);
+		controller.setActiveTerminal("t1");
+		controller.renderSnapshotWithRange("t1", "hello", 10);
+		controller.unmount();
+		controller.appendActiveOutput("t1", "tail", 19);
+
+		await controller.mount(secondHost);
+
+		const terminal = controllerField<MockTerminal | null>(
+			controller,
+			"terminal",
+		);
+		expect(terminal?.writes).toEqual(["hello", "tail"]);
+		expect(
+			(
+				controller as unknown as {
+					currentRenderedText: () => string;
+				}
+			).currentRenderedText(),
+		).toBe("hellotail");
+		expect(
+			controllerField<{ startSeq: number | null; endSeq: number | null }>(
+				controller,
+				"loadedRange",
+			),
+		).toEqual({
+			startSeq: 10,
+			endSeq: 19,
+		});
+	});
+
+	it("buffers live output while redrawing history and replays it after redraw", async () => {
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
 		});
 		const host = document.createElement("div");
 
@@ -222,15 +248,15 @@ describe("TerminalController", () => {
 			throw new Error("expected terminal to mount");
 		}
 		terminal.buffer.active.viewportY = 0;
-		const loadOlderHistory = controllerField<() => Promise<void>>(
-			controller,
-			"loadOlderHistory",
-		);
-		const loadPromise = loadOlderHistory.call(controller);
+		const loadPromise = controller.prependHistoryPage({
+			terminal_id: "t1",
+			start_seq: 0,
+			end_seq: 5,
+			bytes_b64: btoa("old\n"),
+		});
 		controller.appendActiveOutput("t1", "tail", 14);
 		await loadPromise;
 
-		expect(readHistory).toHaveBeenCalledWith("t1", 5, 32 * 1024);
 		expect(
 			(
 				controller as unknown as {
@@ -250,20 +276,10 @@ describe("TerminalController", () => {
 	});
 
 	it("uses the string estimator for plain-text history chunks", async () => {
-		const readHistory = vi.fn(async () => ({
-			terminal_id: "t1",
-			start_seq: 0,
-			end_seq: 5,
-			bytes_b64: btoa("old\n"),
-		}));
 		const controller = new TerminalController({
-			session: () =>
-				({
-					readHistory,
-				}) as never,
-			onError: vi.fn(),
 			onInput: vi.fn(),
 			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
 		});
 		const host = document.createElement("div");
 
@@ -277,12 +293,38 @@ describe("TerminalController", () => {
 			},
 			"ensureProbeTerminal",
 		);
-		const loadOlderHistory = controllerField<() => Promise<void>>(
-			controller,
-			"loadOlderHistory",
-		);
-		await loadOlderHistory.call(controller);
+		await controller.prependHistoryPage({
+			terminal_id: "t1",
+			start_seq: 0,
+			end_seq: 5,
+			bytes_b64: btoa("old\n"),
+		});
 
 		expect(ensureProbeTerminal).not.toHaveBeenCalled();
+	});
+
+	it("requests older history when the viewport scrolls to the top", async () => {
+		const onLoadOlderHistory = vi.fn();
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory,
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+
+		const terminal = controllerField<MockTerminal | null>(
+			controller,
+			"terminal",
+		);
+		expect(terminal).not.toBeNull();
+		if (terminal == null || terminal.scrollListener == null) {
+			throw new Error("expected scroll listener");
+		}
+
+		terminal.scrollListener(0);
+
+		expect(onLoadOlderHistory).toHaveBeenCalledTimes(1);
 	});
 });

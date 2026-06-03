@@ -1,17 +1,11 @@
 import { LoaderCircle, Plus, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { TerminalViewport } from "@/features/terminals/TerminalViewport";
 import type { TerminalController } from "@/features/terminals/terminalController";
-import type {
-	SessionActor,
-	TerminalSnapshotRecord,
-} from "@/platform/bridge/types";
+import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
+import type { SessionActor } from "@/platform/bridge/types";
 import type { ConnectionState } from "@/state/workspace/workspaceState";
-
-const initialHistoryPageBytes = 32 * 1024;
-const initialHistoryTargetBytes = 128 * 1024;
-const maxInitialHistoryPages = 4;
 
 interface TerminalSummaryView {
 	id: string;
@@ -32,168 +26,13 @@ interface TerminalAreaProps {
 	workspaceState: StoreApi<{
 		terminals: TerminalSummaryView[];
 		setActiveSessionId: (terminalId: string | null) => void;
-		markTerminalConnecting: (terminalId: string) => void;
-		markTerminalReady: (info: TerminalSnapshotRecord["info"]) => void;
-		markTerminalError: (terminalId: string, message: string) => void;
-		updateTerminalSize: (
-			terminalId: string,
-			cols: number,
-			rows: number,
-		) => void;
 		removeTerminal: (terminalId: string) => void;
 	}>;
 	controller: TerminalController;
+	registry: TerminalSessionRegistry;
+	connectionGeneration: number;
 	theme: "light" | "dark";
 	onInlineError: (message: string | null) => void;
-}
-
-function decodeBase64Bytes(value: string) {
-	const binary = window.atob(value);
-	const bytes = new Uint8Array(binary.length);
-	for (let index = 0; index < binary.length; index += 1) {
-		bytes[index] = binary.charCodeAt(index);
-	}
-	return new TextDecoder().decode(bytes);
-}
-
-function parseTerminalSnapshot(value: unknown): TerminalSnapshotRecord | null {
-	if (typeof value !== "object" || value === null) {
-		return null;
-	}
-
-	const info =
-		"info" in value && typeof value.info === "object" && value.info !== null
-			? value.info
-			: null;
-	if (info == null) {
-		return null;
-	}
-
-	const terminal =
-		"terminal" in info && typeof info.terminal === "string"
-			? info.terminal
-			: null;
-	const snapshotBytes =
-		"snapshot_bytes_b64" in value &&
-		typeof value.snapshot_bytes_b64 === "string"
-			? value.snapshot_bytes_b64
-			: null;
-	if (terminal == null || snapshotBytes == null) {
-		return null;
-	}
-
-	return value as TerminalSnapshotRecord;
-}
-
-async function preloadTerminalWindow(
-	session: SessionActor,
-	snapshot: TerminalSnapshotRecord,
-) {
-	const renderPrefix = decodeBase64Bytes(snapshot.render_prefix_b64);
-	let startSeq = snapshot.start_seq;
-	const historyChunks: string[] = [];
-	const snapshotBytes = decodeBase64Bytes(snapshot.snapshot_bytes_b64);
-	let loadedBytes = snapshotBytes.length;
-	let nextBefore = snapshot.start_seq;
-
-	for (
-		let page = 0;
-		page < maxInitialHistoryPages &&
-		nextBefore > 0 &&
-		loadedBytes < initialHistoryTargetBytes;
-		page += 1
-	) {
-		const history = await session.readHistory(
-			snapshot.info.terminal,
-			nextBefore,
-			initialHistoryPageBytes,
-		);
-		if (history.bytes_b64.length === 0) {
-			startSeq = history.start_seq;
-			break;
-		}
-
-		const chunk = decodeBase64Bytes(history.bytes_b64);
-		if (chunk.length === 0 || history.start_seq >= nextBefore) {
-			break;
-		}
-
-		historyChunks.unshift(chunk);
-		loadedBytes += chunk.length;
-		startSeq = history.start_seq;
-		nextBefore = history.start_seq;
-		if (history.start_seq === 0) {
-			break;
-		}
-	}
-
-	return {
-		startSeq,
-		snapshot: `${renderPrefix}${historyChunks.join("")}${snapshotBytes}`,
-	};
-}
-
-export async function openTerminalSnapshot({
-	session,
-	terminalId,
-	onMarkTerminalConnecting,
-	onMarkTerminalReady,
-	onMarkTerminalError,
-	onInlineError,
-	onRenderSnapshot,
-}: {
-	session: SessionActor | null;
-	terminalId: string;
-	onMarkTerminalConnecting: (terminalId: string) => void;
-	onMarkTerminalReady: (snapshot: TerminalSnapshotRecord) => void;
-	onMarkTerminalError: (terminalId: string, message: string) => void;
-	onInlineError: (message: string | null) => void;
-	onRenderSnapshot: (
-		terminalId: string,
-		snapshot: string,
-		startSeq: number,
-	) => void;
-}) {
-	if (session == null) {
-		return;
-	}
-	onMarkTerminalConnecting(terminalId);
-
-	try {
-		const snapshot = await Promise.race([
-			session.openTerminal(terminalId),
-			new Promise<never>((_, reject) => {
-				window.setTimeout(
-					() => reject(new Error("terminal open timed out")),
-					5_000,
-				);
-			}),
-		]);
-		const parsed = parseTerminalSnapshot(snapshot);
-		if (parsed == null) {
-			throw new Error("invalid terminal snapshot");
-		}
-		let initialWindow = {
-			startSeq: parsed.start_seq,
-			snapshot: `${decodeBase64Bytes(parsed.render_prefix_b64)}${decodeBase64Bytes(parsed.snapshot_bytes_b64)}`,
-		};
-		try {
-			initialWindow = await preloadTerminalWindow(session, parsed);
-		} catch {
-			// Fall back to the attach snapshot if preloading shared history fails.
-		}
-		onMarkTerminalReady(parsed);
-		onRenderSnapshot(
-			terminalId,
-			initialWindow.snapshot,
-			initialWindow.startSeq,
-		);
-	} catch (error: unknown) {
-		const message =
-			error instanceof Error ? error.message : "failed to open terminal";
-		onMarkTerminalError(terminalId, message);
-		onInlineError(message);
-	}
 }
 
 export function TerminalArea({
@@ -201,10 +40,11 @@ export function TerminalArea({
 	workspace,
 	workspaceState,
 	controller,
+	registry,
+	connectionGeneration,
 	theme,
 	onInlineError,
 }: TerminalAreaProps) {
-	const lastOpenedTerminalIdRef = useRef<string | null>(null);
 	const activeSession =
 		workspace.terminals.find(
 			(terminal) => terminal.id === workspace.activeSessionId,
@@ -217,80 +57,15 @@ export function TerminalArea({
 	}, [controller, theme]);
 
 	useEffect(() => {
-		controller.setActiveTerminal(activeSession?.id ?? null);
-	}, [activeSession?.id, controller]);
-
-	useEffect(() => {
-		if (activeSession == null) {
-			lastOpenedTerminalIdRef.current = null;
-			return;
-		}
-		if (session == null) {
+		if (activeSession == null || session == null) {
+			registry.setActiveTerminalId(null);
 			return;
 		}
 		if (activeSession.status === "connecting") {
 			return;
 		}
-		if (lastOpenedTerminalIdRef.current === activeSession.id) {
-			return;
-		}
-
-		lastOpenedTerminalIdRef.current = activeSession.id;
-		void openTerminalSnapshot({
-			session,
-			terminalId: activeSession.id,
-			onMarkTerminalConnecting: (terminalId) => {
-				workspaceState.getState().markTerminalConnecting(terminalId);
-			},
-			onMarkTerminalReady: (snapshot) => {
-				workspaceState.getState().markTerminalReady(snapshot.info);
-			},
-			onMarkTerminalError: (terminalId, message) => {
-				workspaceState.getState().markTerminalError(terminalId, message);
-				lastOpenedTerminalIdRef.current = null;
-			},
-			onInlineError,
-			onRenderSnapshot: (terminalId, snapshot, startSeq) => {
-				controller.renderSnapshotWithRange(terminalId, snapshot, startSeq);
-			},
-		});
-	}, [activeSession, controller, onInlineError, session, workspaceState]);
-
-	useEffect(() => {
-		controller.setHandlers({
-			session: () => session,
-			onError: (message) => {
-				onInlineError(message);
-			},
-			onInput: (terminalId, data) => {
-				if (session == null) {
-					return;
-				}
-
-				void session
-					.sendInput(terminalId, new TextEncoder().encode(data))
-					.catch((error: unknown) => {
-						onInlineError(
-							error instanceof Error ? error.message : "failed to send input",
-						);
-					});
-			},
-			onResize: (terminalId, cols, rows) => {
-				if (session == null) {
-					return;
-				}
-
-				workspaceState.getState().updateTerminalSize(terminalId, cols, rows);
-				void session.resize(terminalId, cols, rows).catch((error: unknown) => {
-					onInlineError(
-						error instanceof Error
-							? error.message
-							: "failed to resize terminal",
-					);
-				});
-			},
-		});
-	}, [controller, onInlineError, session, workspaceState]);
+		registry.activateTerminal(activeSession.id, connectionGeneration);
+	}, [activeSession, connectionGeneration, registry, session]);
 
 	if (workspace.connectionState !== "connected") {
 		return null;
@@ -326,6 +101,7 @@ export function TerminalArea({
 		}
 
 		workspaceState.getState().removeTerminal(terminalId);
+		registry.removeTerminal(terminalId);
 		try {
 			await session.kill(terminalId, "TERM");
 		} catch (error: unknown) {
@@ -400,7 +176,7 @@ export function TerminalArea({
 						{activeSession.error ?? "Terminal attach failed"}
 					</div>
 				) : (
-					<TerminalViewport controller={controller} />
+					<TerminalViewport registry={registry} />
 				)}
 			</div>
 			<footer className="terminal-footer">

@@ -1,4 +1,5 @@
 import type { StoreApi } from "zustand/vanilla";
+import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
 import type {
 	ConnectConfig,
 	PlatformServices,
@@ -66,12 +67,9 @@ interface ControllerDeps {
 	workspaceState: WorkspaceStore;
 	onInlineError: (message: string | null) => void;
 	onConnectionReset: () => void;
-	onTerminalOutput: (
-		terminalId: string,
-		chunk: string,
-		streamSeq: number,
-	) => void;
 	onTerminalRemoved: (terminalId: string) => void;
+	onConnectionGenerationChange: (generation: number) => void;
+	terminalRegistry: TerminalSessionRegistry;
 }
 
 function parseTerminalInfo(value: unknown): TerminalInfoRecord | null {
@@ -124,6 +122,12 @@ export class ConnectionController {
 
 	constructor(private readonly deps: ControllerDeps) {}
 
+	private bumpConnectionGeneration() {
+		this.connectionGeneration += 1;
+		this.deps.onConnectionGenerationChange(this.connectionGeneration);
+		return this.connectionGeneration;
+	}
+
 	async bootstrap() {
 		if (this.bootstrapped) {
 			return;
@@ -134,20 +138,22 @@ export class ConnectionController {
 	}
 
 	async shutdown() {
-		this.connectionGeneration += 1;
+		const generation = this.bumpConnectionGeneration();
 		this.stopTerminalPolling();
 		const session = this.session;
 		this.session = null;
+		this.deps.terminalRegistry.disconnect(generation);
 		if (session != null) {
 			await session.close();
 		}
 	}
 
 	async disconnect() {
-		this.connectionGeneration += 1;
+		const generation = this.bumpConnectionGeneration();
 		this.stopTerminalPolling();
 		const session = this.session;
 		this.session = null;
+		this.deps.terminalRegistry.disconnect(generation);
 		this.deps.workspaceState.getState().markDisconnected({ reason: null });
 		this.deps.onConnectionReset();
 		this.deps.onInlineError(null);
@@ -210,8 +216,7 @@ export class ConnectionController {
 	}
 
 	private async connect(serverId: string, config: ConnectConfig) {
-		this.connectionGeneration += 1;
-		const generation = this.connectionGeneration;
+		const generation = this.bumpConnectionGeneration();
 
 		this.stopTerminalPolling();
 		const previous = this.session;
@@ -282,6 +287,7 @@ export class ConnectionController {
 			return;
 		}
 		if (kind === "Disconnected") {
+			const generation = this.bumpConnectionGeneration();
 			const reason =
 				"reason" in event && typeof event.reason === "string"
 					? event.reason
@@ -293,6 +299,7 @@ export class ConnectionController {
 			this.deps.workspaceState
 				.getState()
 				.markDisconnected({ willRetry, reason });
+			this.deps.terminalRegistry.disconnect(generation);
 			this.deps.onConnectionReset();
 			this.deps.onInlineError(reason);
 			return;
@@ -340,10 +347,11 @@ export class ConnectionController {
 					? event.stream_seq
 					: null;
 			if (terminalId != null && bytesB64 != null && streamSeq != null) {
-				this.deps.onTerminalOutput(
+				this.deps.terminalRegistry.applyOutput(
 					terminalId,
-					decodeBase64Bytes(bytesB64),
 					streamSeq,
+					decodeBase64Bytes(bytesB64),
+					this.connectionGeneration,
 				);
 			}
 			return;
@@ -355,6 +363,7 @@ export class ConnectionController {
 					: null;
 			if (terminalId != null) {
 				this.deps.workspaceState.getState().removeTerminal(terminalId);
+				this.deps.terminalRegistry.removeTerminal(terminalId);
 				this.deps.onTerminalRemoved(terminalId);
 				void this.refreshTerminalsOnce();
 			}

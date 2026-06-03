@@ -66,7 +66,7 @@ export interface CreateTerminalParams {
 export interface SessionActor {
 	events(): AsyncIterable<unknown>;
 	refreshTerminals(): Promise<void>;
-	openTerminal(terminalId: string): Promise<TerminalSnapshotRecord>;
+	activateTerminal(terminalId: string): Promise<TerminalSnapshotRecord>;
 	readHistory(
 		terminalId: string,
 		before: number | null,

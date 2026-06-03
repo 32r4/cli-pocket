@@ -74,10 +74,13 @@ class TauriSessionActor implements SessionActor {
 		this.eventSource.push(terminalListEvent(terminals));
 	}
 
-	async openTerminal(terminalId: string) {
-		return await invoke<TerminalSnapshotRecord>("cli_pocket_open_terminal", {
-			terminalId,
-		});
+	async activateTerminal(terminalId: string) {
+		return await invoke<TerminalSnapshotRecord>(
+			"cli_pocket_activate_terminal",
+			{
+				terminalId,
+			},
+		);
 	}
 
 	async readHistory(

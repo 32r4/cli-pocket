@@ -64,6 +64,8 @@ export function AppRoot({
 		platformError,
 		session,
 		terminalController,
+		terminalRegistry,
+		connectionGeneration,
 		connectServer,
 		disconnectCurrentServer,
 		copyLocalPairUrl,
@@ -333,6 +335,8 @@ export function AppRoot({
 						workspace={workspace}
 						workspaceState={workspaceState}
 						controller={terminalController}
+						registry={terminalRegistry}
+						connectionGeneration={connectionGeneration}
 						theme={ui.theme}
 						onInlineError={setInlineError}
 					/>

@@ -24,7 +24,10 @@ use cli_pocket_daemon_core::session::SessionManager;
 use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::{Hello, ServerInfo};
-use cli_pocket_proto::{ByeReason, ClientId, TerminalCreateParams, PROTOCOL_VERSION};
+use cli_pocket_proto::{
+    ByeReason, ClientId, RequestBody, RequestFrame, RequestId, RequestOp, ResponseBody,
+    TerminalCreateParams, PROTOCOL_VERSION,
+};
 use cli_pocket_transport::{InMemoryTransport, InMemoryTransportPair, Transport};
 use parking_lot::Mutex;
 use tempfile::TempDir;
@@ -138,33 +141,40 @@ async fn revocation_drops_live_session() {
 
     // ---- Send TerminalCreate. ----
     let request_id = 1u32;
-    let create = Frame::body(FrameBody::TerminalCreate {
+    let create = request_frame(
         request_id,
-        params: TerminalCreateParams {
-            cols: 80,
-            rows: 24,
-            cwd: None,
-            cmd: terminal_cmd(),
-            env: Vec::new(),
+        RequestOp::CreateTerminal,
+        RequestBody::CreateTerminal {
+            params: TerminalCreateParams {
+                cols: 80,
+                rows: 24,
+                cwd: None,
+                cmd: terminal_cmd(),
+                env: Vec::new(),
+            },
         },
-    });
+    );
     send_frame(&mut client_transport, &mut session, &create)
         .await
         .expect("send TerminalCreate");
 
-    // ---- Expect TerminalCreateOk. ----
+    // ---- Expect create response. ----
     let create_ok = recv_frame(&mut client_transport, &mut session)
         .await
-        .expect("recv TerminalCreateOk");
+        .expect("recv create response");
     let terminal_id = match &create_ok.body {
-        FrameBody::TerminalCreateOk {
-            request_id: rid,
-            info,
-        } => {
-            assert_eq!(*rid, request_id, "request_id should match");
-            info.terminal
+        FrameBody::Response(response) => {
+            assert_eq!(
+                response.id,
+                RequestId(request_id),
+                "request_id should match"
+            );
+            match response.body.as_ref() {
+                Some(ResponseBody::CreateTerminal { info }) => info.terminal,
+                other => panic!("expected CreateTerminal response body, got {other:?}"),
+            }
         }
-        other => panic!("expected TerminalCreateOk, got {other:?}"),
+        other => panic!("expected create response, got {other:?}"),
     };
 
     // ---- Sanity: SessionManager now owns one terminal. ----
@@ -246,6 +256,14 @@ async fn recv_with_timeout(t: &mut InMemoryTransport) -> Option<Vec<u8>> {
         .await
         .expect("transport recv timed out")
         .expect("transport recv error")
+}
+
+fn request_frame(request_id: u32, op: RequestOp, body: RequestBody) -> Frame {
+    Frame::body(FrameBody::Request(RequestFrame {
+        id: RequestId(request_id),
+        op,
+        body,
+    }))
 }
 
 async fn send_frame(

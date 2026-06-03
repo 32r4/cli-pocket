@@ -1,9 +1,8 @@
 use crate::error::{ByeReason, ProtocolError};
 use crate::hello::{Hello, HelloOk};
-use crate::snapshot::TerminalBaseline;
 use crate::terminal::ServerConfig;
 use crate::terminal::{
-    ExitInfo, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
+    ExitInfo, RequestId, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
@@ -18,154 +17,15 @@ pub enum FrameBody {
     // ---- Connection control ----
     Hello(Hello),
     HelloOk(HelloOk),
-    Ping {
-        nonce: u32,
-    },
-    Pong {
-        nonce: u32,
-    },
-    Bye {
-        reason: ByeReason,
-    },
+    Ping { nonce: u32 },
+    Pong { nonce: u32 },
+    Bye { reason: ByeReason },
 
     // ---- Terminal lifecycle (request/response, request_id paired) ----
-    TerminalCreate {
-        request_id: u32,
-        params: TerminalCreateParams,
-    },
-    TerminalCreateOk {
-        request_id: u32,
-        info: TerminalInfo,
-    },
-    TerminalCreateErr {
-        request_id: u32,
-        error: ProtocolError,
-    },
-
-    TerminalAttach {
-        request_id: u32,
-        terminal: TerminalId,
-    },
-    TerminalAttachOk {
-        request_id: u32,
-        baseline: TerminalBaseline,
-        stream: StreamId,
-        initial_window: u32,
-    },
-    TerminalAttachErr {
-        request_id: u32,
-        error: ProtocolError,
-    },
-
-    TerminalDetach {
-        request_id: u32,
-        stream: StreamId,
-    },
-    TerminalDetachOk {
-        request_id: u32,
-    },
-    TerminalDetachErr {
-        request_id: u32,
-        error: ProtocolError,
-    },
-
-    TerminalKill {
-        request_id: u32,
-        terminal: TerminalId,
-    },
-    TerminalKillOk {
-        request_id: u32,
-    },
-    TerminalKillErr {
-        request_id: u32,
-        error: ProtocolError,
-    },
-
-    TerminalList {
-        request_id: u32,
-    },
-    TerminalListOk {
-        request_id: u32,
-        terminals: Vec<TerminalInfo>,
-    },
-
-    ServerConfigGet {
-        request_id: u32,
-    },
-    ServerConfigGetOk {
-        request_id: u32,
-        config: ServerConfig,
-    },
-    ServerConfigGetErr {
-        request_id: u32,
-        error: ProtocolError,
-    },
-
-    ServerConfigSet {
-        request_id: u32,
-        config: ServerConfig,
-    },
-    ServerConfigSetOk {
-        request_id: u32,
-        config: ServerConfig,
-    },
-    ServerConfigSetErr {
-        request_id: u32,
-        error: ProtocolError,
-    },
-
-    TerminalExit {
-        terminal: TerminalId,
-        exit: ExitInfo,
-    },
-
-    // ---- Data plane (per terminal stream) ----
-    Output {
-        stream: StreamId,
-        seq: StreamSeq,
-        bytes: ByteBuf,
-    },
-    TerminalSnapshotChunk {
-        stream: StreamId,
-        seq: StreamSeq,
-        offset: u32,
-        bytes: ByteBuf,
-        last: bool,
-    },
-    Input {
-        stream: StreamId,
-        bytes: ByteBuf,
-    },
-
-    HistoryRequest {
-        request_id: u32,
-        terminal: TerminalId,
-        before: Option<StreamSeq>,
-        max_bytes: u32,
-    },
-    HistoryChunk {
-        request_id: u32,
-        terminal: TerminalId,
-        start_seq: StreamSeq,
-        end_seq: StreamSeq,
-        bytes: ByteBuf,
-        last: bool,
-    },
-    HistoryErr {
-        request_id: u32,
-        error: ProtocolError,
-    },
-    Resize {
-        stream: StreamId,
-        cols: u16,
-        rows: u16,
-    },
-
-    // ---- Flow control ----
-    Window {
-        stream: StreamId,
-        credit: u32,
-    },
+    Request(RequestFrame),
+    Response(ResponseFrame),
+    StreamData(StreamDataFrame),
+    Event(EventFrame),
 }
 
 impl Frame {
@@ -173,4 +33,156 @@ impl Frame {
     pub fn body(body: FrameBody) -> Self {
         Self { body }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestFrame {
+    pub id: RequestId,
+    pub op: RequestOp,
+    pub body: RequestBody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestOp {
+    ListTerminals,
+    CreateTerminal,
+    AttachTerminal,
+    ReadHistory,
+    KillTerminal,
+    GetServerConfig,
+    SetServerConfig,
+    SendInput,
+    ResizeTerminal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RequestBody {
+    ListTerminals,
+    CreateTerminal {
+        params: TerminalCreateParams,
+    },
+    AttachTerminal {
+        terminal_id: TerminalId,
+    },
+    ReadHistory {
+        terminal_id: TerminalId,
+        before: Option<StreamSeq>,
+        max_bytes: u32,
+    },
+    KillTerminal {
+        terminal_id: TerminalId,
+    },
+    GetServerConfig,
+    SetServerConfig {
+        config: ServerConfig,
+    },
+    SendInput {
+        terminal_id: TerminalId,
+        bytes: ByteBuf,
+    },
+    ResizeTerminal {
+        terminal_id: TerminalId,
+        cols: u16,
+        rows: u16,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResponseFrame {
+    pub id: RequestId,
+    pub ok: bool,
+    pub body: Option<ResponseBody>,
+    pub error: Option<ResponseError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ResponseBody {
+    ListTerminals {
+        terminals: Vec<TerminalInfo>,
+    },
+    CreateTerminal {
+        info: TerminalInfo,
+    },
+    AttachTerminal {
+        stream_id: StreamId,
+        terminal_info: TerminalInfo,
+        baseline_start_seq: StreamSeq,
+        baseline_end_seq: StreamSeq,
+        render_prefix: String,
+    },
+    ReadHistory {
+        stream_id: StreamId,
+        terminal_id: TerminalId,
+        start_seq: StreamSeq,
+        end_seq: StreamSeq,
+    },
+    KillTerminal,
+    GetServerConfig {
+        config: ServerConfig,
+    },
+    SetServerConfig {
+        config: ServerConfig,
+    },
+    SendInput,
+    ResizeTerminal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResponseError {
+    pub code: ProtocolError,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamDataFrame {
+    pub stream_id: StreamId,
+    pub kind: StreamKind,
+    pub seq: StreamSeq,
+    pub offset: Option<u32>,
+    pub bytes: ByteBuf,
+    pub last: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamKind {
+    Baseline,
+    Output,
+    History,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventFrame {
+    pub kind: EventKind,
+    pub body: EventBody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    Connected,
+    Disconnected,
+    TerminalCreated,
+    TerminalExited,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EventBody {
+    Connected,
+    Disconnected {
+        reason: String,
+    },
+    TerminalCreated {
+        info: TerminalInfo,
+    },
+    TerminalExited {
+        terminal_id: TerminalId,
+        exit: ExitInfo,
+    },
+    Error {
+        error: ProtocolError,
+        message: String,
+    },
 }

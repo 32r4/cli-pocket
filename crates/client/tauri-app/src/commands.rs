@@ -116,13 +116,13 @@ pub async fn create_terminal(
         .await
 }
 
-pub async fn open_terminal(
+pub async fn activate_terminal(
     session: SessionHandle,
     terminal_id: String,
 ) -> Result<serde_json::Value, String> {
     let terminal_id = parse_terminal_id(&terminal_id)?;
     session
-        .open_terminal(terminal_id)
+        .activate_terminal(terminal_id)
         .await
         .map(|snapshot| serialize_terminal_snapshot(&snapshot))
 }

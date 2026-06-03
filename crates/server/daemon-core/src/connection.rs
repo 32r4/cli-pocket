@@ -9,8 +9,9 @@ use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::frame::{Frame, FrameBody};
 use cli_pocket_proto::hello::HelloOk;
 use cli_pocket_proto::{
-    ByeReason, Hello, KillSignal, ProtocolError, ServerConfig, SessionId, StreamId, StreamSeq,
-    TerminalBaseline, TerminalCreateParams, TerminalId, PROTOCOL_VERSION,
+    ByeReason, Hello, KillSignal, ProtocolError, RequestBody, RequestFrame, RequestId, RequestOp,
+    ResponseBody, ResponseError, ResponseFrame, ServerConfig, SessionId, StreamDataFrame, StreamId,
+    StreamKind, StreamSeq, TerminalBaseline, TerminalId, PROTOCOL_VERSION,
 };
 use cli_pocket_pty::output::{OutputChunk, OutputRecv};
 use cli_pocket_pty::Terminal;
@@ -150,91 +151,9 @@ async fn run_connection_post_handshake<T: Transport>(
         };
 
         match frame.body {
-            FrameBody::TerminalCreate { request_id, params } => {
-                handle_terminal_create(&mut chan, &deps, request_id, params).await?;
+            FrameBody::Request(request) => {
+                handle_request(&mut chan, &deps, request, &mut streams).await?;
             }
-            FrameBody::TerminalAttach {
-                request_id,
-                terminal,
-            } => {
-                handle_terminal_attach(&mut chan, &deps, request_id, terminal, &mut streams)
-                    .await?;
-            }
-            FrameBody::TerminalDetach { request_id, stream } => {
-                let resp = if streams.map.remove(&stream).is_some() {
-                    Frame::body(FrameBody::TerminalDetachOk { request_id })
-                } else {
-                    Frame::body(FrameBody::TerminalDetachErr {
-                        request_id,
-                        error: ProtocolError::Other("unknown stream".to_owned()),
-                    })
-                };
-                chan.send_frame(&resp).await?;
-            }
-            FrameBody::TerminalKill {
-                request_id,
-                terminal,
-            } => {
-                let result = deps.session_mgr.kill(&terminal, KillSignal::Term).await;
-                let resp = match result {
-                    Ok(()) => Frame::body(FrameBody::TerminalKillOk { request_id }),
-                    Err(error) => Frame::body(FrameBody::TerminalKillErr {
-                        request_id,
-                        error: ProtocolError::Other(error.to_string()),
-                    }),
-                };
-                chan.send_frame(&resp).await?;
-            }
-            FrameBody::TerminalList { request_id } => {
-                chan.send_frame(&Frame::body(FrameBody::TerminalListOk {
-                    request_id,
-                    terminals: deps.session_mgr.list(),
-                }))
-                .await?;
-            }
-            FrameBody::ServerConfigGet { request_id } => {
-                let resp = match server_config_from_deps(&deps) {
-                    Ok(config) => Frame::body(FrameBody::ServerConfigGetOk { request_id, config }),
-                    Err(error) => Frame::body(FrameBody::ServerConfigGetErr {
-                        request_id,
-                        error: ProtocolError::Other(error.to_string()),
-                    }),
-                };
-                chan.send_frame(&resp).await?;
-            }
-            FrameBody::ServerConfigSet { request_id, config } => {
-                let resp = match apply_server_config_update(&deps, &config) {
-                    Ok(config) => Frame::body(FrameBody::ServerConfigSetOk { request_id, config }),
-                    Err(error) => Frame::body(FrameBody::ServerConfigSetErr {
-                        request_id,
-                        error: ProtocolError::Other(error.to_string()),
-                    }),
-                };
-                chan.send_frame(&resp).await?;
-            }
-            FrameBody::HistoryRequest {
-                request_id,
-                terminal,
-                before,
-                max_bytes,
-            } => {
-                handle_history_request(&mut chan, &deps, request_id, terminal, before, max_bytes)
-                    .await?;
-            }
-            FrameBody::Input { stream, bytes } => {
-                if let Some(attached) = streams.map.get(&stream) {
-                    let _ = attached.terminal.write_input(&bytes);
-                }
-            }
-            FrameBody::Resize { stream, cols, rows } => {
-                if let Some(attached) = streams.map.get(&stream) {
-                    let _ = attached.terminal.resize(cols, rows);
-                }
-            }
-            FrameBody::Window {
-                stream: _,
-                credit: _,
-            } => {}
             FrameBody::Ping { nonce } => {
                 chan.send_frame(&Frame::body(FrameBody::Pong { nonce }))
                     .await?;
@@ -306,56 +225,233 @@ struct StreamContext {
     output_tx: mpsc::Sender<OutboundOutput>,
 }
 
-async fn handle_terminal_create(
+async fn handle_request(
     chan: &mut EncryptedChannel<impl Transport>,
     deps: &ConnectionDeps,
-    request_id: u32,
-    params: TerminalCreateParams,
+    request: RequestFrame,
+    streams: &mut StreamContext,
 ) -> crate::DaemonResult<()> {
-    let info = deps
-        .session_mgr
-        .create(params, current_scrollback_bytes(deps))
+    if !request_body_matches_op(request.op, &request.body) {
+        send_error_response(
+            chan,
+            request.id,
+            ProtocolError::InvalidParam("request op/body mismatch".to_owned()),
+        )
         .await?;
-    chan.send_frame(&Frame::body(FrameBody::TerminalCreateOk {
-        request_id,
-        info,
-    }))
+        return Ok(());
+    }
+
+    match request.body {
+        RequestBody::ListTerminals => {
+            send_ok_response(
+                chan,
+                request.id,
+                ResponseBody::ListTerminals {
+                    terminals: deps.session_mgr.list(),
+                },
+            )
+            .await
+        }
+        RequestBody::CreateTerminal { params } => {
+            match deps
+                .session_mgr
+                .create(params, current_scrollback_bytes(deps))
+                .await
+            {
+                Ok(info) => {
+                    send_ok_response(chan, request.id, ResponseBody::CreateTerminal { info }).await
+                }
+                Err(error) => {
+                    send_error_response(chan, request.id, ProtocolError::Other(error.to_string()))
+                        .await
+                }
+            }
+        }
+        RequestBody::AttachTerminal { terminal_id } => {
+            handle_attach_request(chan, deps, request.id, terminal_id, streams).await
+        }
+        RequestBody::ReadHistory {
+            terminal_id,
+            before,
+            max_bytes,
+        } => {
+            handle_history_read_request(chan, deps, request.id, terminal_id, before, max_bytes)
+                .await
+        }
+        RequestBody::KillTerminal { terminal_id } => {
+            match deps.session_mgr.kill(&terminal_id, KillSignal::Term).await {
+                Ok(()) => send_ok_response(chan, request.id, ResponseBody::KillTerminal).await,
+                Err(error) => {
+                    send_error_response(chan, request.id, ProtocolError::Other(error.to_string()))
+                        .await
+                }
+            }
+        }
+        RequestBody::GetServerConfig => match server_config_from_deps(deps) {
+            Ok(config) => {
+                send_ok_response(chan, request.id, ResponseBody::GetServerConfig { config }).await
+            }
+            Err(error) => {
+                send_error_response(chan, request.id, ProtocolError::Other(error.to_string())).await
+            }
+        },
+        RequestBody::SetServerConfig { config } => {
+            match apply_server_config_update(deps, &config) {
+                Ok(config) => {
+                    send_ok_response(chan, request.id, ResponseBody::SetServerConfig { config })
+                        .await
+                }
+                Err(error) => {
+                    send_error_response(chan, request.id, ProtocolError::Other(error.to_string()))
+                        .await
+                }
+            }
+        }
+        RequestBody::SendInput { terminal_id, bytes } => {
+            if let Some(attached) = streams
+                .map
+                .values()
+                .find(|attached| attached.terminal_id == terminal_id)
+            {
+                let _ = attached.terminal.write_input(&bytes);
+                send_ok_response(chan, request.id, ResponseBody::SendInput).await
+            } else {
+                send_error_response(chan, request.id, ProtocolError::UnknownTerminal).await
+            }
+        }
+        RequestBody::ResizeTerminal {
+            terminal_id,
+            cols,
+            rows,
+        } => {
+            if let Some(attached) = streams
+                .map
+                .values()
+                .find(|attached| attached.terminal_id == terminal_id)
+            {
+                let _ = attached.terminal.resize(cols, rows);
+                send_ok_response(chan, request.id, ResponseBody::ResizeTerminal).await
+            } else {
+                send_error_response(chan, request.id, ProtocolError::UnknownTerminal).await
+            }
+        }
+    }
+}
+
+fn request_body_matches_op(op: RequestOp, body: &RequestBody) -> bool {
+    matches!(
+        (op, body),
+        (RequestOp::ListTerminals, RequestBody::ListTerminals)
+            | (
+                RequestOp::CreateTerminal,
+                RequestBody::CreateTerminal { .. }
+            )
+            | (
+                RequestOp::AttachTerminal,
+                RequestBody::AttachTerminal { .. }
+            )
+            | (RequestOp::ReadHistory, RequestBody::ReadHistory { .. })
+            | (RequestOp::KillTerminal, RequestBody::KillTerminal { .. })
+            | (RequestOp::GetServerConfig, RequestBody::GetServerConfig)
+            | (
+                RequestOp::SetServerConfig,
+                RequestBody::SetServerConfig { .. }
+            )
+            | (RequestOp::SendInput, RequestBody::SendInput { .. })
+            | (
+                RequestOp::ResizeTerminal,
+                RequestBody::ResizeTerminal { .. }
+            )
+    )
+}
+
+async fn send_ok_response(
+    chan: &mut EncryptedChannel<impl Transport>,
+    id: RequestId,
+    body: ResponseBody,
+) -> crate::DaemonResult<()> {
+    chan.send_frame(&Frame::body(FrameBody::Response(ResponseFrame {
+        id,
+        ok: true,
+        body: Some(body),
+        error: None,
+    })))
     .await
 }
 
-async fn handle_terminal_attach(
+async fn send_error_response(
+    chan: &mut EncryptedChannel<impl Transport>,
+    id: RequestId,
+    code: ProtocolError,
+) -> crate::DaemonResult<()> {
+    let message = code.to_string();
+    chan.send_frame(&Frame::body(FrameBody::Response(ResponseFrame {
+        id,
+        ok: false,
+        body: None,
+        error: Some(ResponseError { code, message }),
+    })))
+    .await
+}
+
+async fn handle_attach_request(
     chan: &mut EncryptedChannel<impl Transport>,
     deps: &ConnectionDeps,
-    request_id: u32,
+    request_id: RequestId,
     terminal_id: TerminalId,
     streams: &mut StreamContext,
 ) -> crate::DaemonResult<()> {
     let Some(terminal) = deps.session_mgr.attach(&terminal_id) else {
-        chan.send_frame(&Frame::body(FrameBody::TerminalAttachErr {
-            request_id,
-            error: ProtocolError::UnknownTerminal,
-        }))
-        .await?;
+        send_error_response(chan, request_id, ProtocolError::UnknownTerminal).await?;
         return Ok(());
     };
+
+    streams.map.clear();
 
     let stream_id = StreamId(streams.next_local_stream_id);
     streams.next_local_stream_id = streams.next_local_stream_id.saturating_add(1);
 
     let snapshot = terminal.snapshot();
     let baseline = TerminalBaseline::from(&snapshot);
+    let Some(info) = deps
+        .session_mgr
+        .list()
+        .into_iter()
+        .find(|info| info.terminal == terminal_id)
+    else {
+        send_error_response(chan, request_id, ProtocolError::UnknownTerminal).await?;
+        return Ok(());
+    };
 
-    chan.send_frame(&Frame::body(FrameBody::TerminalAttachOk {
+    let start_seq = StreamSeq(
+        baseline
+            .head_seq
+            .0
+            .saturating_sub(u64::try_from(snapshot.bytes.len()).unwrap_or(u64::MAX)),
+    );
+    send_ok_response(
+        chan,
         request_id,
-        baseline: baseline.clone(),
-        stream: stream_id,
-        initial_window: u32::try_from(SNAPSHOT_CHUNK_BYTES).unwrap_or(u32::MAX),
-    }))
+        ResponseBody::AttachTerminal {
+            stream_id,
+            terminal_info: info,
+            baseline_start_seq: start_seq,
+            baseline_end_seq: baseline.head_seq,
+            render_prefix: String::new(),
+        },
+    )
     .await?;
 
-    if !snapshot.bytes.is_empty() {
-        send_snapshot_chunks(chan, stream_id, baseline.head_seq, snapshot.bytes.as_ref()).await?;
-    }
+    send_stream_chunks(
+        chan,
+        stream_id,
+        StreamKind::Baseline,
+        baseline.head_seq,
+        Some(0),
+        snapshot.bytes.as_ref(),
+        SNAPSHOT_CHUNK_BYTES,
+    )
+    .await?;
 
     let writer = spawn_output_forwarder(stream_id, terminal.subscribe(), streams.output_tx.clone());
     streams.map.insert(
@@ -371,27 +467,90 @@ async fn handle_terminal_attach(
     Ok(())
 }
 
-async fn send_snapshot_chunks(
+async fn handle_history_read_request(
     chan: &mut EncryptedChannel<impl Transport>,
-    stream: StreamId,
-    seq: StreamSeq,
-    bytes: &[u8],
+    deps: &ConnectionDeps,
+    request_id: RequestId,
+    terminal_id: TerminalId,
+    before: Option<StreamSeq>,
+    max_bytes: u32,
 ) -> crate::DaemonResult<()> {
-    let total = bytes.len();
-    for (index, chunk) in bytes.chunks(SNAPSHOT_CHUNK_BYTES).enumerate() {
-        let offset = index.saturating_mul(SNAPSHOT_CHUNK_BYTES);
-        let last = offset + chunk.len() >= total;
-        chan.send_frame(&Frame::body(FrameBody::TerminalSnapshotChunk {
-            stream,
+    let Some(terminal) = deps.session_mgr.attach(&terminal_id) else {
+        send_error_response(chan, request_id, ProtocolError::UnknownTerminal).await?;
+        return Ok(());
+    };
+
+    let stream_id = StreamId(request_id.0);
+    let page = terminal.history_page(before, usize::try_from(max_bytes).unwrap_or(usize::MAX));
+
+    send_ok_response(
+        chan,
+        request_id,
+        ResponseBody::ReadHistory {
+            stream_id,
+            terminal_id,
+            start_seq: page.start_seq,
+            end_seq: page.end_seq,
+        },
+    )
+    .await?;
+
+    send_stream_chunks(
+        chan,
+        stream_id,
+        StreamKind::History,
+        page.start_seq,
+        Some(0),
+        page.bytes.as_ref(),
+        HISTORY_CHUNK_BYTES,
+    )
+    .await
+}
+
+async fn send_stream_chunks(
+    chan: &mut EncryptedChannel<impl Transport>,
+    stream_id: StreamId,
+    kind: StreamKind,
+    seq: StreamSeq,
+    first_offset: Option<u32>,
+    bytes: &[u8],
+    chunk_size: usize,
+) -> crate::DaemonResult<()> {
+    if bytes.is_empty() {
+        chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
+            stream_id,
+            kind,
             seq,
-            offset: u32::try_from(offset).map_err(|_| {
-                crate::DaemonError::Internal("snapshot offset exceeds u32::MAX".to_owned())
-            })?,
+            offset: first_offset,
+            bytes: Vec::new().into(),
+            last: true,
+        })))
+        .await?;
+        return Ok(());
+    }
+
+    for (index, chunk) in bytes.chunks(chunk_size).enumerate() {
+        let offset = index.saturating_mul(chunk_size);
+        let last = offset + chunk.len() >= bytes.len();
+        let seq = match kind {
+            StreamKind::History | StreamKind::Output => StreamSeq(
+                seq.0
+                    .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
+            ),
+            StreamKind::Baseline => seq,
+        };
+        chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
+            stream_id,
+            kind,
+            seq,
+            offset: first_offset
+                .map(|base| base.saturating_add(u32::try_from(offset).unwrap_or(u32::MAX))),
             bytes: chunk.to_vec().into(),
             last,
-        }))
+        })))
         .await?;
     }
+
     Ok(())
 }
 
@@ -420,71 +579,14 @@ async fn send_live_output(
     for piece in chunk.bytes.as_ref().chunks(OUTPUT_CHUNK_BYTES) {
         sent = sent.saturating_add(piece.len());
         let seq = StreamSeq(start_seq.saturating_add(u64::try_from(sent).unwrap_or(u64::MAX)));
-        chan.send_frame(&Frame::body(FrameBody::Output {
-            stream,
+        chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
+            stream_id: stream,
+            kind: StreamKind::Output,
             seq,
+            offset: None,
             bytes: piece.to_vec().into(),
-        }))
-        .await?;
-    }
-
-    Ok(())
-}
-
-async fn handle_history_request(
-    chan: &mut EncryptedChannel<impl Transport>,
-    deps: &ConnectionDeps,
-    request_id: u32,
-    terminal_id: TerminalId,
-    before: Option<StreamSeq>,
-    max_bytes: u32,
-) -> crate::DaemonResult<()> {
-    let Some(terminal) = deps.session_mgr.attach(&terminal_id) else {
-        chan.send_frame(&Frame::body(FrameBody::HistoryErr {
-            request_id,
-            error: ProtocolError::UnknownTerminal,
-        }))
-        .await?;
-        return Ok(());
-    };
-
-    let page = terminal.history_page(before, usize::try_from(max_bytes).unwrap_or(usize::MAX));
-    let total = page.bytes.len();
-
-    if total == 0 {
-        chan.send_frame(&Frame::body(FrameBody::HistoryChunk {
-            request_id,
-            terminal: terminal_id,
-            start_seq: page.start_seq,
-            end_seq: page.end_seq,
-            bytes: Vec::new().into(),
-            last: true,
-        }))
-        .await?;
-        return Ok(());
-    }
-
-    for (index, chunk) in page.bytes.as_ref().chunks(HISTORY_CHUNK_BYTES).enumerate() {
-        let offset = index.saturating_mul(HISTORY_CHUNK_BYTES);
-        let start_seq = StreamSeq(
-            page.start_seq
-                .0
-                .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
-        );
-        let end_seq = StreamSeq(
-            start_seq
-                .0
-                .saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX)),
-        );
-        let last = offset + chunk.len() >= total;
-        chan.send_frame(&Frame::body(FrameBody::HistoryChunk {
-            request_id,
-            terminal: terminal_id,
-            start_seq,
-            end_seq,
-            bytes: chunk.to_vec().into(),
-            last,
-        }))
+            last: false,
+        })))
         .await?;
     }
 

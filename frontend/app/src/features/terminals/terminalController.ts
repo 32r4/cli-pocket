@@ -1,7 +1,4 @@
-import type {
-	SessionActor,
-	TerminalHistoryPageRecord,
-} from "@/platform/bridge/types";
+import type { TerminalHistoryPageRecord } from "@/platform/bridge/types";
 import type { ThemeName } from "@/state/ui/uiState";
 
 interface TerminalAddonLike {
@@ -68,10 +65,9 @@ const utf8Decoder = new TextDecoder();
 const terminalScrollbackLines = 100_000;
 
 interface TerminalControllerOptions {
-	session: () => SessionActor | null;
-	onError: (message: string) => void;
 	onInput: (terminalId: string, data: string) => void;
 	onResize: (terminalId: string, cols: number, rows: number) => void;
+	onLoadOlderHistory: () => void;
 }
 
 interface BufferedLiveOutput {
@@ -200,10 +196,9 @@ async function loadTerminalModules() {
 }
 
 export class TerminalController {
-	private session: TerminalControllerOptions["session"];
-	private onError: TerminalControllerOptions["onError"];
 	private onInput: TerminalControllerOptions["onInput"];
 	private onResize: TerminalControllerOptions["onResize"];
+	private onLoadOlderHistory: TerminalControllerOptions["onLoadOlderHistory"];
 	private activeTerminalId: string | null = null;
 	private host: HTMLElement | null = null;
 	private terminal: TerminalLike | null = null;
@@ -222,34 +217,18 @@ export class TerminalController {
 	private bodyChunks: string[] = [];
 	private loadedRange: LoadedRange = { startSeq: null, endSeq: null };
 	private pendingSnapshot: PendingSnapshot | null = null;
-	private pendingHistory = false;
-	private isHistoryExhausted = false;
 	private isRedrawing = false;
 	private bufferedLiveOutput: BufferedLiveOutput[] = [];
 	private pendingDetachedLiveOutput: BufferedLiveOutput[] = [];
 
 	constructor({
-		session,
-		onError,
 		onInput,
 		onResize,
+		onLoadOlderHistory,
 	}: TerminalControllerOptions) {
-		this.session = session;
-		this.onError = onError;
 		this.onInput = onInput;
 		this.onResize = onResize;
-	}
-
-	setHandlers({
-		session,
-		onError,
-		onInput,
-		onResize,
-	}: TerminalControllerOptions) {
-		this.session = session;
-		this.onError = onError;
-		this.onInput = onInput;
-		this.onResize = onResize;
+		this.onLoadOlderHistory = onLoadOlderHistory;
 	}
 
 	reset() {
@@ -257,8 +236,6 @@ export class TerminalController {
 		this.resetRenderedContent();
 		this.loadedRange = { startSeq: null, endSeq: null };
 		this.pendingSnapshot = null;
-		this.pendingHistory = false;
-		this.isHistoryExhausted = false;
 		this.isRedrawing = false;
 		this.bufferedLiveOutput = [];
 		this.pendingDetachedLiveOutput = [];
@@ -274,10 +251,6 @@ export class TerminalController {
 	setActiveTerminal(terminalId: string | null) {
 		this.activeTerminalId = terminalId;
 		this.flushPendingState();
-	}
-
-	renderSnapshot(terminalId: string, snapshot: string) {
-		this.renderSnapshotWithRange(terminalId, snapshot, null);
 	}
 
 	renderSnapshotWithRange(
@@ -313,6 +286,10 @@ export class TerminalController {
 		}
 
 		this.appendLiveOutput(chunk, seq);
+	}
+
+	async prependHistoryPage(page: TerminalHistoryPageRecord) {
+		await this.prependHistoryPageToTerminal(page);
 	}
 
 	removeTerminal(terminalId: string) {
@@ -379,7 +356,7 @@ export class TerminalController {
 		});
 		this.scrollSubscription = terminal.onScroll((viewportY) => {
 			if (viewportY <= 0) {
-				void this.loadOlderHistory();
+				this.onLoadOlderHistory();
 			}
 		});
 
@@ -439,8 +416,6 @@ export class TerminalController {
 		this.terminal = null;
 		this.fitAddon = null;
 		this.lastReportedSize = null;
-		this.pendingHistory = false;
-		this.isHistoryExhausted = false;
 		this.isRedrawing = false;
 		this.bufferedLiveOutput = [];
 	}
@@ -459,8 +434,6 @@ export class TerminalController {
 			startSeq,
 			endSeq: startSeq == null ? null : chunkEndSeq(startSeq, snapshot),
 		};
-		this.isHistoryExhausted = startSeq === 0;
-		this.pendingHistory = false;
 		this.bufferedLiveOutput = [];
 		this.terminal.reset();
 		if (snapshot.length > 0) {
@@ -603,40 +576,6 @@ export class TerminalController {
 		this.bufferedLiveOutput.splice(insertAt + 1, 0, { seq, chunk });
 	}
 
-	private async loadOlderHistory() {
-		if (this.pendingHistory || this.activeTerminalId == null) {
-			return;
-		}
-
-		if (this.loadedRange.startSeq == null || this.loadedRange.startSeq <= 0) {
-			return;
-		}
-		if (this.isHistoryExhausted) {
-			return;
-		}
-
-		const session = this.session();
-		if (session == null) {
-			return;
-		}
-
-		this.pendingHistory = true;
-		try {
-			const page = await session.readHistory(
-				this.activeTerminalId,
-				this.loadedRange.startSeq,
-				32 * 1024,
-			);
-			await this.prependHistoryPage(page);
-		} catch (error: unknown) {
-			this.onError(
-				error instanceof Error ? error.message : "failed to load history",
-			);
-		} finally {
-			this.pendingHistory = false;
-		}
-	}
-
 	private async ensureProbeTerminal() {
 		if (this.host == null || this.terminal == null) {
 			return null;
@@ -681,7 +620,7 @@ export class TerminalController {
 		return probeTerminal;
 	}
 
-	private async prependHistoryPage(page: TerminalHistoryPageRecord) {
+	private async prependHistoryPageToTerminal(page: TerminalHistoryPageRecord) {
 		if (
 			this.terminal == null ||
 			this.activeTerminalId == null ||
@@ -692,7 +631,6 @@ export class TerminalController {
 
 		const chunk = decodeBase64Bytes(page.bytes_b64);
 		if (chunk.length === 0) {
-			this.isHistoryExhausted = true;
 			return;
 		}
 
@@ -706,7 +644,6 @@ export class TerminalController {
 		try {
 			this.prependHistoryChunk(chunk);
 			this.loadedRange.startSeq = page.start_seq;
-			this.isHistoryExhausted = page.start_seq === 0;
 			this.terminal.reset();
 			await writeToTerminal(this.terminal, this.currentRenderedText());
 

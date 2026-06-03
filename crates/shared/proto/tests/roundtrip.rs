@@ -71,41 +71,197 @@ fn arb_terminal_info() -> impl Strategy<Value = TerminalInfo> {
         )
 }
 
-fn arb_snapshot() -> impl Strategy<Value = Snapshot> {
-    (
-        any::<u16>(),
-        any::<u16>(),
-        any::<u16>(),
-        any::<u16>(),
-        any::<u64>(),
-        arb_bytes(128),
-    )
-        .prop_map(
-            |(cols, rows, cursor_x, cursor_y, head_seq, bytes)| Snapshot {
-                cols,
-                rows,
-                anchor_state: AnchorState {
-                    cursor: (cursor_x, cursor_y),
-                    sgr: SgrAttrs::default(),
-                    modes: TerminalModes {
-                        deccmm_cursor_keys: false,
-                        autowrap: true,
-                        alt_screen: false,
-                        bracketed_paste: false,
-                        mouse_reporting: MouseMode::Off,
-                        origin_mode: false,
-                    },
-                    charset: CharsetState::default(),
-                    title: None,
-                },
-                bytes,
-                head_seq: StreamSeq(head_seq),
-            },
-        )
+fn arb_server_config() -> impl Strategy<Value = ServerConfig> {
+    any::<u32>().prop_map(|scrollback_bytes| ServerConfig { scrollback_bytes })
 }
 
-fn arb_terminal_baseline() -> impl Strategy<Value = TerminalBaseline> {
-    arb_snapshot().prop_map(|snapshot| TerminalBaseline::from(&snapshot))
+fn arb_request_op() -> impl Strategy<Value = RequestOp> {
+    prop_oneof![
+        Just(RequestOp::ListTerminals),
+        Just(RequestOp::CreateTerminal),
+        Just(RequestOp::AttachTerminal),
+        Just(RequestOp::ReadHistory),
+        Just(RequestOp::KillTerminal),
+        Just(RequestOp::GetServerConfig),
+        Just(RequestOp::SetServerConfig),
+        Just(RequestOp::SendInput),
+        Just(RequestOp::ResizeTerminal),
+    ]
+}
+
+fn arb_request_body() -> impl Strategy<Value = RequestBody> {
+    prop_oneof![
+        Just(RequestBody::ListTerminals),
+        arb_terminal_create_params().prop_map(|params| RequestBody::CreateTerminal { params }),
+        arb_uuid().prop_map(|terminal_id| RequestBody::AttachTerminal {
+            terminal_id: TerminalId(terminal_id),
+        }),
+        (arb_uuid(), prop::option::of(any::<u64>()), any::<u32>(),).prop_map(
+            |(terminal_id, before, max_bytes)| RequestBody::ReadHistory {
+                terminal_id: TerminalId(terminal_id),
+                before: before.map(StreamSeq),
+                max_bytes,
+            }
+        ),
+        arb_uuid().prop_map(|terminal_id| RequestBody::KillTerminal {
+            terminal_id: TerminalId(terminal_id),
+        }),
+        Just(RequestBody::GetServerConfig),
+        arb_server_config().prop_map(|config| RequestBody::SetServerConfig { config }),
+        (arb_uuid(), arb_bytes(256)).prop_map(|(terminal_id, bytes)| RequestBody::SendInput {
+            terminal_id: TerminalId(terminal_id),
+            bytes,
+        }),
+        (arb_uuid(), any::<u16>(), any::<u16>()).prop_map(|(terminal_id, cols, rows)| {
+            RequestBody::ResizeTerminal {
+                terminal_id: TerminalId(terminal_id),
+                cols,
+                rows,
+            }
+        },),
+    ]
+}
+
+fn arb_response_body() -> impl Strategy<Value = ResponseBody> {
+    prop_oneof![
+        prop::collection::vec(arb_terminal_info(), 0..=4)
+            .prop_map(|terminals| ResponseBody::ListTerminals { terminals }),
+        arb_terminal_info().prop_map(|info| ResponseBody::CreateTerminal { info }),
+        (
+            any::<u32>(),
+            arb_terminal_info(),
+            any::<u64>(),
+            any::<u64>(),
+            arb_string(64),
+        )
+            .prop_map(
+                |(
+                    stream_id,
+                    terminal_info,
+                    baseline_start_seq,
+                    baseline_end_seq,
+                    render_prefix,
+                )| {
+                    ResponseBody::AttachTerminal {
+                        stream_id: StreamId(stream_id),
+                        terminal_info,
+                        baseline_start_seq: StreamSeq(baseline_start_seq),
+                        baseline_end_seq: StreamSeq(baseline_end_seq),
+                        render_prefix,
+                    }
+                },
+            ),
+        (any::<u32>(), arb_uuid(), any::<u64>(), any::<u64>()).prop_map(
+            |(stream_id, terminal_id, start_seq, end_seq)| ResponseBody::ReadHistory {
+                stream_id: StreamId(stream_id),
+                terminal_id: TerminalId(terminal_id),
+                start_seq: StreamSeq(start_seq),
+                end_seq: StreamSeq(end_seq),
+            },
+        ),
+        Just(ResponseBody::KillTerminal),
+        arb_server_config().prop_map(|config| ResponseBody::GetServerConfig { config }),
+        arb_server_config().prop_map(|config| ResponseBody::SetServerConfig { config }),
+        Just(ResponseBody::SendInput),
+        Just(ResponseBody::ResizeTerminal),
+    ]
+}
+
+fn arb_protocol_error() -> impl Strategy<Value = ProtocolError> {
+    prop_oneof![
+        Just(ProtocolError::UnknownTerminal),
+        Just(ProtocolError::Unauthorized),
+        Just(ProtocolError::BackpressureExceeded),
+        Just(ProtocolError::ProtocolMismatch),
+        Just(ProtocolError::ResourceExhausted),
+        arb_string(32).prop_map(ProtocolError::InvalidParam),
+        Just(ProtocolError::ResumeStale),
+        Just(ProtocolError::RateLimited),
+        arb_string(32).prop_map(ProtocolError::Other),
+    ]
+}
+
+fn arb_response_error() -> impl Strategy<Value = ResponseError> {
+    (arb_protocol_error(), arb_string(64))
+        .prop_map(|(code, message)| ResponseError { code, message })
+}
+
+fn arb_stream_kind() -> impl Strategy<Value = StreamKind> {
+    prop_oneof![
+        Just(StreamKind::Baseline),
+        Just(StreamKind::Output),
+        Just(StreamKind::History),
+    ]
+}
+
+fn arb_event_kind() -> impl Strategy<Value = EventKind> {
+    prop_oneof![
+        Just(EventKind::Connected),
+        Just(EventKind::Disconnected),
+        Just(EventKind::TerminalCreated),
+        Just(EventKind::TerminalExited),
+        Just(EventKind::Error),
+    ]
+}
+
+fn arb_event_body() -> impl Strategy<Value = EventBody> {
+    prop_oneof![
+        Just(EventBody::Connected),
+        arb_string(64).prop_map(|reason| EventBody::Disconnected { reason }),
+        arb_terminal_info().prop_map(|info| EventBody::TerminalCreated { info }),
+        (arb_uuid(), arb_exit_info()).prop_map(|(terminal_id, exit)| EventBody::TerminalExited {
+            terminal_id: TerminalId(terminal_id),
+            exit,
+        }),
+        (arb_protocol_error(), arb_string(64))
+            .prop_map(|(error, message)| EventBody::Error { error, message }),
+    ]
+}
+
+fn arb_generic_frame_body() -> impl Strategy<Value = FrameBody> {
+    prop_oneof![
+        (any::<u32>(), arb_request_op(), arb_request_body()).prop_map(|(id, op, body)| {
+            FrameBody::Request(RequestFrame {
+                id: RequestId(id),
+                op,
+                body,
+            })
+        }),
+        (
+            any::<u32>(),
+            any::<bool>(),
+            prop::option::of(arb_response_body()),
+            prop::option::of(arb_response_error()),
+        )
+            .prop_map(|(id, ok, body, error)| {
+                FrameBody::Response(ResponseFrame {
+                    id: RequestId(id),
+                    ok,
+                    body,
+                    error,
+                })
+            }),
+        (
+            any::<u32>(),
+            arb_stream_kind(),
+            any::<u64>(),
+            prop::option::of(any::<u32>()),
+            arb_bytes(256),
+            any::<bool>(),
+        )
+            .prop_map(|(stream_id, kind, seq, offset, bytes, last)| {
+                FrameBody::StreamData(StreamDataFrame {
+                    stream_id: StreamId(stream_id),
+                    kind,
+                    seq: StreamSeq(seq),
+                    offset,
+                    bytes,
+                    last,
+                })
+            }),
+        (arb_event_kind(), arb_event_body())
+            .prop_map(|(kind, body)| { FrameBody::Event(EventFrame { kind, body }) }),
+    ]
 }
 
 fn arb_hello() -> impl Strategy<Value = Hello> {
@@ -154,155 +310,11 @@ fn arb_connection_frame_body() -> impl Strategy<Value = FrameBody> {
         Just(FrameBody::Bye {
             reason: ByeReason::Normal,
         }),
-        (any::<u32>(), arb_terminal_create_params())
-            .prop_map(|(request_id, params)| FrameBody::TerminalCreate { request_id, params }),
-    ]
-}
-
-fn arb_terminal_frame_body() -> impl Strategy<Value = FrameBody> {
-    prop_oneof![
-        (any::<u32>(), arb_terminal_info())
-            .prop_map(|(request_id, info)| FrameBody::TerminalCreateOk { request_id, info }),
-        any::<u32>().prop_map(|request_id| FrameBody::TerminalCreateErr {
-            request_id,
-            error: ProtocolError::UnknownTerminal,
-        }),
-        (any::<u32>(), arb_uuid()).prop_map(|(request_id, terminal)| FrameBody::TerminalAttach {
-            request_id,
-            terminal: TerminalId(terminal),
-        }),
-        (
-            any::<u32>(),
-            arb_terminal_baseline(),
-            any::<u32>(),
-            any::<u32>()
-        )
-            .prop_map(|(request_id, baseline, stream, initial_window)| {
-                FrameBody::TerminalAttachOk {
-                    request_id,
-                    baseline,
-                    stream: StreamId(stream),
-                    initial_window,
-                }
-            },),
-        any::<u32>().prop_map(|request_id| FrameBody::TerminalAttachErr {
-            request_id,
-            error: ProtocolError::Unauthorized,
-        }),
-        (any::<u32>(), arb_uuid()).prop_map(|(request_id, terminal)| FrameBody::TerminalKill {
-            request_id,
-            terminal: TerminalId(terminal),
-        }),
-        any::<u32>().prop_map(|request_id| FrameBody::TerminalKillOk { request_id }),
-        any::<u32>().prop_map(|request_id| FrameBody::TerminalKillErr {
-            request_id,
-            error: ProtocolError::ResourceExhausted,
-        }),
-        any::<u32>().prop_map(|request_id| FrameBody::TerminalList { request_id }),
-        prop::collection::vec(arb_terminal_info(), 0..=4).prop_map(|terminals| {
-            FrameBody::TerminalListOk {
-                request_id: 1,
-                terminals,
-            }
-        }),
-        (arb_uuid(), arb_exit_info()).prop_map(|(terminal, exit)| FrameBody::TerminalExit {
-            terminal: TerminalId(terminal),
-            exit,
-        }),
-    ]
-}
-
-fn arb_data_frame_body() -> impl Strategy<Value = FrameBody> {
-    prop_oneof![
-        (any::<u32>(), arb_bytes(256), any::<u64>()).prop_map(|(stream, bytes, seq)| {
-            FrameBody::Output {
-                stream: StreamId(stream),
-                seq: StreamSeq(seq),
-                bytes,
-            }
-        }),
-        (
-            any::<u32>(),
-            any::<u64>(),
-            any::<u32>(),
-            arb_bytes(256),
-            any::<bool>()
-        )
-            .prop_map(|(stream, seq, offset, bytes, last)| {
-                FrameBody::TerminalSnapshotChunk {
-                    stream: StreamId(stream),
-                    seq: StreamSeq(seq),
-                    offset,
-                    bytes,
-                    last,
-                }
-            }),
-        (any::<u32>(), arb_bytes(256)).prop_map(|(stream, bytes)| FrameBody::Input {
-            stream: StreamId(stream),
-            bytes,
-        }),
-        (
-            any::<u32>(),
-            arb_uuid(),
-            prop::option::of(any::<u64>()),
-            any::<u32>(),
-        )
-            .prop_map(|(request_id, terminal, before, max_bytes)| {
-                FrameBody::HistoryRequest {
-                    request_id,
-                    terminal: TerminalId(terminal),
-                    before: before.map(StreamSeq),
-                    max_bytes,
-                }
-            }),
-        (
-            any::<u32>(),
-            arb_uuid(),
-            any::<u64>(),
-            any::<u64>(),
-            arb_bytes(256),
-            any::<bool>(),
-        )
-            .prop_map(|(request_id, terminal, start_seq, end_seq, bytes, last)| {
-                FrameBody::HistoryChunk {
-                    request_id,
-                    terminal: TerminalId(terminal),
-                    start_seq: StreamSeq(start_seq),
-                    end_seq: StreamSeq(end_seq),
-                    bytes,
-                    last,
-                }
-            },),
-        any::<u32>().prop_map(|request_id| FrameBody::HistoryErr {
-            request_id,
-            error: ProtocolError::ResourceExhausted,
-        }),
-    ]
-}
-
-fn arb_flow_frame_body() -> impl Strategy<Value = FrameBody> {
-    prop_oneof![
-        (any::<u32>(), any::<u16>(), any::<u16>()).prop_map(|(stream, cols, rows)| {
-            FrameBody::Resize {
-                stream: StreamId(stream),
-                cols,
-                rows,
-            }
-        }),
-        (any::<u32>(), any::<u32>()).prop_map(|(stream, credit)| FrameBody::Window {
-            stream: StreamId(stream),
-            credit,
-        }),
     ]
 }
 
 fn arb_frame_body() -> impl Strategy<Value = FrameBody> {
-    prop_oneof![
-        arb_connection_frame_body(),
-        arb_terminal_frame_body(),
-        arb_data_frame_body(),
-        arb_flow_frame_body(),
-    ]
+    prop_oneof![arb_generic_frame_body(), arb_connection_frame_body()]
 }
 
 proptest! {
@@ -366,4 +378,66 @@ fn relay_decode_reports_empty_and_unknown_discriminator() {
         decode_relay(&[0xff]),
         Err(CodecError::UnknownDiscriminator(0xff))
     ));
+}
+
+#[test]
+fn empty_stream_chunk_roundtrips() {
+    let frame = Frame::body(FrameBody::StreamData(StreamDataFrame {
+        stream_id: StreamId(7),
+        kind: StreamKind::History,
+        seq: StreamSeq(55),
+        offset: Some(0),
+        bytes: ByteBuf::from(Vec::new()),
+        last: true,
+    }));
+
+    let bytes = encode_frame(&frame).expect("encode_frame");
+    let back = decode_frame(&bytes).expect("decode_frame");
+
+    assert_eq!(frame, back);
+}
+
+#[test]
+fn large_request_offset_and_seq_roundtrip() {
+    let frame = Frame::body(FrameBody::StreamData(StreamDataFrame {
+        stream_id: StreamId(u32::MAX),
+        kind: StreamKind::Baseline,
+        seq: StreamSeq(u64::MAX),
+        offset: Some(u32::MAX),
+        bytes: ByteBuf::from(vec![1, 2, 3]),
+        last: false,
+    }));
+    let request = Frame::body(FrameBody::Request(RequestFrame {
+        id: RequestId(u32::MAX),
+        op: RequestOp::ReadHistory,
+        body: RequestBody::ReadHistory {
+            terminal_id: TerminalId(Uuid::nil()),
+            before: Some(StreamSeq(u64::MAX)),
+            max_bytes: u32::MAX,
+        },
+    }));
+
+    for frame in [frame, request] {
+        let bytes = encode_frame(&frame).expect("encode_frame");
+        let back = decode_frame(&bytes).expect("decode_frame");
+        assert_eq!(frame, back);
+    }
+}
+
+#[test]
+fn error_response_roundtrips() {
+    let frame = Frame::body(FrameBody::Response(ResponseFrame {
+        id: RequestId(42),
+        ok: false,
+        body: None,
+        error: Some(ResponseError {
+            code: ProtocolError::UnknownTerminal,
+            message: "terminal not found".to_owned(),
+        }),
+    }));
+
+    let bytes = encode_frame(&frame).expect("encode_frame");
+    let back = decode_frame(&bytes).expect("decode_frame");
+
+    assert_eq!(frame, back);
 }

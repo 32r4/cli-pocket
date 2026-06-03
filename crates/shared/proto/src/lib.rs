@@ -13,7 +13,10 @@ pub use codec::{
     RelayWire,
 };
 pub use error::{ByeReason, ProtocolError};
-pub use frame::{Frame, FrameBody};
+pub use frame::{
+    EventBody, EventFrame, EventKind, Frame, FrameBody, RequestBody, RequestFrame, RequestOp,
+    ResponseBody, ResponseError, ResponseFrame, StreamDataFrame, StreamKind,
+};
 pub use hello::{Hello, HelloOk, ResumeAttachment, ResumeToken, ServerInfo};
 pub use relay::{PairCloseReason, PairId, RelayCtrl, RelayData, RELAY_DISC_CTRL, RELAY_DISC_DATA};
 pub use snapshot::{
@@ -21,8 +24,8 @@ pub use snapshot::{
     TerminalModes,
 };
 pub use terminal::{
-    ClientId, ExitInfo, KillSignal, ServerConfig, ServerId, SessionId, StreamId, StreamSeq,
-    TerminalCreateParams, TerminalId, TerminalInfo,
+    ClientId, ExitInfo, KillSignal, RequestId, ServerConfig, ServerId, SessionId, StreamId,
+    StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
 };
 
 /// Wire protocol version negotiated in `Hello`.
