@@ -375,7 +375,6 @@ export class ConnectionController {
 				this.deps.workspaceState.getState().removeTerminal(terminalId);
 				this.deps.terminalRegistry.removeTerminal(terminalId);
 				this.deps.onTerminalRemoved(terminalId);
-				void this.refreshTerminalsOnce();
 			}
 			return;
 		}

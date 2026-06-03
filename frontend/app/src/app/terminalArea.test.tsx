@@ -173,7 +173,7 @@ describe("TerminalArea", () => {
 		});
 	});
 
-	it("removes the killed terminal from workspace and registry", async () => {
+	it("waits for backend terminal removal instead of optimistically removing it", async () => {
 		const workspaceState = createWorkspaceStore();
 		workspaceState.getState().markConnected();
 		workspaceState.getState().syncTerminalList([terminalOne]);
@@ -194,23 +194,11 @@ describe("TerminalArea", () => {
 		);
 
 		fireEvent.click(view.getByLabelText("Kill old shell"));
-		view.rerender(
-			<TerminalArea
-				session={session}
-				workspace={workspaceState.getState()}
-				workspaceState={workspaceState}
-				controller={makeController()}
-				registry={registry}
-				theme="dark"
-				onInlineError={vi.fn()}
-			/>,
-		);
 
-		expect(view.queryByLabelText("Kill old shell")).toBeNull();
-		expect(registry.removeTerminal).toHaveBeenCalledWith("t1");
 		await waitFor(() => {
 			expect(session.kill).toHaveBeenCalledWith("t1", "TERM");
-			expect(workspaceState.getState().terminals).toHaveLength(0);
 		});
+		expect(workspaceState.getState().terminals).toHaveLength(1);
+		expect(registry.removeTerminal).not.toHaveBeenCalled();
 	});
 });

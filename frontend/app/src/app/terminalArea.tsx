@@ -90,8 +90,6 @@ export function TerminalArea({
 			return;
 		}
 
-		workspaceState.getState().removeTerminal(terminalId);
-		registry.removeTerminal(terminalId);
 		try {
 			await session.kill(terminalId, "TERM");
 		} catch (error: unknown) {
