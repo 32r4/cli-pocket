@@ -4,7 +4,6 @@ import {
 	parsePersistedDaemonRegistry,
 } from "@/state/daemon-registry/daemonRegistry";
 import { AsyncValueQueue } from "../bridge/asyncValueQueue";
-import { findCreatedTerminal } from "../bridge/terminalDiff";
 import type {
 	ConnectConfig,
 	CreateTerminalParams,
@@ -114,7 +113,6 @@ class WebSessionActor implements SessionActor {
 	}
 
 	async createTerminal(params: CreateTerminalParams) {
-		const before = await this.loadTerminals();
 		await this.client.create_terminal(
 			JSON.stringify({
 				cols: params.cols,
@@ -124,9 +122,7 @@ class WebSessionActor implements SessionActor {
 				env: Object.entries(params.env ?? {}),
 			}),
 		);
-		const after = await this.loadTerminals();
-		this.queue.push(terminalListEvent(after));
-		return findCreatedTerminal(before, after);
+		return null;
 	}
 
 	async getServerConfig(): Promise<ServerConfigRecord> {

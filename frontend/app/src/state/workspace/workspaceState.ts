@@ -20,6 +20,7 @@ interface WorkspaceState {
 	}) => void;
 	markConnectionFailed: (message: string) => void;
 	syncTerminalList: (terminals: TerminalInfoRecord[]) => void;
+	upsertTerminal: (terminal: TerminalInfoRecord) => void;
 	updateTerminalSize: (terminalId: string, cols: number, rows: number) => void;
 	removeTerminal: (terminalId: string) => void;
 	setActiveSessionId: (terminalId: string | null) => void;
@@ -95,6 +96,26 @@ export function createWorkspaceStore() {
 				return {
 					terminals: next,
 					activeSessionId: nextActive,
+				};
+			}),
+		upsertTerminal: (terminal) =>
+			set((state) => {
+				const existingIndex = state.terminals.findIndex(
+					(entry) => entry.id === terminal.terminal,
+				);
+				if (existingIndex >= 0) {
+					return {
+						terminals: state.terminals.map((entry, index) =>
+							index === existingIndex ? toSummary(terminal, index) : entry,
+						),
+					};
+				}
+
+				return {
+					terminals: [
+						...state.terminals,
+						toSummary(terminal, state.terminals.length),
+					],
 				};
 			}),
 		updateTerminalSize: (terminalId, cols, rows) =>

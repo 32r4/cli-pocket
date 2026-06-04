@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { PersistedDaemonRegistry } from "@/state/daemon-registry/daemonRegistry";
 import { AsyncValueQueue } from "../bridge/asyncValueQueue";
-import { findCreatedTerminal } from "../bridge/terminalDiff";
 import type {
 	ConnectConfig,
 	CreateTerminalParams,
@@ -100,11 +99,8 @@ class TauriSessionActor implements SessionActor {
 	}
 
 	async createTerminal(params: CreateTerminalParams) {
-		const before = await this.loadTerminals();
 		await invoke("cli_pocket_create_terminal", { params });
-		const after = await this.loadTerminals();
-		this.eventSource.push(terminalListEvent(after));
-		return findCreatedTerminal(before, after);
+		return null;
 	}
 
 	async getServerConfig() {

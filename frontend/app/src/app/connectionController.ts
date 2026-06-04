@@ -49,6 +49,7 @@ type WorkspaceStore = StoreApi<{
 	}) => void;
 	markConnectionFailed: (message: string) => void;
 	syncTerminalList: (terminals: TerminalInfoRecord[]) => void;
+	upsertTerminal: (terminal: TerminalInfoRecord) => void;
 	updateTerminalSize: (terminalId: string, cols: number, rows: number) => void;
 	removeTerminal: (terminalId: string) => void;
 	setActiveSessionId: (terminalId: string | null) => void;
@@ -376,8 +377,9 @@ export class ConnectionController {
 			return;
 		}
 
-		this.deps.workspaceState.getState().setActiveSessionId(parsed.terminal);
-		void this.activeRun?.session?.refreshTerminals();
+		const workspace = this.deps.workspaceState.getState();
+		workspace.upsertTerminal(parsed);
+		workspace.setActiveSessionId(parsed.terminal);
 	}
 
 	private handleTerminalOutput(run: ConnectionRun, event: object) {
