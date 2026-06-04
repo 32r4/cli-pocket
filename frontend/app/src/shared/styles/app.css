@@ -374,7 +374,15 @@ strong {
 }
 
 .app-shell__main {
+	position: relative;
 	padding: 0;
+	min-height: 0;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.app-shell__content {
+	height: 100%;
 	min-height: 0;
 	min-width: 0;
 	overflow: hidden;
@@ -736,6 +744,9 @@ strong {
 }
 
 .control-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 10;
 	display: grid;
 	height: 100%;
 	min-height: 0;

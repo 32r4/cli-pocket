@@ -291,6 +291,55 @@ export function AppRoot({
 				</div>
 			</div>
 		);
+	const mainContent =
+		services == null ? (
+			<section
+				className="connection-status-panel"
+				aria-label="Restoring saved servers"
+			>
+				<h2>Loading servers</h2>
+				<p>Restoring saved servers.</p>
+			</section>
+		) : workspace.connectionState === "connected" ? (
+			<TerminalArea
+				session={session}
+				workspace={workspace}
+				workspaceState={workspaceState}
+				controller={terminalController}
+				registry={terminalRegistry}
+				theme={ui.theme}
+				onInlineError={setInlineError}
+			/>
+		) : workspace.connectionState === "connecting" ? (
+			<section
+				className="connection-spinner-panel"
+				aria-label="Connecting to server"
+			>
+				<LoaderCircle
+					className="connection-spinner"
+					aria-hidden="true"
+					size={32}
+					strokeWidth={1.75}
+				/>
+				<span className="sr-only">Connecting</span>
+			</section>
+		) : hasSavedServers ? (
+			<section
+				className="connection-status-panel"
+				aria-label="Connection status"
+			>
+				<h2>Connection failed</h2>
+			</section>
+		) : (
+			<section className="empty-hosts-panel" aria-label="Add server options">
+				<div className="server-option-buttons">
+					<ServerOptionButtons
+						onOpenDirect={openDirectServerModal}
+						onOpenPairing={openPairingServerModal}
+					/>
+				</div>
+			</section>
+		);
 
 	return (
 		<Shell
@@ -301,6 +350,12 @@ export function AppRoot({
 			onPrimaryNavigation={handlePrimaryNavigation}
 		>
 			<main className="app-shell__main">
+				<div
+					className="app-shell__content"
+					aria-hidden={ui.isMenuOpen ? "true" : undefined}
+				>
+					{mainContent}
+				</div>
 				{ui.isMenuOpen ? (
 					<ControlOverlay
 						isMobileUi={isMobileUi}
@@ -320,57 +375,7 @@ export function AppRoot({
 						}}
 						onOpenAddServer={openAddServerChooser}
 					/>
-				) : services == null ? (
-					<section
-						className="connection-status-panel"
-						aria-label="Restoring saved servers"
-					>
-						<h2>Loading servers</h2>
-						<p>Restoring saved servers.</p>
-					</section>
-				) : workspace.connectionState === "connected" ? (
-					<TerminalArea
-						session={session}
-						workspace={workspace}
-						workspaceState={workspaceState}
-						controller={terminalController}
-						registry={terminalRegistry}
-						theme={ui.theme}
-						onInlineError={setInlineError}
-					/>
-				) : workspace.connectionState === "connecting" ? (
-					<section
-						className="connection-spinner-panel"
-						aria-label="Connecting to server"
-					>
-						<LoaderCircle
-							className="connection-spinner"
-							aria-hidden="true"
-							size={32}
-							strokeWidth={1.75}
-						/>
-						<span className="sr-only">Connecting</span>
-					</section>
-				) : hasSavedServers ? (
-					<section
-						className="connection-status-panel"
-						aria-label="Connection status"
-					>
-						<h2>Connection failed</h2>
-					</section>
-				) : (
-					<section
-						className="empty-hosts-panel"
-						aria-label="Add server options"
-					>
-						<div className="server-option-buttons">
-							<ServerOptionButtons
-								onOpenDirect={openDirectServerModal}
-								onOpenPairing={openPairingServerModal}
-							/>
-						</div>
-					</section>
-				)}
+				) : null}
 
 				<ErrorBanner message={errorMessage} />
 			</main>
