@@ -1,5 +1,6 @@
 import type { TerminalHistoryPageRecord } from "@/platform/bridge/types";
 import type { ThemeName } from "@/state/ui/uiState";
+import { TerminalReplica } from "./terminalReplica";
 
 interface TerminalAddonLike {
 	activate: (terminal: unknown) => void;
@@ -60,7 +61,6 @@ let terminalModulesPromise: Promise<
 		{ FitAddon: TerminalModules["FitAddon"] },
 	]
 > | null = null;
-const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder();
 const terminalScrollbackLines = 100_000;
 
@@ -68,22 +68,6 @@ interface TerminalControllerOptions {
 	onInput: (terminalId: string, data: string) => void;
 	onResize: (terminalId: string, cols: number, rows: number) => void;
 	onLoadOlderHistory: () => void;
-}
-
-interface BufferedLiveOutput {
-	seq: number;
-	chunk: string;
-}
-
-interface LoadedRange {
-	startSeq: number | null;
-	endSeq: number | null;
-}
-
-interface PendingSnapshot {
-	terminalId: string;
-	snapshot: string;
-	startSeq: number | null;
 }
 
 function decodeBase64Bytes(value: string) {
@@ -112,10 +96,6 @@ function terminalTheme() {
 		cursor: readThemeToken("--terminal-cursor"),
 		selectionBackground: readThemeToken("--terminal-selection-bg"),
 	};
-}
-
-function chunkEndSeq(startSeq: number, chunk: string) {
-	return startSeq + utf8Encoder.encode(chunk).length;
 }
 
 function writeToTerminal(terminal: TerminalLike, data: string) {
@@ -196,6 +176,7 @@ async function loadTerminalModules() {
 }
 
 export class TerminalController {
+	private readonly replica = new TerminalReplica();
 	private onInput: TerminalControllerOptions["onInput"];
 	private onResize: TerminalControllerOptions["onResize"];
 	private onLoadOlderHistory: TerminalControllerOptions["onLoadOlderHistory"];
@@ -212,14 +193,6 @@ export class TerminalController {
 	private probeHost: HTMLDivElement | null = null;
 	private probeTerminal: TerminalLike | null = null;
 	private probeFitAddon: FitAddonLike | null = null;
-	private renderedTextCache: string | null = "";
-	private prependedHistoryChunks: string[] = [];
-	private bodyChunks: string[] = [];
-	private loadedRange: LoadedRange = { startSeq: null, endSeq: null };
-	private pendingSnapshot: PendingSnapshot | null = null;
-	private isRedrawing = false;
-	private bufferedLiveOutput: BufferedLiveOutput[] = [];
-	private pendingDetachedLiveOutput: BufferedLiveOutput[] = [];
 
 	constructor({
 		onInput,
@@ -233,12 +206,7 @@ export class TerminalController {
 
 	reset() {
 		this.activeTerminalId = null;
-		this.resetRenderedContent();
-		this.loadedRange = { startSeq: null, endSeq: null };
-		this.pendingSnapshot = null;
-		this.isRedrawing = false;
-		this.bufferedLiveOutput = [];
-		this.pendingDetachedLiveOutput = [];
+		this.replica.reset();
 		this.terminal?.reset();
 	}
 
@@ -253,21 +221,21 @@ export class TerminalController {
 		this.flushPendingState();
 	}
 
+	currentRenderedText() {
+		return this.replica.currentRenderedText();
+	}
+
+	getLoadedRange() {
+		return this.replica.getLoadedRange();
+	}
+
 	renderSnapshot(
 		terminalId: string,
 		snapshot: string,
 		startSeq: number | null,
 	) {
-		this.pendingSnapshot = {
-			terminalId,
-			snapshot,
-			startSeq,
-		};
-		if (this.terminal === null || this.activeTerminalId !== terminalId) {
-			return;
-		}
-
-		this.applySnapshot(terminalId, snapshot, startSeq);
+		this.replica.queueSnapshot(terminalId, snapshot, startSeq);
+		this.flushPendingState();
 	}
 
 	appendActiveOutput(terminalId: string, chunk: string, seq: number) {
@@ -276,12 +244,12 @@ export class TerminalController {
 		}
 
 		if (this.terminal === null) {
-			this.pendingDetachedLiveOutput.push({ seq, chunk });
+			this.replica.queueDetachedLiveOutput(seq, chunk);
 			return;
 		}
 
-		if (this.isRedrawing) {
-			this.bufferLiveOutput(seq, chunk);
+		if (this.replica.isCurrentlyRedrawing()) {
+			this.replica.bufferLiveOutput(seq, chunk);
 			return;
 		}
 
@@ -388,15 +356,17 @@ export class TerminalController {
 	private detachTerminal() {
 		if (
 			this.activeTerminalId != null &&
-			this.pendingSnapshot == null &&
-			(this.currentRenderedText().length > 0 ||
-				this.loadedRange.startSeq != null)
+			!this.replica.hasPendingSnapshot(this.activeTerminalId)
 		) {
-			this.pendingSnapshot = {
-				terminalId: this.activeTerminalId,
-				snapshot: this.currentRenderedText(),
-				startSeq: this.loadedRange.startSeq,
-			};
+			const current = this.replica.currentRenderedText();
+			const range = this.replica.getLoadedRange();
+			if (current.length > 0 || range.startSeq != null) {
+				this.replica.queueSnapshot(
+					this.activeTerminalId,
+					current,
+					range.startSeq,
+				);
+			}
 		}
 
 		this.scrollSubscription?.dispose();
@@ -416,8 +386,33 @@ export class TerminalController {
 		this.terminal = null;
 		this.fitAddon = null;
 		this.lastReportedSize = null;
-		this.isRedrawing = false;
-		this.bufferedLiveOutput = [];
+	}
+
+	private flushPendingState() {
+		if (this.terminal == null || this.activeTerminalId == null) {
+			return;
+		}
+
+		const pendingSnapshot = this.replica.consumePendingSnapshot(
+			this.activeTerminalId,
+		);
+		if (pendingSnapshot != null) {
+			this.applySnapshot(
+				pendingSnapshot.terminalId,
+				pendingSnapshot.snapshot,
+				pendingSnapshot.startSeq,
+			);
+			return;
+		}
+
+		const replay = this.replica.drainDetachedLiveOutput();
+		if (replay.length === 0) {
+			return;
+		}
+
+		for (const output of replay) {
+			this.appendLiveOutput(output.chunk, output.seq);
+		}
 	}
 
 	private applySnapshot(
@@ -429,47 +424,16 @@ export class TerminalController {
 			return;
 		}
 
-		this.setSnapshotContent(snapshot);
-		this.loadedRange = {
-			startSeq,
-			endSeq: startSeq == null ? null : chunkEndSeq(startSeq, snapshot),
-		};
-		this.bufferedLiveOutput = [];
+		this.replica.setSnapshotContent(snapshot, startSeq);
 		this.terminal.reset();
 		if (snapshot.length > 0) {
 			this.terminal.write(snapshot);
 		}
-		const replay = this.pendingDetachedLiveOutput;
-		this.pendingDetachedLiveOutput = [];
+		const replay = this.replica.drainDetachedLiveOutput();
 		for (const output of replay) {
 			this.appendLiveOutput(output.chunk, output.seq);
 		}
 		this.fitToViewport();
-	}
-
-	private flushPendingState() {
-		if (this.terminal == null || this.activeTerminalId == null) {
-			return;
-		}
-
-		if (this.pendingSnapshot?.terminalId === this.activeTerminalId) {
-			this.applySnapshot(
-				this.pendingSnapshot.terminalId,
-				this.pendingSnapshot.snapshot,
-				this.pendingSnapshot.startSeq,
-			);
-			return;
-		}
-
-		if (this.pendingDetachedLiveOutput.length === 0) {
-			return;
-		}
-
-		const replay = this.pendingDetachedLiveOutput;
-		this.pendingDetachedLiveOutput = [];
-		for (const output of replay) {
-			this.appendLiveOutput(output.chunk, output.seq);
-		}
 	}
 
 	private fitToViewport() {
@@ -500,80 +464,13 @@ export class TerminalController {
 		);
 	}
 
-	private resetRenderedContent() {
-		this.renderedTextCache = "";
-		this.prependedHistoryChunks = [];
-		this.bodyChunks = [];
-	}
-
-	private setSnapshotContent(snapshot: string) {
-		this.prependedHistoryChunks = [];
-		this.bodyChunks = snapshot.length === 0 ? [] : [snapshot];
-		this.renderedTextCache = snapshot;
-	}
-
-	private appendRenderedChunk(chunk: string) {
-		if (chunk.length === 0) {
-			return;
-		}
-		this.bodyChunks.push(chunk);
-		this.renderedTextCache = null;
-	}
-
-	private prependHistoryChunk(chunk: string) {
-		if (chunk.length === 0) {
-			return;
-		}
-		this.prependedHistoryChunks.push(chunk);
-		this.renderedTextCache = null;
-	}
-
-	private currentRenderedText() {
-		if (this.renderedTextCache != null) {
-			return this.renderedTextCache;
-		}
-
-		let text = "";
-		for (
-			let index = this.prependedHistoryChunks.length - 1;
-			index >= 0;
-			index -= 1
-		) {
-			text += this.prependedHistoryChunks[index];
-		}
-		for (const chunk of this.bodyChunks) {
-			text += chunk;
-		}
-		this.renderedTextCache = text;
-		return this.renderedTextCache;
-	}
-
 	private appendLiveOutput(chunk: string, seq: number) {
 		if (this.terminal === null) {
 			return;
 		}
 
-		this.appendRenderedChunk(chunk);
-		this.loadedRange.endSeq = seq;
-		if (this.loadedRange.startSeq == null) {
-			this.loadedRange.startSeq = seq - utf8Encoder.encode(chunk).length;
-		}
+		this.replica.appendLiveChunk(chunk, seq);
 		this.terminal.write(chunk);
-	}
-
-	private bufferLiveOutput(seq: number, chunk: string) {
-		const lastBuffered =
-			this.bufferedLiveOutput[this.bufferedLiveOutput.length - 1];
-		if (lastBuffered == null || lastBuffered.seq <= seq) {
-			this.bufferedLiveOutput.push({ seq, chunk });
-			return;
-		}
-
-		let insertAt = this.bufferedLiveOutput.length - 1;
-		while (insertAt >= 0 && this.bufferedLiveOutput[insertAt].seq > seq) {
-			insertAt -= 1;
-		}
-		this.bufferedLiveOutput.splice(insertAt + 1, 0, { seq, chunk });
 	}
 
 	private async ensureProbeTerminal() {
@@ -635,29 +532,31 @@ export class TerminalController {
 		}
 
 		const previousViewportY = this.terminal.buffer.active.viewportY;
-		const previousLiveBuffered = [...this.bufferedLiveOutput];
-		const prependedVisibleLines =
-			await this.measurePrependedVisibleLines(chunk);
-
-		this.isRedrawing = true;
-		this.bufferedLiveOutput = [];
+		this.replica.beginRedraw();
+		const previousLiveBuffered = this.replica.drainBufferedLiveOutput();
 		try {
-			this.prependHistoryChunk(chunk);
-			this.loadedRange.startSeq = page.start_seq;
+			const prependedVisibleLines =
+				await this.measurePrependedVisibleLines(chunk);
+
+			this.replica.prependHistoryChunk(chunk, page.start_seq);
 			this.terminal.reset();
-			await writeToTerminal(this.terminal, this.currentRenderedText());
+			await writeToTerminal(this.terminal, this.replica.currentRenderedText());
 
 			if (prependedVisibleLines > 0) {
 				this.terminal.scrollToLine(previousViewportY + prependedVisibleLines);
 			}
 
-			const replay = [...previousLiveBuffered, ...this.bufferedLiveOutput];
-			this.bufferedLiveOutput = [];
-			for (const output of replay) {
+			for (const output of [
+				...previousLiveBuffered,
+				...this.replica.drainBufferedLiveOutput(),
+			]) {
+				this.appendLiveOutput(output.chunk, output.seq);
+			}
+			for (const output of this.replica.drainBufferedLiveOutput()) {
 				this.appendLiveOutput(output.chunk, output.seq);
 			}
 		} finally {
-			this.isRedrawing = false;
+			this.replica.endRedraw();
 		}
 	}
 

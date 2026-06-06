@@ -112,12 +112,7 @@ describe("TerminalController", () => {
 		controller.setActiveTerminal("t1");
 		controller.renderSnapshot("t1", "hello", 10);
 
-		expect(
-			controllerField<{ startSeq: number | null; endSeq: number | null }>(
-				controller,
-				"loadedRange",
-			),
-		).toEqual({
+		expect(controller.getLoadedRange()).toEqual({
 			startSeq: 10,
 			endSeq: 15,
 		});
@@ -140,12 +135,7 @@ describe("TerminalController", () => {
 			"terminal",
 		);
 		expect(terminal?.writes).toEqual(["hello"]);
-		expect(
-			controllerField<{ startSeq: number | null; endSeq: number | null }>(
-				controller,
-				"loadedRange",
-			),
-		).toEqual({
+		expect(controller.getLoadedRange()).toEqual({
 			startSeq: 10,
 			endSeq: 15,
 		});
@@ -169,19 +159,8 @@ describe("TerminalController", () => {
 			"terminal",
 		);
 		expect(terminal?.writes).toEqual(["hello", "tail"]);
-		expect(
-			(
-				controller as unknown as {
-					currentRenderedText: () => string;
-				}
-			).currentRenderedText(),
-		).toBe("hellotail");
-		expect(
-			controllerField<{ startSeq: number | null; endSeq: number | null }>(
-				controller,
-				"loadedRange",
-			),
-		).toEqual({
+		expect(controller.currentRenderedText()).toBe("hellotail");
+		expect(controller.getLoadedRange()).toEqual({
 			startSeq: 10,
 			endSeq: 19,
 		});
@@ -209,19 +188,8 @@ describe("TerminalController", () => {
 			"terminal",
 		);
 		expect(terminal?.writes).toEqual(["hello", "tail"]);
-		expect(
-			(
-				controller as unknown as {
-					currentRenderedText: () => string;
-				}
-			).currentRenderedText(),
-		).toBe("hellotail");
-		expect(
-			controllerField<{ startSeq: number | null; endSeq: number | null }>(
-				controller,
-				"loadedRange",
-			),
-		).toEqual({
+		expect(controller.currentRenderedText()).toBe("hellotail");
+		expect(controller.getLoadedRange()).toEqual({
 			startSeq: 10,
 			endSeq: 19,
 		});
@@ -258,19 +226,8 @@ describe("TerminalController", () => {
 		controller.appendActiveOutput("t1", "tail", 14);
 		await loadPromise;
 
-		expect(
-			(
-				controller as unknown as {
-					currentRenderedText: () => string;
-				}
-			).currentRenderedText(),
-		).toBe("old\nlive\ntail");
-		expect(
-			controllerField<{ startSeq: number | null; endSeq: number | null }>(
-				controller,
-				"loadedRange",
-			),
-		).toEqual({
+		expect(controller.currentRenderedText()).toBe("old\nlive\ntail");
+		expect(controller.getLoadedRange()).toEqual({
 			startSeq: 0,
 			endSeq: 14,
 		});

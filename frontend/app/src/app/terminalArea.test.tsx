@@ -1,8 +1,10 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TerminalController } from "@/features/terminals/terminalController";
-import type { TerminalRuntimeState } from "@/features/terminals/terminalSessionActor";
-import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
+import type {
+	TerminalRuntimeState,
+	TerminalSessionRegistry,
+} from "@/features/terminals/terminalSessionRegistry";
 import type {
 	SessionActor,
 	TerminalInfoRecord,

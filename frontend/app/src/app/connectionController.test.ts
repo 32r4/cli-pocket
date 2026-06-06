@@ -1,7 +1,9 @@
 import { waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { TerminalRuntimeState } from "@/features/terminals/terminalSessionActor";
-import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
+import type {
+	TerminalRuntimeState,
+	TerminalSessionRegistry,
+} from "@/features/terminals/terminalSessionRegistry";
 import type {
 	ConnectConfig,
 	PlatformServices,
