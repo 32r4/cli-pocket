@@ -66,7 +66,7 @@ fn arb_request_body() -> impl Strategy<Value = RequestBody> {
     prop_oneof![
         Just(RequestBody::ListTerminals),
         arb_terminal_create_params().prop_map(|params| RequestBody::CreateTerminal { params }),
-        arb_uuid().prop_map(|terminal_id| RequestBody::AttachTerminal {
+        arb_uuid().prop_map(|terminal_id| RequestBody::OpenTerminal {
             terminal_id: TerminalId(terminal_id),
         }),
         (arb_uuid(), prop::option::of(any::<u64>()), any::<u32>(),).prop_map(
@@ -105,33 +105,41 @@ fn arb_response_body() -> impl Strategy<Value = ResponseBody> {
             arb_terminal_info(),
             any::<u64>(),
             any::<u64>(),
-            arb_string(64),
+            arb_bytes(320),
+            any::<bool>(),
         )
             .prop_map(
-                |(
-                    stream_id,
-                    terminal_info,
-                    baseline_start_seq,
-                    baseline_end_seq,
-                    render_prefix,
-                )| {
-                    ResponseBody::AttachTerminal {
-                        stream_id: StreamId(stream_id),
-                        terminal_info,
-                        baseline_start_seq: StreamSeq(baseline_start_seq),
-                        baseline_end_seq: StreamSeq(baseline_end_seq),
-                        render_prefix,
+                |(stream_id, info, start_seq, end_seq, render_bytes, has_more_history)| {
+                    ResponseBody::OpenTerminal {
+                        ack: OpenTerminalAck {
+                            stream_id: StreamId(stream_id),
+                            info,
+                            start_seq: StreamSeq(start_seq),
+                            end_seq: StreamSeq(end_seq),
+                            render_bytes,
+                            has_more_history,
+                        },
                     }
                 },
             ),
-        (any::<u32>(), arb_uuid(), any::<u64>(), any::<u64>()).prop_map(
-            |(stream_id, terminal_id, start_seq, end_seq)| ResponseBody::ReadHistory {
-                stream_id: StreamId(stream_id),
-                terminal_id: TerminalId(terminal_id),
-                start_seq: StreamSeq(start_seq),
-                end_seq: StreamSeq(end_seq),
-            },
-        ),
+        (
+            arb_uuid(),
+            any::<u64>(),
+            any::<u64>(),
+            arb_bytes(320),
+            any::<bool>()
+        )
+            .prop_map(|(terminal_id, start_seq, end_seq, bytes, has_more)| {
+                ResponseBody::ReadHistory {
+                    page: HistoryPage {
+                        terminal_id: TerminalId(terminal_id),
+                        start_seq: StreamSeq(start_seq),
+                        end_seq: StreamSeq(end_seq),
+                        bytes,
+                        has_more,
+                    },
+                }
+            },),
         Just(ResponseBody::KillTerminal),
         arb_server_config().prop_map(|config| ResponseBody::GetServerConfig { config }),
         arb_server_config().prop_map(|config| ResponseBody::SetServerConfig { config }),

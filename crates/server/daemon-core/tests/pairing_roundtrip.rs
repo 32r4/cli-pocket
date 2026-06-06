@@ -376,44 +376,22 @@ async fn paired_client_pages_history() {
     .await
     .expect("send history request");
 
-    let history_stream = loop {
-        let history_response = recv_frame(&mut client_transport, &mut session)
-            .await
-            .expect("recv history response");
-        match history_response.body {
-            FrameBody::Response(response) if response.id == RequestId(4) => match response.result {
-                Ok(ResponseBody::ReadHistory { stream_id, .. }) => break stream_id,
-                other => panic!("expected ReadHistory response body, got {other:?}"),
-            },
-            FrameBody::StreamData(_) => {}
-            other => panic!("expected history Response, got {other:?}"),
-        }
+    let history_response = recv_frame(&mut client_transport, &mut session)
+        .await
+        .expect("recv history response");
+    let history = match history_response.body {
+        FrameBody::Response(response) if response.id == RequestId(4) => match response.result {
+            Ok(ResponseBody::ReadHistory { page }) => {
+                assert_eq!(page.terminal_id, terminal_id);
+                assert!(!page.has_more);
+                page.bytes
+            }
+            other => panic!("expected ReadHistory response body, got {other:?}"),
+        },
+        other => panic!("expected history Response, got {other:?}"),
     };
 
-    let mut history = Vec::new();
-    loop {
-        let frame = recv_frame(&mut client_transport, &mut session)
-            .await
-            .expect("recv history chunk");
-        match frame.body {
-            FrameBody::StreamData(chunk) => {
-                assert_eq!(chunk.stream_id, history_stream);
-                assert!(chunk.offset.is_some());
-                let start_seq = chunk.seq;
-                let bytes = chunk.bytes;
-                let last = chunk.last;
-                let end_seq = start_seq.0.saturating_add(bytes.len() as u64);
-                assert!(end_seq >= start_seq.0);
-                history.extend_from_slice(bytes.as_ref());
-                if last {
-                    break;
-                }
-            }
-            other => panic!("expected history StreamData, got {other:?}"),
-        }
-    }
-
-    assert_eq!(history, expected_history_tail());
+    assert_eq!(history.as_ref(), expected_history_tail().as_slice());
 
     daemon_task.abort();
     let _ = daemon_task.await;
@@ -572,7 +550,7 @@ async fn paired_client_attach_unknown_terminal_returns_error_response() {
         &mut session,
         &request_frame(
             2,
-            RequestBody::AttachTerminal {
+            RequestBody::OpenTerminal {
                 terminal_id: TerminalId::new(),
             },
         ),
@@ -582,18 +560,110 @@ async fn paired_client_attach_unknown_terminal_returns_error_response() {
 
     let response = recv_frame(&mut client_transport, &mut session)
         .await
-        .expect("recv attach response");
+        .expect("recv open response");
 
     match response.body {
         FrameBody::Response(response) => {
             assert_eq!(response.id, RequestId(2));
             let Err(error) = response.result else {
-                panic!("unknown terminal attach should fail");
+                panic!("unknown terminal open should fail");
             };
             assert_eq!(error.code, cli_pocket_proto::ProtocolError::UnknownTerminal);
         }
         other => panic!("expected error response, got {other:?}"),
     }
+
+    daemon_task.abort();
+    let _ = daemon_task.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paired_client_attaches_large_snapshot_without_hitting_noise_limit() {
+    let dir = TempDir::new().expect("tempdir");
+    let id_path = dir.path().join("identity.json");
+    let clients_path = dir.path().join("clients.json");
+    let revoked_path = dir.path().join("revoked.json");
+
+    let daemon_id = load_or_create(&id_path).expect("load_or_create daemon identity");
+    let client_keypair = KeyPair::generate().expect("client keypair");
+    let client_pub = client_keypair.public;
+
+    let db = Arc::new(
+        ClientDb::open(&clients_path, &revoked_path)
+            .await
+            .expect("ClientDb::open"),
+    );
+    db.add(ClientRecord {
+        client_id: ClientId(Uuid::from_bytes([0x92; 16])),
+        public_key: client_pub,
+        paired_at: 0,
+    })
+    .await
+    .expect("add client record");
+
+    let session_mgr = Arc::new(SessionManager::new(4));
+    let deps = ConnectionDeps {
+        session_mgr: Arc::clone(&session_mgr),
+        client_db: db,
+        server_info: ServerInfo {
+            server_version: "test".to_string(),
+            server_label: None,
+        },
+        config: Arc::new(Mutex::new(cli_pocket_daemon_core::DaemonConfig::default())),
+    };
+    let InMemoryTransportPair {
+        a: daemon_transport,
+        b: client_transport,
+    } = InMemoryTransportPair::new(16);
+    let daemon_keypair = daemon_id.keypair.clone();
+    let daemon_task = tokio::spawn(async move {
+        run_connection_with_handshake(
+            daemon_transport,
+            &daemon_keypair,
+            HandshakeKind::Direct { auto_pair: false },
+            deps,
+        )
+        .await
+    });
+
+    let mut client_transport = client_transport;
+    let mut session = connect_paired_client(&mut client_transport, &client_keypair)
+        .await
+        .expect("connect paired client");
+
+    let terminal_id = create_terminal(
+        &mut client_transport,
+        &mut session,
+        large_snapshot_terminal_cmd(),
+    )
+    .await
+    .expect("create terminal");
+
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let Some(terminal) = session_mgr.attach(&terminal_id) else {
+                panic!("expected terminal to exist while waiting for large snapshot");
+            };
+            if terminal.snapshot().bytes.len() > 70_000 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("terminal should accumulate a large snapshot");
+
+    let (_stream_id, start_seq, end_seq, snapshot_len) =
+        attach_terminal_with_snapshot(&mut client_transport, &mut session, terminal_id)
+            .await
+            .expect("attach terminal");
+
+    assert!(snapshot_len <= 48 * 1024);
+    assert!(end_seq >= start_seq);
+    assert!(
+        start_seq > 0,
+        "large snapshot should be trimmed to a later anchor"
+    );
 
     daemon_task.abort();
     let _ = daemon_task.await;
@@ -691,10 +761,20 @@ async fn attach_terminal(
     session: &mut NoiseSession,
     terminal_id: TerminalId,
 ) -> Result<StreamId, String> {
-    let attach = request_frame(2, RequestBody::AttachTerminal { terminal_id });
+    attach_terminal_with_snapshot(client_transport, session, terminal_id)
+        .await
+        .map(|(stream_id, _, _, _)| stream_id)
+}
+
+async fn attach_terminal_with_snapshot(
+    client_transport: &mut InMemoryTransport,
+    session: &mut NoiseSession,
+    terminal_id: TerminalId,
+) -> Result<(StreamId, u64, u64, usize), String> {
+    let attach = request_frame(2, RequestBody::OpenTerminal { terminal_id });
     send_frame(client_transport, session, &attach).await?;
 
-    let stream_id = loop {
+    loop {
         let attach_ok = recv_frame(client_transport, session).await?;
         match attach_ok.body {
             FrameBody::Response(response) => {
@@ -702,38 +782,25 @@ async fn attach_terminal(
                     return Err(format!("unexpected attach request id {:?}", response.id));
                 }
                 match response.result {
-                    Ok(ResponseBody::AttachTerminal { stream_id, .. }) => break stream_id,
+                    Ok(ResponseBody::OpenTerminal { ack }) => {
+                        return Ok((
+                            ack.stream_id,
+                            ack.start_seq.0,
+                            ack.end_seq.0,
+                            ack.render_bytes.len(),
+                        ));
+                    }
                     other => {
                         return Err(format!(
-                            "expected AttachTerminal response body, got {other:?}"
+                            "expected OpenTerminal response body, got {other:?}"
                         ))
                     }
                 }
             }
             FrameBody::StreamData(_) => {}
-            other => return Err(format!("expected AttachTerminal response, got {other:?}")),
-        }
-    };
-
-    loop {
-        let frame = recv_frame(client_transport, session).await?;
-        match frame.body {
-            FrameBody::StreamData(chunk) => {
-                if chunk.stream_id != stream_id {
-                    return Err(format!(
-                        "baseline chunk for unexpected stream {:?}",
-                        chunk.stream_id
-                    ));
-                }
-                if chunk.last {
-                    break;
-                }
-            }
-            other => return Err(format!("expected baseline StreamData, got {other:?}")),
+            other => return Err(format!("expected OpenTerminal response, got {other:?}")),
         }
     }
-
-    Ok(stream_id)
 }
 
 async fn recv_output_containing(
@@ -932,5 +999,25 @@ fn delayed_output_terminal_cmd(marker: &str) -> Vec<String> {
         "-NoProfile".to_string(),
         "-Command".to_string(),
         format!("Start-Sleep -Seconds 1; Write-Output '{marker}'; Start-Sleep -Seconds 30"),
+    ]
+}
+
+#[cfg(unix)]
+fn large_snapshot_terminal_cmd() -> Vec<String> {
+    vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        "i=0; while [ $i -lt 5000 ]; do printf '0123456789abcdef0123456789abcdef\\n'; i=$((i+1)); done; sleep 30".to_string(),
+    ]
+}
+
+#[cfg(windows)]
+fn large_snapshot_terminal_cmd() -> Vec<String> {
+    vec![
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".to_string(),
+        "-NoLogo".to_string(),
+        "-NoProfile".to_string(),
+        "-Command".to_string(),
+        "1..5000 | ForEach-Object { Write-Output '0123456789abcdef0123456789abcdef' }; Start-Sleep -Seconds 30".to_string(),
     ]
 }

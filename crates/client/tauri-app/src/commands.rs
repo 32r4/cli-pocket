@@ -1,7 +1,7 @@
 use base64::Engine as _;
 use bytes::Bytes;
 use cli_pocket_client_core::{
-    ClientIdentity, KeyValueStore, SessionBuilder, SessionConfig, SessionEndpoint, TerminalSnapshot,
+    ClientIdentity, KeyValueStore, SessionBuilder, SessionConfig, SessionEndpoint, TerminalOpenAck,
 };
 use cli_pocket_proto::{
     ResumeToken, ServerConfig, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
@@ -116,15 +116,15 @@ pub async fn create_terminal(
         .await
 }
 
-pub async fn activate_terminal(
+pub async fn open_terminal(
     session: SessionHandle,
     terminal_id: String,
 ) -> Result<serde_json::Value, String> {
     let terminal_id = parse_terminal_id(&terminal_id)?;
     session
-        .activate_terminal(terminal_id)
+        .open_terminal(terminal_id)
         .await
-        .map(|snapshot| serialize_terminal_snapshot(&snapshot))
+        .map(|open_ack| serialize_terminal_open_ack(&open_ack))
 }
 
 pub async fn list_terminals(session: SessionHandle) -> Result<Vec<serde_json::Value>, String> {
@@ -152,6 +152,7 @@ pub async fn read_history(
                 "start_seq": page.start_seq.0,
                 "end_seq": page.end_seq.0,
                 "bytes_b64": base64::engine::general_purpose::STANDARD.encode(&page.bytes),
+                "has_more": page.has_more,
             })
         })
 }
@@ -330,13 +331,14 @@ fn serialize_terminal_info(info: &TerminalInfo) -> serde_json::Value {
     })
 }
 
-fn serialize_terminal_snapshot(snapshot: &TerminalSnapshot) -> serde_json::Value {
+fn serialize_terminal_open_ack(open_ack: &TerminalOpenAck) -> serde_json::Value {
     serde_json::json!({
-        "info": serialize_terminal_info(&snapshot.info),
-        "start_seq": snapshot.start_seq.0,
-        "end_seq": snapshot.end_seq.0,
-        "render_prefix_b64": base64::engine::general_purpose::STANDARD.encode(snapshot.render_prefix.as_bytes()),
-        "snapshot_bytes_b64": base64::engine::general_purpose::STANDARD.encode(&snapshot.bytes),
+        "stream_id": open_ack.stream_id.0,
+        "info": serialize_terminal_info(&open_ack.info),
+        "start_seq": open_ack.start_seq.0,
+        "end_seq": open_ack.end_seq.0,
+        "render_bytes_b64": base64::engine::general_purpose::STANDARD.encode(&open_ack.render_bytes),
+        "has_more_history": open_ack.has_more_history,
     })
 }
 

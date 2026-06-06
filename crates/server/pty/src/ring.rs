@@ -24,6 +24,7 @@ pub struct HistorySlice {
     pub start_seq: StreamSeq,
     pub end_seq: StreamSeq,
     pub bytes: ByteBuf,
+    pub has_more: bool,
 }
 
 pub struct ScrollbackRing {
@@ -100,20 +101,32 @@ impl ScrollbackRing {
 
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
-        let anchor = self.anchors.front().cloned().unwrap_or_else(|| Anchor {
+        self.snapshot_from_anchor(self.anchors.front().cloned().unwrap_or_else(|| Anchor {
             byte_offset: self.tail_offset,
             state: self.tracker.snapshot_state(),
-        });
-        let start_rel = offset_to_relative(anchor.byte_offset, self.tail_offset);
-        let bytes: Vec<u8> = self.bytes.iter().skip(start_rel).copied().collect();
+        }))
+    }
 
-        Snapshot {
-            cols: self.cols,
-            rows: self.rows,
-            anchor_state: anchor.state,
-            bytes: ByteBuf::from(bytes),
-            head_seq: self.head_seq,
-        }
+    #[must_use]
+    pub fn snapshot_with_max_bytes(&self, max_bytes: usize) -> Snapshot {
+        let max_bytes = u64::try_from(max_bytes).unwrap_or(u64::MAX);
+        let Some(anchor) = self
+            .anchors
+            .iter()
+            .rev()
+            .find(|anchor| self.head_seq.0.saturating_sub(anchor.byte_offset) <= max_bytes)
+            .cloned()
+        else {
+            return Snapshot {
+                cols: self.cols,
+                rows: self.rows,
+                anchor_state: self.tracker.snapshot_state(),
+                bytes: ByteBuf::from(Vec::new()),
+                head_seq: self.head_seq,
+            };
+        };
+
+        self.snapshot_from_anchor(anchor)
     }
 
     #[must_use]
@@ -156,6 +169,7 @@ impl ScrollbackRing {
             start_seq: StreamSeq(start_offset),
             end_seq: StreamSeq(end_offset),
             bytes: ByteBuf::from(bytes),
+            has_more: start_offset > self.tail_offset,
         }
     }
 
@@ -206,6 +220,19 @@ impl ScrollbackRing {
             .is_some_and(|anchor| anchor.byte_offset <= self.tail_offset)
         {
             self.anchors.pop_front();
+        }
+    }
+
+    fn snapshot_from_anchor(&self, anchor: Anchor) -> Snapshot {
+        let start_rel = offset_to_relative(anchor.byte_offset, self.tail_offset);
+        let bytes: Vec<u8> = self.bytes.iter().skip(start_rel).copied().collect();
+
+        Snapshot {
+            cols: self.cols,
+            rows: self.rows,
+            anchor_state: anchor.state,
+            bytes: ByteBuf::from(bytes),
+            head_seq: self.head_seq,
         }
     }
 }
@@ -342,6 +369,32 @@ mod tests {
             ring.anchors.front().map(|anchor| anchor.byte_offset),
             Some(ring.tail_seq().0)
         );
+    }
+
+    #[test]
+    fn bounded_snapshot_prefers_newer_anchor_when_window_is_large() {
+        let mut ring = ScrollbackRing::new(80, 24, Some(8 * 1024)).unwrap();
+
+        ring.push(&vec![b'a'; 20 * 1024]);
+
+        let snapshot = ring.snapshot_with_max_bytes(4 * 1024);
+
+        assert_eq!(snapshot.head_seq, ring.head_seq());
+        assert!(snapshot.bytes.len() <= 4 * 1024);
+        assert!(!snapshot.bytes.is_empty());
+    }
+
+    #[test]
+    fn bounded_snapshot_falls_back_to_empty_when_no_safe_anchor_fits() {
+        let mut ring = ScrollbackRing::new(80, 24, Some(8 * 1024)).unwrap();
+
+        ring.push(b"\x1b]");
+        ring.push(&vec![b'x'; 8 * 1024]);
+
+        let snapshot = ring.snapshot_with_max_bytes(1024);
+
+        assert_eq!(snapshot.head_seq, ring.head_seq());
+        assert!(snapshot.bytes.is_empty());
     }
 
     proptest! {

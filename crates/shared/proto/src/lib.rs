@@ -14,14 +14,14 @@ pub use codec::{
 };
 pub use error::{ByeReason, ProtocolError};
 pub use frame::{
-    EventBody, EventFrame, Frame, FrameBody, RequestBody, RequestFrame, ResponseBody,
-    ResponseError, ResponseFrame, StreamDataFrame,
+    EventBody, EventFrame, Frame, FrameBody, HistoryPage, OpenTerminalAck, RequestBody,
+    RequestFrame, ResponseBody, ResponseError, ResponseFrame, StreamDataFrame,
 };
 pub use hello::{Hello, HelloOk, ResumeAttachment, ResumeToken, ServerInfo};
 pub use relay::{PairCloseReason, PairId, RelayCtrl, RelayData, RELAY_DISC_CTRL, RELAY_DISC_DATA};
 pub use snapshot::{
-    AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs, Snapshot, TerminalBaseline,
-    TerminalModes,
+    render_prefix_from_anchor, AnchorState, CharsetState, Color, DeltaSlice, MouseMode, SgrAttrs,
+    Snapshot, TerminalModes,
 };
 pub use terminal::{
     ClientId, ExitInfo, KillSignal, RequestId, ServerConfig, ServerId, SessionId, StreamId,

@@ -2,13 +2,12 @@ import type { StoreApi } from "zustand/vanilla";
 import type {
 	SessionActor,
 	TerminalHistoryPageRecord,
-	TerminalSnapshotRecord,
+	TerminalOpenAckRecord,
 } from "@/platform/bridge/types";
 import type { TerminalController } from "./terminalController";
 
 const initialHistoryPageBytes = 32 * 1024;
-const initialHistoryTargetBytes = 128 * 1024;
-const maxInitialHistoryPages = 4;
+const terminalOpenTimeoutMs = 10_000;
 
 type Phase =
 	| "idle"
@@ -54,7 +53,7 @@ function decodeBase64Bytes(value: string) {
 	return new TextDecoder().decode(bytes);
 }
 
-function parseTerminalSnapshot(value: unknown): TerminalSnapshotRecord | null {
+function parseTerminalOpenAck(value: unknown): TerminalOpenAckRecord | null {
 	if (typeof value !== "object" || value === null) {
 		return null;
 	}
@@ -71,64 +70,34 @@ function parseTerminalSnapshot(value: unknown): TerminalSnapshotRecord | null {
 		"terminal" in info && typeof info.terminal === "string"
 			? info.terminal
 			: null;
-	const snapshotBytes =
-		"snapshot_bytes_b64" in value &&
-		typeof value.snapshot_bytes_b64 === "string"
-			? value.snapshot_bytes_b64
+	const startSeq =
+		"start_seq" in value && typeof value.start_seq === "number"
+			? value.start_seq
 			: null;
-	if (terminal == null || snapshotBytes == null) {
+	const endSeq =
+		"end_seq" in value && typeof value.end_seq === "number"
+			? value.end_seq
+			: null;
+	const renderBytes =
+		"render_bytes_b64" in value && typeof value.render_bytes_b64 === "string"
+			? value.render_bytes_b64
+			: null;
+	const hasMoreHistory =
+		"has_more_history" in value && typeof value.has_more_history === "boolean"
+			? value.has_more_history
+			: null;
+	if (
+		terminal == null ||
+		startSeq == null ||
+		endSeq == null ||
+		endSeq < startSeq ||
+		renderBytes == null ||
+		hasMoreHistory == null
+	) {
 		return null;
 	}
 
-	return value as TerminalSnapshotRecord;
-}
-
-async function preloadTerminalWindow(
-	session: SessionActor,
-	snapshot: TerminalSnapshotRecord,
-) {
-	const renderPrefix = decodeBase64Bytes(snapshot.render_prefix_b64);
-	let startSeq = snapshot.start_seq;
-	const historyChunks: string[] = [];
-	const snapshotBytes = decodeBase64Bytes(snapshot.snapshot_bytes_b64);
-	let loadedBytes = snapshotBytes.length;
-	let nextBefore = snapshot.start_seq;
-
-	for (
-		let page = 0;
-		page < maxInitialHistoryPages &&
-		nextBefore > 0 &&
-		loadedBytes < initialHistoryTargetBytes;
-		page += 1
-	) {
-		const history = await session.readHistory(
-			snapshot.info.terminal,
-			nextBefore,
-			initialHistoryPageBytes,
-		);
-		if (history.bytes_b64.length === 0) {
-			startSeq = history.start_seq;
-			break;
-		}
-
-		const chunk = decodeBase64Bytes(history.bytes_b64);
-		if (chunk.length === 0 || history.start_seq >= nextBefore) {
-			break;
-		}
-
-		historyChunks.unshift(chunk);
-		loadedBytes += chunk.length;
-		startSeq = history.start_seq;
-		nextBefore = history.start_seq;
-		if (history.start_seq === 0) {
-			break;
-		}
-	}
-
-	return {
-		startSeq,
-		snapshot: `${renderPrefix}${historyChunks.join("")}${snapshotBytes}`,
-	};
+	return value as TerminalOpenAckRecord;
 }
 
 export class TerminalSessionActor {
@@ -136,7 +105,8 @@ export class TerminalSessionActor {
 	private terminalGeneration = 0;
 	private phase: Phase = "idle";
 	private pendingOpen: Promise<void> | null = null;
-	private pendingHistory: Promise<void> | null = null;
+	private pendingHistory: Promise<TerminalHistoryPageRecord | null> | null =
+		null;
 	private liveBuffer: BufferedLiveOutput[] = [];
 	private loadedRange: { startSeq: number | null; endSeq: number | null } = {
 		startSeq: null,
@@ -291,41 +261,37 @@ export class TerminalSessionActor {
 		}
 
 		try {
-			const snapshot = await Promise.race([
-				session.activateTerminal(this.deps.terminalId),
-				new Promise<never>((_, reject) => {
-					window.setTimeout(
-						() => reject(new Error("terminal open timed out")),
-						5_000,
-					);
-				}),
-			]);
+			const attachAck = await new Promise<unknown>((resolve, reject) => {
+				const timeoutId = window.setTimeout(() => {
+					reject(new Error("terminal open timed out"));
+				}, terminalOpenTimeoutMs);
+				void session
+					.openTerminal(this.deps.terminalId)
+					.then(resolve, reject)
+					.finally(() => {
+						window.clearTimeout(timeoutId);
+					});
+			});
 			if (!this.isCurrent(connectionGeneration, terminalGeneration)) {
 				return;
 			}
 
-			const parsed = parseTerminalSnapshot(snapshot);
+			const parsed = parseTerminalOpenAck(attachAck);
 			if (parsed == null) {
-				throw new Error("invalid terminal snapshot");
+				throw new Error("invalid terminal open ack");
 			}
-			let initialWindow = {
+			const initialWindow = {
 				startSeq: parsed.start_seq,
-				snapshot: `${decodeBase64Bytes(parsed.render_prefix_b64)}${decodeBase64Bytes(parsed.snapshot_bytes_b64)}`,
+				endSeq: parsed.end_seq,
+				snapshot: decodeBase64Bytes(parsed.render_bytes_b64),
+				historyExhausted: !parsed.has_more_history,
 			};
-			try {
-				initialWindow = await preloadTerminalWindow(session, parsed);
-			} catch {
-				// Fall back to the attach snapshot if preloading shared history fails.
-			}
-			if (!this.isCurrent(connectionGeneration, terminalGeneration)) {
-				return;
-			}
-
 			this.loadedRange = {
 				startSeq: initialWindow.startSeq,
-				endSeq: parsed.end_seq,
+				endSeq: initialWindow.endSeq,
 			};
-			this.deps.controller.renderSnapshotWithRange(
+			this.historyExhausted = initialWindow.historyExhausted;
+			this.deps.controller.renderSnapshot(
 				this.deps.terminalId,
 				initialWindow.snapshot,
 				initialWindow.startSeq,
@@ -343,7 +309,9 @@ export class TerminalSessionActor {
 			this.phase = "failed";
 			this.lastError = message;
 			this.emitRuntimeState();
-			this.deps.onInlineError(message);
+			if (message !== "terminal open timed out") {
+				this.deps.onInlineError(message);
+			}
 		}
 	}
 
@@ -367,10 +335,10 @@ export class TerminalSessionActor {
 				initialHistoryPageBytes,
 			);
 			if (!this.isCurrent(connectionGeneration, terminalGeneration)) {
-				return;
+				return null;
 			}
 			if (page.terminal_id !== this.deps.terminalId) {
-				return;
+				return null;
 			}
 
 			await this.applyHistoryPage(
@@ -378,16 +346,18 @@ export class TerminalSessionActor {
 				connectionGeneration,
 				terminalGeneration,
 			);
+			return page;
 		} catch (error: unknown) {
-			if (!this.isCurrent(connectionGeneration, terminalGeneration)) {
-				return;
+			if (this.isCurrent(connectionGeneration, terminalGeneration)) {
+				this.deps.onInlineError(
+					error instanceof Error ? error.message : "failed to load history",
+				);
 			}
-			this.deps.onInlineError(
-				error instanceof Error ? error.message : "failed to load history",
-			);
+			return null;
 		} finally {
 			if (this.isCurrent(connectionGeneration, terminalGeneration)) {
 				this.phase = "ready";
+				this.emitRuntimeState();
 				this.replayBufferedOutput(connectionGeneration);
 			}
 		}
@@ -405,19 +375,14 @@ export class TerminalSessionActor {
 		connectionGeneration: number,
 		terminalGeneration: number,
 	) {
-		if (page.bytes_b64.length === 0) {
-			this.historyExhausted = true;
-			this.loadedRange.startSeq = page.start_seq;
-			return;
+		if (page.bytes_b64.length > 0) {
+			await this.deps.controller.prependHistoryPage(page);
+			if (!this.isCurrent(connectionGeneration, terminalGeneration)) {
+				return;
+			}
 		}
-
-		await this.deps.controller.prependHistoryPage(page);
-		if (!this.isCurrent(connectionGeneration, terminalGeneration)) {
-			return;
-		}
-
 		this.loadedRange.startSeq = page.start_seq;
-		this.historyExhausted = page.start_seq === 0;
+		this.historyExhausted = !page.has_more;
 	}
 
 	private bufferLiveOutput(output: BufferedLiveOutput) {

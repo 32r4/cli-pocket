@@ -17,7 +17,7 @@ use bytes::Bytes;
 use cli_pocket_client_core::session::SessionSpawner;
 use cli_pocket_client_core::{
     ClientEvent, ClientIdentity, ClientResult, ClientSession, KeyValueStore, SessionBuilder,
-    SessionConfig, SessionEndpoint, TerminalSnapshot,
+    SessionConfig, SessionEndpoint, TerminalOpenAck,
 };
 use cli_pocket_proto::{ResumeToken, ServerConfig, TerminalCreateParams, TerminalId, TerminalInfo};
 use futures_channel::mpsc;
@@ -185,8 +185,9 @@ mod tests {
 
     #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen_test]
-    fn terminal_snapshot_js_includes_render_prefix() {
-        let snapshot = TerminalSnapshot::new(
+    fn terminal_open_ack_js_includes_render_bytes() {
+        let open_ack = TerminalOpenAck::new(
+            cli_pocket_proto::StreamId(9),
             cli_pocket_proto::TerminalInfo {
                 terminal: cli_pocket_proto::TerminalId(uuid::Uuid::nil()),
                 cols: 80,
@@ -198,19 +199,16 @@ mod tests {
             cli_pocket_proto::StreamSeq(0),
             cli_pocket_proto::StreamSeq(2),
             Bytes::from_static(b"ok"),
-            "\u{1b}[?25h".to_owned(),
+            true,
         );
 
-        let value = terminal_snapshot_to_js(&snapshot).expect("serialize snapshot");
-        let render_prefix = js_sys::Reflect::get(&value, &JsValue::from_str("render_prefix_b64"))
-            .expect("render_prefix_b64 property")
+        let value = terminal_open_ack_to_js(&open_ack).expect("serialize open ack");
+        let render_bytes = js_sys::Reflect::get(&value, &JsValue::from_str("render_bytes_b64"))
+            .expect("render_bytes_b64 property")
             .as_string()
-            .expect("render_prefix_b64 string");
+            .expect("render_bytes_b64 string");
 
-        assert_eq!(
-            render_prefix,
-            BASE64.encode(snapshot.render_prefix.as_bytes())
-        );
+        assert_eq!(render_bytes, BASE64.encode(open_ack.render_bytes.as_ref()));
     }
 }
 
@@ -325,10 +323,10 @@ impl CliPocketClient {
     }
 
     #[wasm_bindgen]
-    pub fn activate_terminal(&self, terminal_id: String) -> Promise {
+    pub fn open_terminal(&self, terminal_id: String) -> Promise {
         let client = self.clone();
         future_to_promise(async move {
-            let value = client.activate_terminal_inner(terminal_id).await?;
+            let value = client.open_terminal_inner(terminal_id).await?;
             Ok(value)
         })
     }
@@ -520,10 +518,14 @@ impl CliPocketClient {
             env: js_params.env,
         };
 
-        session.create_terminal(params).await.map_err(js_error)
+        session
+            .create_terminal(params)
+            .await
+            .map(|_| ())
+            .map_err(js_error)
     }
 
-    async fn activate_terminal_inner(&self, terminal_id: String) -> Result<JsValue, JsValue> {
+    async fn open_terminal_inner(&self, terminal_id: String) -> Result<JsValue, JsValue> {
         let session = self
             .inner
             .borrow()
@@ -531,12 +533,12 @@ impl CliPocketClient {
             .ok_or_else(|| JsValue::from_str("not connected"))?
             .clone();
 
-        let snapshot = session
-            .activate_terminal(parse_terminal_id(&terminal_id)?)
+        let open_ack = session
+            .open_terminal(parse_terminal_id(&terminal_id)?)
             .await
             .map_err(js_error)?;
 
-        terminal_snapshot_to_js(&snapshot)
+        terminal_open_ack_to_js(&open_ack)
     }
 
     async fn read_history_inner(
@@ -566,6 +568,7 @@ impl CliPocketClient {
             "start_seq": page.start_seq.0,
             "end_seq": page.end_seq.0,
             "bytes_b64": BASE64.encode(&page.bytes),
+            "has_more": page.has_more,
         })
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|e| JsValue::from_str(&format!("serialize history page: {e}")))
@@ -876,16 +879,17 @@ fn terminal_info_to_json_value(info: &TerminalInfo) -> serde_json::Value {
     })
 }
 
-fn terminal_snapshot_to_js(snapshot: &TerminalSnapshot) -> Result<JsValue, JsValue> {
+fn terminal_open_ack_to_js(open_ack: &TerminalOpenAck) -> Result<JsValue, JsValue> {
     serde_json::json!({
-        "info": terminal_info_to_json_value(&snapshot.info),
-        "start_seq": snapshot.start_seq.0,
-        "end_seq": snapshot.end_seq.0,
-        "render_prefix_b64": BASE64.encode(snapshot.render_prefix.as_bytes()),
-        "snapshot_bytes_b64": BASE64.encode(&snapshot.bytes),
+        "stream_id": open_ack.stream_id.0,
+        "info": terminal_info_to_json_value(&open_ack.info),
+        "start_seq": open_ack.start_seq.0,
+        "end_seq": open_ack.end_seq.0,
+        "render_bytes_b64": BASE64.encode(&open_ack.render_bytes),
+        "has_more_history": open_ack.has_more_history,
     })
     .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-    .map_err(|e| JsValue::from_str(&format!("serialize terminal snapshot: {e}")))
+    .map_err(|e| JsValue::from_str(&format!("serialize terminal open ack: {e}")))
 }
 
 fn server_config_to_js(config: &ServerConfig) -> Result<JsValue, JsValue> {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { TerminalSessionActor } from "./terminalSessionActor";
 
@@ -12,13 +12,10 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-function makeSnapshot(
-	terminalId: string,
-	text: string,
-	startSeq = 0,
-	endSeq?: number,
-) {
+function makeSnapshot(terminalId: string, endSeq: number, text = "") {
+	const startSeq = endSeq - text.length;
 	return {
+		stream_id: 1,
 		info: {
 			terminal: terminalId,
 			cols: 80,
@@ -28,9 +25,24 @@ function makeSnapshot(
 			attached_clients: 1,
 		},
 		start_seq: startSeq,
-		end_seq: endSeq ?? startSeq + text.length,
-		render_prefix_b64: btoa(""),
-		snapshot_bytes_b64: btoa(text),
+		end_seq: endSeq,
+		render_bytes_b64: btoa(text),
+		has_more_history: startSeq > 0,
+	};
+}
+
+function makeHistoryPage(
+	terminalId: string,
+	startSeq: number,
+	endSeq: number,
+	text: string,
+) {
+	return {
+		terminal_id: terminalId,
+		start_seq: startSeq,
+		end_seq: endSeq,
+		bytes_b64: btoa(text),
+		has_more: startSeq > 0,
 	};
 }
 
@@ -58,7 +70,7 @@ async function awaitPendingHistory(actor: TerminalSessionActor) {
 }
 
 function makeDeps(overrides?: {
-	activateTerminal?: (terminalId: string) => Promise<unknown>;
+	openTerminal?: (terminalId: string) => Promise<unknown>;
 	readHistory?: (
 		terminalId: string,
 		before: number | null,
@@ -68,6 +80,7 @@ function makeDeps(overrides?: {
 		start_seq: number;
 		end_seq: number;
 		bytes_b64: string;
+		has_more: boolean;
 	}>;
 }) {
 	const workspaceState = createWorkspaceStore();
@@ -84,24 +97,26 @@ function makeDeps(overrides?: {
 	]);
 	const controller = {
 		setActiveTerminal: vi.fn(),
-		renderSnapshotWithRange: vi.fn(),
+		renderSnapshot: vi.fn(),
 		appendActiveOutput: vi.fn(),
 		prependHistoryPage: vi.fn(async () => undefined),
 		mount: vi.fn(async () => undefined),
 		unmount: vi.fn(),
 	};
 	const session = {
-		activateTerminal:
-			overrides?.activateTerminal ??
-			vi.fn(async (terminalId: string) => makeSnapshot(terminalId, "snap")),
+		openTerminal:
+			overrides?.openTerminal ??
+			vi.fn(async (terminalId: string) => makeSnapshot(terminalId, 12)),
 		readHistory:
 			overrides?.readHistory ??
-			vi.fn(async (terminalId: string, before: number | null) => ({
-				terminal_id: terminalId,
-				start_seq: Math.max(0, (before ?? 0) - 5),
-				end_seq: before ?? 0,
-				bytes_b64: btoa("older"),
-			})),
+			vi.fn(async (terminalId: string, before: number | null) =>
+				makeHistoryPage(
+					terminalId,
+					Math.max(0, (before ?? 0) - 4),
+					before ?? 0,
+					"latest",
+				),
+			),
 		resize: vi.fn(async () => undefined),
 	} as const;
 	const onInlineError = vi.fn();
@@ -123,36 +138,31 @@ function makeDeps(overrides?: {
 }
 
 describe("TerminalSessionActor", () => {
-	it("drops a late open result after a newer activation", async () => {
-		const firstOpen = deferred<unknown>();
-		const secondOpen = deferred<unknown>();
-		const activateTerminal = vi
-			.fn<(terminalId: string) => Promise<unknown>>()
-			.mockImplementationOnce(async () => firstOpen.promise)
-			.mockImplementationOnce(async () => secondOpen.promise);
-		const { actor, controller } = makeDeps({
-			activateTerminal,
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("renders the attach snapshot immediately", async () => {
+		const { actor, controller, session } = makeDeps({
+			openTerminal: vi.fn(async (terminalId: string) =>
+				makeSnapshot(terminalId, 12, "latest"),
+			),
 		});
 
 		actor.activateTerminal(1);
-		actor.activateTerminal(1);
-		secondOpen.resolve(makeSnapshot("t1", "second"));
 		await awaitPendingOpen(actor);
-		firstOpen.resolve(makeSnapshot("t1", "first"));
-		await firstOpen.promise;
-		await Promise.resolve();
 
-		expect(activateTerminal).toHaveBeenCalledTimes(2);
-		expect(controller.renderSnapshotWithRange).toHaveBeenCalledTimes(1);
-		expect(controller.renderSnapshotWithRange).toHaveBeenCalledWith(
-			"t1",
-			"second",
-			0,
-		);
+		expect(session.openTerminal).toHaveBeenCalledTimes(1);
+		expect(session.readHistory).not.toHaveBeenCalled();
+		expect(controller.renderSnapshot).toHaveBeenCalledWith("t1", "latest", 6);
+		expect(actor.getRuntimeState()).toEqual({
+			phase: "ready",
+			error: null,
+		});
 	});
 
-	it("ignores duplicate history loads while one is in flight", async () => {
-		const history = deferred<{
+	it("loads older history pages after the attach snapshot is rendered", async () => {
+		const older = deferred<{
 			terminal_id: string;
 			start_seq: number;
 			end_seq: number;
@@ -160,285 +170,49 @@ describe("TerminalSessionActor", () => {
 		}>();
 		const readHistory = vi
 			.fn()
-			.mockImplementationOnce(async () => ({
-				terminal_id: "t1",
-				start_seq: 4,
-				end_seq: 4,
-				bytes_b64: "",
-			}))
-			.mockImplementationOnce(async () => history.promise);
+			.mockImplementationOnce(async () => older.promise);
 		const { actor, controller } = makeDeps({
-			activateTerminal: vi.fn(async (terminalId: string) =>
-				makeSnapshot(terminalId, "snap", 4, 8),
+			openTerminal: vi.fn(async (terminalId: string) =>
+				makeSnapshot(terminalId, 12, "latest"),
 			),
 			readHistory,
 		});
 
 		actor.activateTerminal(1);
 		await awaitPendingOpen(actor);
-		actor.loadOlderHistory();
-		actor.loadOlderHistory();
 
-		expect(readHistory).toHaveBeenCalledTimes(2);
-
-		history.resolve({
-			terminal_id: "t1",
-			start_seq: 0,
-			end_seq: 4,
-			bytes_b64: btoa("old"),
-		});
+		actor.loadOlderHistory();
+		older.resolve(makeHistoryPage("t1", 0, 6, "older"));
 		await awaitPendingHistory(actor);
 
+		expect(readHistory).toHaveBeenCalledWith("t1", 6, 32 * 1024);
 		expect(controller.prependHistoryPage).toHaveBeenCalledTimes(1);
-	});
-
-	it("buffers output during history redraw and replays it in seq order", async () => {
-		const history = deferred<{
-			terminal_id: string;
-			start_seq: number;
-			end_seq: number;
-			bytes_b64: string;
-		}>();
-		const readHistory = vi
-			.fn()
-			.mockImplementationOnce(async () => ({
+		expect(controller.prependHistoryPage).toHaveBeenCalledWith(
+			expect.objectContaining({
 				terminal_id: "t1",
-				start_seq: 4,
-				end_seq: 4,
-				bytes_b64: "",
-			}))
-			.mockImplementationOnce(async () => history.promise);
-		const { actor, controller } = makeDeps({
-			activateTerminal: vi.fn(async (terminalId: string) =>
-				makeSnapshot(terminalId, "snap", 4, 8),
-			),
-			readHistory,
-		});
-
-		actor.activateTerminal(1);
-		await awaitPendingOpen(actor);
-		actor.loadOlderHistory();
-		actor.applyOutput("t1", 9, "b", 1);
-		actor.applyOutput("t1", 8, "a", 1);
-
-		history.resolve({
-			terminal_id: "t1",
-			start_seq: 0,
-			end_seq: 4,
-			bytes_b64: btoa("old"),
-		});
-		await awaitPendingHistory(actor);
-
-		expect(controller.appendActiveOutput).toHaveBeenNthCalledWith(
-			1,
-			"t1",
-			"a",
-			8,
-		);
-		expect(controller.appendActiveOutput).toHaveBeenNthCalledWith(
-			2,
-			"t1",
-			"b",
-			9,
+				start_seq: 0,
+				end_seq: 6,
+				bytes_b64: btoa("older"),
+			}),
 		);
 	});
 
-	it("disconnect clears in-flight history without replaying stale completion", async () => {
-		const history = deferred<{
-			terminal_id: string;
-			start_seq: number;
-			end_seq: number;
-			bytes_b64: string;
-		}>();
-		const readHistory = vi
-			.fn()
-			.mockImplementationOnce(async () => ({
-				terminal_id: "t1",
-				start_seq: 4,
-				end_seq: 4,
-				bytes_b64: "",
-			}))
-			.mockImplementationOnce(async () => history.promise);
-		const { actor, controller } = makeDeps({
-			activateTerminal: vi.fn(async (terminalId: string) =>
-				makeSnapshot(terminalId, "snap", 4, 8),
-			),
-			readHistory,
-		});
-
-		actor.activateTerminal(1);
-		await awaitPendingOpen(actor);
-		actor.loadOlderHistory();
-		actor.disconnect(2);
-		history.resolve({
-			terminal_id: "t1",
-			start_seq: 0,
-			end_seq: 4,
-			bytes_b64: btoa("old"),
-		});
-		await awaitPendingHistory(actor);
-
-		expect(controller.prependHistoryPage).not.toHaveBeenCalled();
-		expect(controller.appendActiveOutput).not.toHaveBeenCalled();
-	});
-
-	it("disconnect during open drops the late snapshot completion", async () => {
+	it("fails the open after 10 seconds", async () => {
+		vi.useFakeTimers();
 		const open = deferred<unknown>();
 		const { actor, controller, onInlineError } = makeDeps({
-			activateTerminal: vi.fn(async () => open.promise),
+			openTerminal: vi.fn(async () => open.promise),
 		});
 
 		actor.activateTerminal(1);
-		actor.disconnect(2);
-		open.resolve(makeSnapshot("t1", "late"));
-		await open.promise;
-		await Promise.resolve();
-
-		expect(controller.renderSnapshotWithRange).not.toHaveBeenCalled();
-		expect(onInlineError).not.toHaveBeenCalled();
-	});
-
-	it("disconnect then reactivate drops stale open and renders only the reconnected open", async () => {
-		const firstOpen = deferred<unknown>();
-		const secondOpen = deferred<unknown>();
-		const activateTerminal = vi
-			.fn<(terminalId: string) => Promise<unknown>>()
-			.mockImplementationOnce(async () => firstOpen.promise)
-			.mockImplementationOnce(async () => secondOpen.promise);
-		const { actor, controller } = makeDeps({
-			activateTerminal,
-		});
-
-		actor.activateTerminal(1);
-		actor.disconnect(2);
-		actor.activateTerminal(3);
-
-		firstOpen.resolve(makeSnapshot("t1", "stale"));
-		await firstOpen.promise;
-		secondOpen.resolve(makeSnapshot("t1", "fresh"));
+		await vi.advanceTimersByTimeAsync(10_000);
 		await awaitPendingOpen(actor);
 
-		expect(controller.renderSnapshotWithRange).toHaveBeenCalledTimes(1);
-		expect(controller.renderSnapshotWithRange).toHaveBeenCalledWith(
-			"t1",
-			"fresh",
-			0,
-		);
-	});
-
-	it("keeps the last activation rendered across rapid out-of-order switches", async () => {
-		const opens = new Map<
-			string,
-			Array<
-				ReturnType<
-					typeof deferred<{
-						info: {
-							terminal: string;
-							cols: number;
-							rows: number;
-							created_at_unix_ms: number;
-							label: string;
-							attached_clients: number;
-						};
-						start_seq: number;
-						end_seq: number;
-						render_prefix_b64: string;
-						snapshot_bytes_b64: string;
-					}>
-				>
-			>
-		>();
-		const activateTerminal = vi.fn(async (terminalId: string) => {
-			const pending = deferred<ReturnType<typeof makeSnapshot>>();
-			const queued = opens.get(terminalId) ?? [];
-			queued.push(pending);
-			opens.set(terminalId, queued);
-			return pending.promise;
+		expect(controller.renderSnapshot).not.toHaveBeenCalled();
+		expect(actor.getRuntimeState()).toEqual({
+			phase: "failed",
+			error: "terminal open timed out",
 		});
-		const workspaceState = createWorkspaceStore();
-		workspaceState.getState().markConnected();
-		workspaceState.getState().syncTerminalList([
-			{
-				terminal: "a",
-				cols: 80,
-				rows: 24,
-				created_at_unix_ms: 1,
-				label: "a",
-				attached_clients: 1,
-			},
-			{
-				terminal: "b",
-				cols: 80,
-				rows: 24,
-				created_at_unix_ms: 2,
-				label: "b",
-				attached_clients: 1,
-			},
-		]);
-		const controller = {
-			setActiveTerminal: vi.fn(),
-			renderSnapshotWithRange: vi.fn(),
-			appendActiveOutput: vi.fn(),
-			prependHistoryPage: vi.fn(async () => undefined),
-			mount: vi.fn(async () => undefined),
-			unmount: vi.fn(),
-		};
-		const session = {
-			activateTerminal,
-			readHistory: vi.fn(async () => ({
-				terminal_id: "a",
-				start_seq: 0,
-				end_seq: 0,
-				bytes_b64: "",
-			})),
-			resize: vi.fn(async () => undefined),
-		};
-		const actorA = new TerminalSessionActor({
-			terminalId: "a",
-			controller: controller as never,
-			workspaceState,
-			session: () => session as never,
-			onInlineError: vi.fn(),
-			onRuntimeStateChange: vi.fn(),
-		});
-		const actorB = new TerminalSessionActor({
-			terminalId: "b",
-			controller: controller as never,
-			workspaceState,
-			session: () => session as never,
-			onInlineError: vi.fn(),
-			onRuntimeStateChange: vi.fn(),
-		});
-
-		const switchCount = 20;
-		for (let index = 0; index < switchCount; index += 1) {
-			if (index % 2 === 0) {
-				actorA.activateTerminal(1);
-				actorB.detach();
-			} else {
-				actorB.activateTerminal(1);
-				actorA.detach();
-			}
-		}
-
-		const finalTerminalId = (switchCount - 1) % 2 === 0 ? "a" : "b";
-		const terminalIds = [...opens.keys()].sort().reverse();
-		for (const terminalId of terminalIds) {
-			const queued = opens.get(terminalId) ?? [];
-			for (let index = queued.length - 1; index >= 0; index -= 1) {
-				queued[index].resolve(
-					makeSnapshot(terminalId, `${terminalId}-${index}`),
-				);
-				await queued[index].promise;
-			}
-		}
-		await Promise.resolve();
-
-		expect(controller.renderSnapshotWithRange).toHaveBeenCalledTimes(1);
-		expect(controller.renderSnapshotWithRange).toHaveBeenCalledWith(
-			finalTerminalId,
-			expect.stringMatching(new RegExp(`^${finalTerminalId}-`)),
-			0,
-		);
+		expect(onInlineError).not.toHaveBeenCalled();
 	});
 });

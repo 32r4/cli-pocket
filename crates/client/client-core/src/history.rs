@@ -7,6 +7,7 @@ pub struct TerminalHistoryPage {
     pub start_seq: StreamSeq,
     pub end_seq: StreamSeq,
     pub bytes: Bytes,
+    pub has_more: bool,
 }
 
 impl TerminalHistoryPage {
@@ -16,12 +17,14 @@ impl TerminalHistoryPage {
         start_seq: StreamSeq,
         end_seq: StreamSeq,
         bytes: Bytes,
+        has_more: bool,
     ) -> Self {
         Self {
             terminal_id,
             start_seq,
             end_seq,
             bytes,
+            has_more,
         }
     }
 }

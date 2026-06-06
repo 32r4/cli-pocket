@@ -1,5 +1,6 @@
 import { waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { TerminalRuntimeState } from "@/features/terminals/terminalSessionActor";
 import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
 import type {
 	ConnectConfig,
@@ -7,7 +8,7 @@ import type {
 	ServerConfigRecord,
 	SessionActor,
 	TerminalInfoRecord,
-	TerminalSnapshotRecord,
+	TerminalOpenAckRecord,
 } from "@/platform/bridge/types";
 import { createDaemonRegistryStore } from "@/state/daemon-registry/daemonRegistry";
 import { createUiStateStore } from "@/state/ui/uiState";
@@ -38,9 +39,10 @@ function makeActor(
 				}),
 			}),
 			refreshTerminals,
-			activateTerminal: vi.fn(
+			openTerminal: vi.fn(
 				async () =>
 					({
+						stream_id: 1,
 						info: {
 							terminal: "t1",
 							cols: 80,
@@ -51,15 +53,16 @@ function makeActor(
 						},
 						start_seq: 0,
 						end_seq: 0,
-						render_prefix_b64: "",
-						snapshot_bytes_b64: "",
-					}) as TerminalSnapshotRecord,
+						render_bytes_b64: "",
+						has_more_history: false,
+					}) as TerminalOpenAckRecord,
 			),
 			readHistory: vi.fn(async () => ({
 				terminal_id: "t1",
 				start_seq: 0,
 				end_seq: 0,
 				bytes_b64: "",
+				has_more: false,
 			})),
 			createTerminal: vi.fn(
 				async (): Promise<TerminalInfoRecord | null> => null,
@@ -106,6 +109,7 @@ function makeTerminalRegistry(): TerminalSessionRegistry {
 		applyOutput: vi.fn(),
 		disconnect: vi.fn(),
 		removeTerminal: vi.fn(),
+		retryActive: vi.fn(),
 		setSelectedTerminal: vi.fn(),
 		dispose: vi.fn(),
 		mountActive: vi.fn(async () => undefined),
@@ -328,6 +332,84 @@ describe("ConnectionController", () => {
 			await vi.advanceTimersByTimeAsync(1000);
 			await Promise.resolve();
 			expect(refreshTerminals).toHaveBeenCalledTimes(3);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("pauses terminal polling while the active terminal is opening", async () => {
+		vi.useFakeTimers();
+		try {
+			const { actor, refreshTerminals } = makeActor([
+				{ kind: "Connecting" },
+				{
+					kind: "Connected",
+					server_label: "server-a",
+				},
+			]);
+			const services = makeServices(actor);
+			const daemonRegistry = createDaemonRegistryStore();
+			const uiState = createUiStateStore();
+			const workspaceState = createWorkspaceStore();
+			const terminalRegistry = makeTerminalRegistry();
+			terminalRegistry.activeRuntimeState = vi
+				.fn<() => TerminalRuntimeState | null>()
+				.mockReturnValueOnce({
+					phase: "opening",
+					error: null,
+				})
+				.mockReturnValueOnce({
+					phase: "opening",
+					error: null,
+				})
+				.mockReturnValue({
+					phase: "ready",
+					error: null,
+				});
+			daemonRegistry.hydratePersistedState({
+				version: 1,
+				daemons: [
+					{
+						id: "server-a",
+						label: "server-a",
+						kind: "direct",
+						endpointUrl: "ws://127.0.0.1:9999",
+						resumeTokenHex: null,
+						lastConnectedAt: null,
+					},
+				],
+				selectedDaemonId: "server-a",
+			});
+			uiState.getState().setSelectedServerId("server-a");
+
+			const controller = new ConnectionController({
+				services,
+				daemonRegistry,
+				uiState,
+				workspaceState,
+				onInlineError: vi.fn(),
+				onConnectionReset: vi.fn(),
+				onTerminalRemoved: vi.fn(),
+				terminalRegistry,
+			});
+
+			const server = daemonRegistry.getState().daemons[0];
+			expect(server).toBeDefined();
+			if (server == null) {
+				throw new Error("expected seeded daemon");
+			}
+
+			await controller.connectServer(server);
+			await Promise.resolve();
+			expect(refreshTerminals).toHaveBeenCalledTimes(0);
+
+			await vi.advanceTimersByTimeAsync(1000);
+			await Promise.resolve();
+			expect(refreshTerminals).toHaveBeenCalledTimes(0);
+
+			await vi.advanceTimersByTimeAsync(1000);
+			await Promise.resolve();
+			expect(refreshTerminals).toHaveBeenCalledTimes(1);
 		} finally {
 			vi.useRealTimers();
 		}

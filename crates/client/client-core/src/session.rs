@@ -21,8 +21,8 @@ use tracing::trace;
 use crate::events::ClientEvent;
 use crate::history::TerminalHistoryPage;
 use crate::identity::ClientIdentity;
+use crate::open_ack::TerminalOpenAck;
 use crate::relay::open_client_pair;
-use crate::snapshot::TerminalSnapshot;
 use crate::terminal::{TerminalCmd, TerminalHandle};
 use crate::{ClientError, ClientResult, Clock, KeyValueStore, Rng, Transport};
 
@@ -48,8 +48,9 @@ const HEARTBEAT_IDLE_MS: u64 = 10_000;
 const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
 
 type SharedReply<T> = Rc<RefCell<Option<oneshot::Sender<ClientResult<T>>>>>;
-type TerminalSnapshotReply = SharedReply<TerminalSnapshot>;
+type TerminalOpenAckReply = SharedReply<TerminalOpenAck>;
 type HistoryReply = SharedReply<TerminalHistoryPage>;
+type TerminalCreateReply = SharedReply<TerminalInfo>;
 type TerminalListReply = SharedReply<Vec<TerminalInfo>>;
 type ServerConfigReply = SharedReply<ServerConfig>;
 type UnitReply = SharedReply<()>;
@@ -91,6 +92,7 @@ where
     _transport: PhantomData<T>,
 }
 
+#[derive(Clone)]
 pub struct ClientSession {
     terminal: Rc<RefCell<Option<TerminalHandle>>>,
     session_cmd_tx: mpsc::Sender<SessionCommand>,
@@ -99,10 +101,13 @@ pub struct ClientSession {
 
 #[derive(Debug, Clone)]
 enum SessionCommand {
-    CreateTerminal(TerminalCreateParams),
-    ActivateTerminal {
+    CreateTerminal {
+        params: TerminalCreateParams,
+        reply: TerminalCreateReply,
+    },
+    OpenTerminal {
         terminal: TerminalId,
-        reply: TerminalSnapshotReply,
+        reply: TerminalOpenAckReply,
     },
     ListTerminals {
         reply: TerminalListReply,
@@ -196,26 +201,41 @@ impl ClientSession {
         self.terminal.borrow().clone()
     }
 
-    pub async fn create_terminal(&self, params: TerminalCreateParams) -> ClientResult<()> {
+    pub async fn create_terminal(
+        &self,
+        params: TerminalCreateParams,
+    ) -> ClientResult<TerminalInfo> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        trace!(terminal_create = true, "queue create terminal request");
         self.session_cmd_tx
             .clone()
-            .send(SessionCommand::CreateTerminal(params))
+            .send(SessionCommand::CreateTerminal {
+                params,
+                reply: Rc::new(RefCell::new(Some(reply_tx))),
+            })
             .await
-            .map_err(|_| ClientError::Closed)
+            .map_err(|_| ClientError::Closed)?;
+
+        let result = reply_rx.await.map_err(|_| ClientError::Closed)?;
+        trace!(terminal_create = true, "create terminal resolved");
+        result
     }
 
-    pub async fn activate_terminal(&self, terminal: TerminalId) -> ClientResult<TerminalSnapshot> {
+    pub async fn open_terminal(&self, terminal: TerminalId) -> ClientResult<TerminalOpenAck> {
         let (reply_tx, reply_rx) = oneshot::channel();
+        trace!(terminal = ?terminal, "queue open terminal request");
         self.session_cmd_tx
             .clone()
-            .send(SessionCommand::ActivateTerminal {
+            .send(SessionCommand::OpenTerminal {
                 terminal,
                 reply: Rc::new(RefCell::new(Some(reply_tx))),
             })
             .await
             .map_err(|_| ClientError::Closed)?;
 
-        reply_rx.await.map_err(|_| ClientError::Closed)?
+        let result = reply_rx.await.map_err(|_| ClientError::Closed)?;
+        trace!(terminal = ?terminal, "open terminal resolved");
+        result
     }
 
     pub async fn list_terminals(&self) -> ClientResult<Vec<TerminalInfo>> {
@@ -228,7 +248,8 @@ impl ClientSession {
             .await
             .map_err(|_| ClientError::Closed)?;
 
-        reply_rx.await.map_err(|_| ClientError::Closed)?
+        let result = reply_rx.await.map_err(|_| ClientError::Closed)?;
+        result
     }
 
     pub async fn read_history(
@@ -238,6 +259,7 @@ impl ClientSession {
         max_bytes: u32,
     ) -> ClientResult<TerminalHistoryPage> {
         let (reply_tx, reply_rx) = oneshot::channel();
+        trace!(terminal = ?terminal, before = ?before, max_bytes, "queue history request");
         self.session_cmd_tx
             .clone()
             .send(SessionCommand::ReadHistory {
@@ -249,7 +271,9 @@ impl ClientSession {
             .await
             .map_err(|_| ClientError::Closed)?;
 
-        reply_rx.await.map_err(|_| ClientError::Closed)?
+        let result = reply_rx.await.map_err(|_| ClientError::Closed)?;
+        trace!(terminal = ?terminal, before = ?before, max_bytes, "history request resolved");
+        result
     }
 
     pub async fn get_server_config(&self) -> ClientResult<ServerConfig> {
@@ -705,62 +729,75 @@ fn handle_response_frame(
             }
         }
         ResponseBody::CreateTerminal { info } => {
-            if !runtime.remove_pending_create(request_id) {
+            let Some(reply) = runtime.remove_pending_create(request_id) else {
                 return Err(ClientError::Proto(format!(
                     "terminal create response for unknown request {request_id}"
                 )));
-            }
+            };
             runtime.store_info(info.clone());
+            if let Some(reply) = reply.borrow_mut().take() {
+                let _ = reply.send(Ok(info.clone()));
+            }
             return Ok(Action::Emit(ClientEvent::TerminalCreated(info)));
         }
-        ResponseBody::AttachTerminal {
-            stream_id,
-            terminal_info,
-            baseline_start_seq,
-            baseline_end_seq,
-            render_prefix,
-        } => {
+        ResponseBody::OpenTerminal { ack } => {
+            let stream_id = ack.stream_id;
+            let terminal_info = ack.info.clone();
             if !matches!(
                 runtime.pending_requests.get(&request_id),
-                Some(RequestTxn::Attach { .. })
+                Some(RequestTxn::OpenTerminal { .. })
             ) {
                 return Err(ClientError::Proto(format!(
-                    "attach response for unknown request {request_id}"
+                    "open terminal response for unknown request {request_id}"
                 )));
             }
             runtime.store_info(terminal_info.clone());
-            runtime.set_active(&terminal_info, stream_id, Some(baseline_end_seq));
+            runtime.set_active(&terminal_info, stream_id, Some(ack.end_seq));
             *state.terminal.borrow_mut() = Some(TerminalHandle::new(
                 terminal_info.clone(),
                 stream_id,
-                Some(baseline_end_seq),
+                Some(ack.end_seq),
                 state.cmd_tx.clone(),
             ));
             runtime
-                .begin_generic_snapshot(
+                .complete_open_terminal(
                     request_id,
-                    &terminal_info,
                     stream_id,
-                    baseline_start_seq,
-                    baseline_end_seq,
-                    render_prefix,
+                    TerminalOpenAck::new(
+                        ack.stream_id,
+                        ack.info,
+                        ack.start_seq,
+                        ack.end_seq,
+                        Bytes::from(ack.render_bytes.into_vec()),
+                        ack.has_more_history,
+                    ),
                 )
                 .map_err(ClientError::Proto)?;
+            return Ok(Action::None);
         }
-        ResponseBody::ReadHistory {
-            stream_id,
-            terminal_id,
-            ..
-        } => {
-            if !matches!(
-                runtime.pending_requests.get(&request_id),
-                Some(RequestTxn::ReadHistory { .. })
-            ) {
+        ResponseBody::ReadHistory { page } => {
+            let Some(RequestTxn::ReadHistory { terminal_id, reply }) =
+                runtime.pending_requests.remove(&request_id)
+            else {
                 return Err(ClientError::Proto(format!(
                     "history response for unknown request {request_id}"
                 )));
+            };
+            if terminal_id != page.terminal_id {
+                return Err(ClientError::Proto(
+                    "history response terminal mismatch".to_owned(),
+                ));
             }
-            runtime.begin_generic_history(request_id, stream_id, terminal_id);
+            let reply = reply.borrow_mut().take();
+            if let Some(reply) = reply {
+                let _ = reply.send(Ok(TerminalHistoryPage::new(
+                    page.terminal_id,
+                    page.start_seq,
+                    page.end_seq,
+                    Bytes::from(page.bytes.into_vec()),
+                    page.has_more,
+                )));
+            }
         }
         ResponseBody::KillTerminal => {
             let Some(RequestTxn::KillTerminal { reply }) =
@@ -827,22 +864,8 @@ fn fail_request(
     };
 
     match txn {
-        RequestTxn::Attach {
-            reply, stream_id, ..
-        } => {
-            if let Some(stream_id) = stream_id {
-                runtime.active_streams.remove(&stream_id);
-            }
-            fail_shared_reply(&reply, error);
-        }
-        RequestTxn::ReadHistory {
-            reply, stream_id, ..
-        } => {
-            if let Some(stream_id) = stream_id {
-                runtime.active_streams.remove(&stream_id);
-            }
-            fail_shared_reply(&reply, error);
-        }
+        RequestTxn::OpenTerminal { reply, .. } => fail_shared_reply(&reply, error),
+        RequestTxn::ReadHistory { reply, .. } => fail_shared_reply(&reply, error),
         RequestTxn::ListTerminals { reply } => fail_shared_reply(&reply, error),
         RequestTxn::GetConfig { reply } | RequestTxn::SetConfig { reply } => {
             fail_shared_reply(&reply, error);
@@ -852,7 +875,8 @@ fn fail_request(
                 fail_shared_reply(&reply, error);
             }
         }
-        RequestTxn::CreateTerminal | RequestTxn::SendInputAck | RequestTxn::ResizeAck => {}
+        RequestTxn::CreateTerminal { reply } => fail_shared_reply(&reply, error),
+        RequestTxn::SendInputAck | RequestTxn::ResizeAck => {}
     }
 
     Ok(())
@@ -862,7 +886,7 @@ fn fail_all_pending_requests(runtime: &mut RuntimeState, error: &ClientError) {
     let pending = std::mem::take(&mut runtime.pending_requests);
     for txn in pending.into_values() {
         match txn {
-            RequestTxn::Attach { reply, .. } => fail_shared_reply(&reply, error),
+            RequestTxn::OpenTerminal { reply, .. } => fail_shared_reply(&reply, error),
             RequestTxn::ReadHistory { reply, .. } => fail_shared_reply(&reply, error),
             RequestTxn::ListTerminals { reply } => fail_shared_reply(&reply, error),
             RequestTxn::GetConfig { reply } | RequestTxn::SetConfig { reply } => {
@@ -873,7 +897,8 @@ fn fail_all_pending_requests(runtime: &mut RuntimeState, error: &ClientError) {
                     fail_shared_reply(&reply, error);
                 }
             }
-            RequestTxn::CreateTerminal | RequestTxn::SendInputAck | RequestTxn::ResizeAck => {}
+            RequestTxn::CreateTerminal { reply } => fail_shared_reply(&reply, error),
+            RequestTxn::SendInputAck | RequestTxn::ResizeAck => {}
         }
     }
 
@@ -887,21 +912,6 @@ fn handle_stream_data_frame(
     state: &ConnectionState<'_>,
 ) -> ClientResult<Action> {
     match runtime.active_streams.get(&stream.stream_id).cloned() {
-        Some(StreamState::Baseline { .. }) => {
-            let offset = stream
-                .offset
-                .ok_or_else(|| ClientError::Proto("baseline chunk missing offset".to_owned()))?;
-            runtime
-                .complete_generic_snapshot(
-                    stream.stream_id,
-                    stream.seq,
-                    offset,
-                    stream.bytes.as_ref(),
-                    stream.last,
-                )
-                .map_err(ClientError::Proto)?;
-            Ok(Action::None)
-        }
         Some(StreamState::Output {
             terminal_id,
             last_seq,
@@ -942,81 +952,6 @@ fn handle_stream_data_frame(
             } else {
                 Ok(Action::None)
             }
-        }
-        Some(StreamState::History {
-            request_id,
-            terminal_id,
-            expected_next_offset,
-            next_seq: expected_next_seq,
-        }) => {
-            let offset = stream
-                .offset
-                .ok_or_else(|| ClientError::Proto("history chunk missing offset".to_owned()))?;
-            if offset != expected_next_offset {
-                return Err(ClientError::Proto(
-                    "history chunk offset mismatch".to_owned(),
-                ));
-            }
-            if let Some(expected_next_seq) = expected_next_seq {
-                if expected_next_seq != stream.seq {
-                    return Err(ClientError::Proto("history chunk sequence gap".to_owned()));
-                }
-            }
-            let end_seq = StreamSeq(
-                stream
-                    .seq
-                    .0
-                    .saturating_add(u64::try_from(stream.bytes.len()).unwrap_or(u64::MAX)),
-            );
-            runtime
-                .push_history_chunk(
-                    request_id,
-                    terminal_id,
-                    stream.seq,
-                    end_seq,
-                    stream.bytes.as_ref(),
-                    stream.last,
-                )
-                .map_err(ClientError::Proto)?;
-            if !stream.last {
-                let next_offset =
-                    offset.saturating_add(u32::try_from(stream.bytes.len()).map_err(|_| {
-                        ClientError::Proto("history chunk offset overflow".to_owned())
-                    })?);
-                runtime.active_streams.insert(
-                    stream.stream_id,
-                    StreamState::History {
-                        request_id,
-                        terminal_id,
-                        expected_next_offset: next_offset,
-                        next_seq: Some(end_seq),
-                    },
-                );
-                return Ok(Action::None);
-            }
-            if stream.last {
-                let Some(RequestTxn::ReadHistory {
-                    terminal_id,
-                    start_seq,
-                    end_seq: completed_end_seq,
-                    bytes,
-                    reply,
-                    ..
-                }) = runtime.pending_requests.remove(&request_id)
-                else {
-                    return Err(ClientError::Proto("history assembly missing".to_owned()));
-                };
-                if let Some(reply) = reply.borrow_mut().take() {
-                    let _ = reply.send(Ok(TerminalHistoryPage::new(
-                        terminal_id,
-                        start_seq.unwrap_or(stream.seq),
-                        completed_end_seq.unwrap_or(end_seq),
-                        Bytes::from(bytes),
-                    )));
-                }
-                runtime.active_streams.remove(&stream.stream_id);
-            }
-            Ok(Action::None)
         }
         None => Err(ClientError::Proto(
             "stream data on unknown stream".to_owned(),
@@ -1152,32 +1087,32 @@ fn frame_for_session_command(
     next_request_id: &mut u32,
 ) -> Frame {
     match cmd {
-        SessionCommand::CreateTerminal(params) => {
+        SessionCommand::CreateTerminal { params, reply } => {
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
-            runtime.record_create(request_id);
+            runtime.record_create(request_id, reply);
             request_frame(request_id, RequestBody::CreateTerminal { params })
         }
-        SessionCommand::ActivateTerminal {
+        SessionCommand::OpenTerminal {
             terminal: target,
             reply,
         } => {
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
-            runtime.start_open(request_id, target, reply);
+            runtime.start_open_terminal(request_id, target, reply);
 
             if active_terminal.borrow().is_some() {
                 clear_active_terminal(active_terminal, runtime);
                 request_frame(
                     request_id,
-                    RequestBody::AttachTerminal {
+                    RequestBody::OpenTerminal {
                         terminal_id: target,
                     },
                 )
             } else {
                 request_frame(
                     request_id,
-                    RequestBody::AttachTerminal {
+                    RequestBody::OpenTerminal {
                         terminal_id: target,
                     },
                 )
@@ -1197,7 +1132,7 @@ fn frame_for_session_command(
         } => {
             let request_id = *next_request_id;
             *next_request_id = next_request_id.saturating_add(1);
-            runtime.begin_history_with_reply(request_id, terminal, reply);
+            runtime.record_history(request_id, terminal, reply);
             request_frame(
                 request_id,
                 RequestBody::ReadHistory {
@@ -1329,7 +1264,6 @@ struct RuntimeState {
     info_cache: HashMap<TerminalId, TerminalInfo>,
     pending_requests: HashMap<u32, RequestTxn>,
     active_streams: HashMap<StreamId, StreamState>,
-    active_attachment: Option<AttachedTerminalState>,
 }
 
 #[derive(Debug, Clone)]
@@ -1340,32 +1274,18 @@ struct ActiveTerminalState {
 }
 
 #[derive(Debug, Clone)]
-struct AttachedTerminalState {
-    stream: StreamId,
-    last_seq: Option<StreamSeq>,
-}
-
-#[derive(Debug, Clone)]
 enum RequestTxn {
-    Attach {
+    OpenTerminal {
         terminal_id: TerminalId,
-        stream_id: Option<StreamId>,
-        terminal_info: Option<TerminalInfo>,
-        baseline_start_seq: Option<StreamSeq>,
-        baseline_end_seq: Option<StreamSeq>,
-        render_prefix: Option<String>,
-        bytes: Vec<u8>,
-        reply: TerminalSnapshotReply,
+        reply: TerminalOpenAckReply,
     },
     ReadHistory {
         terminal_id: TerminalId,
-        stream_id: Option<StreamId>,
-        start_seq: Option<StreamSeq>,
-        end_seq: Option<StreamSeq>,
-        bytes: Vec<u8>,
         reply: HistoryReply,
     },
-    CreateTerminal,
+    CreateTerminal {
+        reply: TerminalCreateReply,
+    },
     ListTerminals {
         reply: TerminalListReply,
     },
@@ -1384,20 +1304,9 @@ enum RequestTxn {
 
 #[derive(Debug, Clone)]
 enum StreamState {
-    Baseline {
-        request_id: u32,
-        terminal_id: TerminalId,
-        expected_next_offset: u32,
-    },
     Output {
         terminal_id: TerminalId,
         last_seq: StreamSeq,
-    },
-    History {
-        request_id: u32,
-        terminal_id: TerminalId,
-        expected_next_offset: u32,
-        next_seq: Option<StreamSeq>,
     },
 }
 
@@ -1414,9 +1323,6 @@ impl RuntimeState {
         if let Some(active) = self.active.as_mut() {
             active.last_seq = Some(seq);
         }
-        if let Some(active_attachment) = self.active_attachment.as_mut() {
-            active_attachment.last_seq = Some(seq);
-        }
     }
 
     fn set_active(&mut self, info: &TerminalInfo, stream: StreamId, last_seq: Option<StreamSeq>) {
@@ -1429,8 +1335,13 @@ impl RuntimeState {
     }
 
     fn clear_active(&mut self) {
-        if let Some(active_attachment) = self.active_attachment.take() {
-            self.active_streams.remove(&active_attachment.stream);
+        if let Some(active_stream) = self.active.as_ref().map(|active| active.stream) {
+            if matches!(
+                self.active_streams.get(&active_stream),
+                Some(StreamState::Output { .. })
+            ) {
+                self.active_streams.remove(&active_stream);
+            }
         }
         self.active = None;
     }
@@ -1439,9 +1350,9 @@ impl RuntimeState {
         self.info_cache.insert(info.terminal, info);
     }
 
-    fn record_create(&mut self, request_id: u32) {
+    fn record_create(&mut self, request_id: u32, reply: TerminalCreateReply) {
         self.pending_requests
-            .insert(request_id, RequestTxn::CreateTerminal);
+            .insert(request_id, RequestTxn::CreateTerminal { reply });
     }
 
     fn record_list(&mut self, request_id: u32, reply: TerminalListReply) {
@@ -1464,11 +1375,11 @@ impl RuntimeState {
             .insert(request_id, RequestTxn::KillTerminal { reply: Some(reply) });
     }
 
-    fn remove_pending_create(&mut self, request_id: u32) -> bool {
-        matches!(
-            self.pending_requests.remove(&request_id),
-            Some(RequestTxn::CreateTerminal)
-        )
+    fn remove_pending_create(&mut self, request_id: u32) -> Option<TerminalCreateReply> {
+        match self.pending_requests.remove(&request_id) {
+            Some(RequestTxn::CreateTerminal { reply }) => Some(reply),
+            _ => None,
+        }
     }
 
     fn record_send_input_ack(&mut self, request_id: u32) {
@@ -1493,243 +1404,60 @@ impl RuntimeState {
         )
     }
 
-    fn start_open(
+    fn start_open_terminal(
         &mut self,
         request_id: u32,
         terminal_id: TerminalId,
-        reply: TerminalSnapshotReply,
+        reply: TerminalOpenAckReply,
     ) {
-        self.pending_requests.insert(
-            request_id,
-            RequestTxn::Attach {
-                terminal_id,
-                stream_id: None,
-                terminal_info: None,
-                baseline_start_seq: None,
-                baseline_end_seq: None,
-                render_prefix: None,
-                bytes: Vec::new(),
-                reply,
-            },
-        );
+        self.pending_requests
+            .insert(request_id, RequestTxn::OpenTerminal { terminal_id, reply });
     }
 
-    fn begin_generic_snapshot(
+    fn complete_open_terminal(
         &mut self,
         request_id: u32,
-        terminal_info: &TerminalInfo,
         stream_id: StreamId,
-        baseline_start_seq: StreamSeq,
-        baseline_end_seq: StreamSeq,
-        render_prefix: String,
+        ack: TerminalOpenAck,
     ) -> Result<(), String> {
-        let Some(RequestTxn::Attach {
-            terminal_id,
-            stream_id: txn_stream_id,
-            terminal_info: txn_terminal_info,
-            baseline_start_seq: txn_start_seq,
-            baseline_end_seq: txn_end_seq,
-            render_prefix: txn_render_prefix,
-            ..
-        }) = self.pending_requests.get_mut(&request_id)
+        let Some(RequestTxn::OpenTerminal { terminal_id, reply }) =
+            self.pending_requests.remove(&request_id)
         else {
-            return Err(format!("attach response for unknown request {request_id}"));
+            return Err(format!(
+                "open terminal response for unknown request {request_id}"
+            ));
         };
 
-        if *terminal_id != terminal_info.terminal {
-            return Err("attach response terminal mismatch".to_owned());
+        if terminal_id != ack.info.terminal {
+            return Err("open terminal response terminal mismatch".to_owned());
         }
 
-        *txn_stream_id = Some(stream_id);
-        *txn_terminal_info = Some(terminal_info.clone());
-        *txn_start_seq = Some(baseline_start_seq);
-        *txn_end_seq = Some(baseline_end_seq);
-        *txn_render_prefix = Some(render_prefix);
         self.active_streams.insert(
             stream_id,
-            StreamState::Baseline {
-                request_id,
-                terminal_id: terminal_info.terminal,
-                expected_next_offset: 0,
-            },
-        );
-        Ok(())
-    }
-
-    fn complete_generic_snapshot(
-        &mut self,
-        stream: StreamId,
-        seq: StreamSeq,
-        offset: u32,
-        bytes: &[u8],
-        last: bool,
-    ) -> Result<(), String> {
-        let (request_id, terminal_id, expected_next_offset) = match self.active_streams.get(&stream)
-        {
-            Some(StreamState::Baseline {
-                request_id,
-                terminal_id,
-                expected_next_offset,
-            }) => (*request_id, *terminal_id, *expected_next_offset),
-            Some(_) => return Err("baseline chunk arrived on non-baseline stream".to_owned()),
-            None => return Err("baseline chunk arrived for unknown stream".to_owned()),
-        };
-        if offset != expected_next_offset {
-            return Err("snapshot chunk offset mismatch".to_owned());
-        }
-        let Some(RequestTxn::Attach {
-            terminal_info,
-            baseline_start_seq,
-            baseline_end_seq,
-            render_prefix,
-            bytes: assembled_bytes,
-            reply,
-            ..
-        }) = self.pending_requests.get_mut(&request_id)
-        else {
-            return Err("snapshot chunk arrived without pending attach".to_owned());
-        };
-        let info = terminal_info
-            .clone()
-            .ok_or_else(|| "snapshot chunk missing terminal info".to_owned())?;
-        if info.terminal != terminal_id {
-            return Err("snapshot chunk terminal mismatch".to_owned());
-        }
-        let end_seq =
-            baseline_end_seq.ok_or_else(|| "snapshot chunk missing end seq".to_owned())?;
-        if end_seq != seq {
-            return Err("snapshot chunk sequence mismatch".to_owned());
-        }
-        assembled_bytes.extend_from_slice(bytes);
-        if !last {
-            let next_offset = offset.saturating_add(
-                u32::try_from(bytes.len()).map_err(|_| "snapshot chunk offset overflow")?,
-            );
-            self.active_streams.insert(
-                stream,
-                StreamState::Baseline {
-                    request_id,
-                    terminal_id,
-                    expected_next_offset: next_offset,
-                },
-            );
-            return Ok(());
-        }
-
-        let start_seq =
-            baseline_start_seq.ok_or_else(|| "snapshot chunk missing start seq".to_owned())?;
-        let render_prefix = render_prefix
-            .clone()
-            .ok_or_else(|| "snapshot chunk missing render prefix".to_owned())?;
-        let bytes = Bytes::from(assembled_bytes.clone());
-        let reply = reply.clone();
-        self.pending_requests.remove(&request_id);
-        self.active_streams.insert(
-            stream,
             StreamState::Output {
-                terminal_id,
-                last_seq: end_seq,
+                terminal_id: ack.info.terminal,
+                last_seq: ack.end_seq,
             },
         );
-        self.active_attachment = Some(AttachedTerminalState {
-            stream,
-            last_seq: Some(end_seq),
-        });
         if let Some(active) = self.active.as_mut() {
-            if active.stream == stream {
-                active.last_seq = Some(end_seq);
+            if active.stream == stream_id {
+                active.last_seq = Some(ack.end_seq);
             }
         }
         if let Some(reply) = reply.borrow_mut().take() {
-            let _ = reply.send(Ok(TerminalSnapshot::new(
-                info,
-                start_seq,
-                end_seq,
-                bytes,
-                render_prefix,
-            )));
+            let _ = reply.send(Ok(ack));
         }
         Ok(())
     }
 
-    fn begin_history_with_reply(
-        &mut self,
-        request_id: u32,
-        terminal: TerminalId,
-        reply: HistoryReply,
-    ) {
+    fn record_history(&mut self, request_id: u32, terminal: TerminalId, reply: HistoryReply) {
         self.pending_requests.insert(
             request_id,
             RequestTxn::ReadHistory {
                 terminal_id: terminal,
-                stream_id: None,
-                start_seq: None,
-                end_seq: None,
-                bytes: Vec::new(),
                 reply,
             },
         );
-    }
-
-    fn begin_generic_history(&mut self, request_id: u32, stream: StreamId, terminal: TerminalId) {
-        if let Some(RequestTxn::ReadHistory {
-            terminal_id,
-            stream_id,
-            ..
-        }) = self.pending_requests.get_mut(&request_id)
-        {
-            *terminal_id = terminal;
-            *stream_id = Some(stream);
-        }
-        self.active_streams.insert(
-            stream,
-            StreamState::History {
-                request_id,
-                terminal_id: terminal,
-                expected_next_offset: 0,
-                next_seq: None,
-            },
-        );
-    }
-
-    fn push_history_chunk(
-        &mut self,
-        request_id: u32,
-        terminal: TerminalId,
-        start_seq: StreamSeq,
-        end_seq: StreamSeq,
-        bytes: &[u8],
-        _last: bool,
-    ) -> Result<(), String> {
-        let Some(RequestTxn::ReadHistory {
-            terminal_id,
-            start_seq: history_start_seq,
-            bytes: assembled_bytes,
-            end_seq: history_end_seq,
-            ..
-        }) = self.pending_requests.get_mut(&request_id)
-        else {
-            return Err("history chunk arrived without pending request".to_owned());
-        };
-        if *terminal_id != terminal {
-            return Err("history chunk terminal mismatch".to_owned());
-        }
-        if end_seq.0.saturating_sub(start_seq.0) != bytes.len() as u64 {
-            return Err("history chunk length mismatch".to_owned());
-        }
-        if let Some(expected_next_seq) = *history_end_seq {
-            if expected_next_seq != start_seq {
-                return Err("history chunk sequence gap".to_owned());
-            }
-        }
-
-        assembled_bytes.extend_from_slice(bytes);
-        if history_start_seq.is_none() {
-            *history_start_seq = Some(start_seq);
-        }
-        *history_end_seq = Some(end_seq);
-
-        Ok(())
     }
 }
 
@@ -1777,12 +1505,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn generic_attach_multi_chunk_baseline_resolves_snapshot() {
+    async fn generic_attach_resolves_empty_snapshot_and_sets_active_stream() {
         let mut runtime = RuntimeState::default();
         let terminal = TerminalId::new();
         let info = terminal_info(terminal);
         let (reply_tx, reply_rx) = oneshot::channel();
-        runtime.start_open(1, terminal, Rc::new(RefCell::new(Some(reply_tx))));
+        runtime.start_open_terminal(1, terminal, Rc::new(RefCell::new(Some(reply_tx))));
 
         let (cmd_tx, _cmd_rx) = mpsc::channel(1);
         let terminal_handle = Rc::new(RefCell::new(None));
@@ -1797,12 +1525,15 @@ mod tests {
         let action = handle_response_frame(
             ResponseFrame {
                 id: RequestId(1),
-                result: Ok(ResponseBody::AttachTerminal {
-                    stream_id: StreamId(9),
-                    terminal_info: info.clone(),
-                    baseline_start_seq: StreamSeq(10),
-                    baseline_end_seq: StreamSeq(18),
-                    render_prefix: "\x1b[0m".to_owned(),
+                result: Ok(ResponseBody::OpenTerminal {
+                    ack: cli_pocket_proto::OpenTerminalAck {
+                        stream_id: StreamId(9),
+                        info: info.clone(),
+                        start_seq: StreamSeq(10),
+                        end_seq: StreamSeq(10),
+                        render_bytes: Vec::new().into(),
+                        has_more_history: true,
+                    },
                 }),
             },
             &mut runtime,
@@ -1811,55 +1542,84 @@ mod tests {
         .expect("attach response handled");
         assert!(matches!(action, Action::None));
 
-        handle_stream_data_frame(
+        let ack = reply_rx
+            .await
+            .expect("reply sender should resolve")
+            .expect("attach should succeed");
+        assert_eq!(ack.info, info);
+        assert_eq!(ack.start_seq, StreamSeq(10));
+        assert_eq!(ack.end_seq, StreamSeq(10));
+        assert_eq!(ack.stream_id, StreamId(9));
+        assert_eq!(ack.render_bytes, Bytes::new());
+        assert!(ack.has_more_history);
+        assert!(matches!(
+            runtime.active_streams.get(&StreamId(9)),
+            Some(StreamState::Output {
+                terminal_id,
+                last_seq,
+            }) if *terminal_id == info.terminal && *last_seq == StreamSeq(10)
+        ));
+        assert_eq!(runtime.active_stream(), Some(StreamId(9)));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn generic_output_on_active_stream_is_emitted() {
+        let mut runtime = RuntimeState::default();
+        let terminal = TerminalId::new();
+        runtime.active_streams.insert(
+            StreamId(9),
+            StreamState::Output {
+                terminal_id: terminal,
+                last_seq: StreamSeq(5),
+            },
+        );
+        runtime.set_active(&terminal_info(terminal), StreamId(9), Some(StreamSeq(5)));
+
+        let terminal_handle = Rc::new(RefCell::new(Some(TerminalHandle::new(
+            terminal_info(terminal),
+            StreamId(9),
+            Some(StreamSeq(5)),
+            mpsc::channel(1).0,
+        ))));
+        let (cmd_tx, _cmd_rx) = mpsc::channel(1);
+        let mut reached_connected = true;
+        let state = ConnectionState {
+            events_tx: mpsc::channel(1).0,
+            cmd_tx: &cmd_tx,
+            terminal: &terminal_handle,
+            reached_connected: &mut reached_connected,
+        };
+
+        let action = handle_stream_data_frame(
             StreamDataFrame {
                 stream_id: StreamId(9),
-                seq: StreamSeq(18),
-                offset: Some(0),
-                bytes: b"abcd".to_vec().into(),
+                seq: StreamSeq(8),
+                offset: None,
+                bytes: b"live".to_vec().into(),
                 last: false,
             },
             &mut runtime,
             &state,
         )
-        .expect("first baseline chunk handled");
-        handle_stream_data_frame(
-            StreamDataFrame {
-                stream_id: StreamId(9),
-                seq: StreamSeq(18),
-                offset: Some(4),
-                bytes: b"efgh".to_vec().into(),
-                last: true,
-            },
-            &mut runtime,
-            &state,
-        )
-        .expect("final baseline chunk handled");
-
-        let snapshot = reply_rx
-            .await
-            .expect("reply sender should resolve")
-            .expect("attach should succeed");
-        assert_eq!(snapshot.info, info);
-        assert_eq!(snapshot.start_seq, StreamSeq(10));
-        assert_eq!(snapshot.end_seq, StreamSeq(18));
-        assert_eq!(snapshot.bytes, Bytes::from_static(b"abcdefgh"));
+        .expect("active output should emit");
         assert!(matches!(
-            runtime.active_streams.get(&StreamId(9)),
-            Some(StreamState::Output { terminal_id, .. }) if *terminal_id == info.terminal
+            action,
+            Action::Emit(ClientEvent::TerminalOutput {
+                terminal_id,
+                stream_seq: StreamSeq(8),
+                ref bytes,
+            }) if terminal_id == terminal && bytes.as_ref() == b"live"
         ));
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn generic_attach_empty_baseline_resolves_snapshot() {
+    async fn generic_history_multi_chunk_resolves_page() {
         let mut runtime = RuntimeState::default();
         let terminal = TerminalId::new();
-        let info = terminal_info(terminal);
         let (reply_tx, reply_rx) = oneshot::channel();
-        runtime.start_open(1, terminal, Rc::new(RefCell::new(Some(reply_tx))));
-
-        let (cmd_tx, _cmd_rx) = mpsc::channel(1);
+        runtime.record_history(7, terminal, Rc::new(RefCell::new(Some(reply_tx))));
         let terminal_handle = Rc::new(RefCell::new(None));
+        let (cmd_tx, _cmd_rx) = mpsc::channel(1);
         let mut reached_connected = true;
         let state = ConnectionState {
             events_tx: mpsc::channel(1).0,
@@ -1870,84 +1630,21 @@ mod tests {
 
         handle_response_frame(
             ResponseFrame {
-                id: RequestId(1),
-                result: Ok(ResponseBody::AttachTerminal {
-                    stream_id: StreamId(9),
-                    terminal_info: info.clone(),
-                    baseline_start_seq: StreamSeq(10),
-                    baseline_end_seq: StreamSeq(10),
-                    render_prefix: String::new(),
+                id: RequestId(7),
+                result: Ok(ResponseBody::ReadHistory {
+                    page: cli_pocket_proto::HistoryPage {
+                        terminal_id: terminal,
+                        start_seq: StreamSeq(100),
+                        end_seq: StreamSeq(108),
+                        bytes: b"old text".to_vec().into(),
+                        has_more: false,
+                    },
                 }),
             },
             &mut runtime,
             &state,
         )
-        .expect("attach response handled");
-
-        handle_stream_data_frame(
-            StreamDataFrame {
-                stream_id: StreamId(9),
-                seq: StreamSeq(10),
-                offset: Some(0),
-                bytes: Vec::<u8>::new().into(),
-                last: true,
-            },
-            &mut runtime,
-            &state,
-        )
-        .expect("empty baseline handled");
-
-        let snapshot = reply_rx
-            .await
-            .expect("reply sender should resolve")
-            .expect("attach should succeed");
-        assert_eq!(snapshot.info, info);
-        assert_eq!(snapshot.start_seq, StreamSeq(10));
-        assert_eq!(snapshot.end_seq, StreamSeq(10));
-        assert_eq!(snapshot.bytes, Bytes::new());
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn generic_history_multi_chunk_resolves_page() {
-        let mut runtime = RuntimeState::default();
-        let terminal = TerminalId::new();
-        let (reply_tx, reply_rx) = oneshot::channel();
-        runtime.begin_history_with_reply(7, terminal, Rc::new(RefCell::new(Some(reply_tx))));
-        let terminal_handle = Rc::new(RefCell::new(None));
-        let (cmd_tx, _cmd_rx) = mpsc::channel(1);
-        let mut reached_connected = true;
-        let state = ConnectionState {
-            events_tx: mpsc::channel(1).0,
-            cmd_tx: &cmd_tx,
-            terminal: &terminal_handle,
-            reached_connected: &mut reached_connected,
-        };
-
-        runtime.begin_generic_history(7, StreamId(44), terminal);
-        handle_stream_data_frame(
-            StreamDataFrame {
-                stream_id: StreamId(44),
-                seq: StreamSeq(100),
-                offset: Some(0),
-                bytes: b"old ".to_vec().into(),
-                last: false,
-            },
-            &mut runtime,
-            &state,
-        )
-        .expect("first history chunk handled");
-        handle_stream_data_frame(
-            StreamDataFrame {
-                stream_id: StreamId(44),
-                seq: StreamSeq(104),
-                offset: Some(4),
-                bytes: b"text".to_vec().into(),
-                last: true,
-            },
-            &mut runtime,
-            &state,
-        )
-        .expect("final history chunk handled");
+        .expect("history response handled");
 
         let page = reply_rx
             .await
@@ -1957,7 +1654,7 @@ mod tests {
         assert_eq!(page.start_seq, StreamSeq(100));
         assert_eq!(page.end_seq, StreamSeq(108));
         assert_eq!(page.bytes, Bytes::from_static(b"old text"));
-        assert!(!runtime.active_streams.contains_key(&StreamId(44)));
+        assert!(!page.has_more);
     }
 
     #[test]
@@ -1965,7 +1662,7 @@ mod tests {
         let mut runtime = RuntimeState::default();
         let terminal = TerminalId::new();
         let (reply_tx, mut reply_rx) = oneshot::channel();
-        runtime.start_open(5, terminal, Rc::new(RefCell::new(Some(reply_tx))));
+        runtime.start_open_terminal(5, terminal, Rc::new(RefCell::new(Some(reply_tx))));
         let terminal_handle = Rc::new(RefCell::new(None));
         let (cmd_tx, _cmd_rx) = mpsc::channel(1);
         let mut reached_connected = true;
@@ -2001,7 +1698,7 @@ mod tests {
         let mut runtime = RuntimeState::default();
         let terminal = TerminalId::new();
         let (reply_tx, mut reply_rx) = oneshot::channel();
-        runtime.begin_history_with_reply(5, terminal, Rc::new(RefCell::new(Some(reply_tx))));
+        runtime.record_history(5, terminal, Rc::new(RefCell::new(Some(reply_tx))));
         let terminal_handle = Rc::new(RefCell::new(None));
         let (cmd_tx, _cmd_rx) = mpsc::channel(1);
         let mut reached_connected = true;
@@ -2061,52 +1758,8 @@ mod tests {
         };
 
         assert!(
-            matches!(error, ClientError::Proto(message) if message == "output on unknown stream")
+            matches!(error, ClientError::Proto(message) if message == "stream data on unknown stream")
         );
-    }
-
-    #[test]
-    fn generic_baseline_chunk_on_output_stream_is_protocol_error() {
-        let mut runtime = RuntimeState::default();
-        let terminal = TerminalId::new();
-        runtime.active_streams.insert(
-            StreamId(9),
-            StreamState::Output {
-                terminal_id: terminal,
-                last_seq: StreamSeq(5),
-            },
-        );
-        runtime.set_active(&terminal_info(terminal), StreamId(9), Some(StreamSeq(5)));
-
-        let terminal_handle = Rc::new(RefCell::new(None));
-        let (cmd_tx, _cmd_rx) = mpsc::channel(1);
-        let mut reached_connected = true;
-        let state = ConnectionState {
-            events_tx: mpsc::channel(1).0,
-            cmd_tx: &cmd_tx,
-            terminal: &terminal_handle,
-            reached_connected: &mut reached_connected,
-        };
-
-        let result = handle_stream_data_frame(
-            StreamDataFrame {
-                stream_id: StreamId(9),
-                seq: StreamSeq(5),
-                offset: Some(0),
-                bytes: b"x".to_vec().into(),
-                last: true,
-            },
-            &mut runtime,
-            &state,
-        );
-        let Err(error) = result else {
-            panic!("baseline chunk on output stream should fail");
-        };
-
-        assert!(matches!(
-            error,
-            ClientError::Proto(message) if message == "baseline chunk arrived on non-baseline stream"
-        ));
     }
 
     #[test]
@@ -2115,8 +1768,8 @@ mod tests {
         let terminal = TerminalId::new();
         let (open_tx, mut open_rx) = oneshot::channel();
         let (history_tx, mut history_rx) = oneshot::channel();
-        runtime.start_open(1, terminal, Rc::new(RefCell::new(Some(open_tx))));
-        runtime.begin_history_with_reply(2, terminal, Rc::new(RefCell::new(Some(history_tx))));
+        runtime.start_open_terminal(1, terminal, Rc::new(RefCell::new(Some(open_tx))));
+        runtime.record_history(2, terminal, Rc::new(RefCell::new(Some(history_tx))));
 
         fail_all_pending_requests(&mut runtime, &ClientError::Closed);
 

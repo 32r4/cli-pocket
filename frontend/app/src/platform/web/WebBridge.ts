@@ -13,7 +13,7 @@ import type {
 	SessionActor,
 	TerminalHistoryPageRecord,
 	TerminalInfoRecord,
-	TerminalSnapshotRecord,
+	TerminalOpenAckRecord,
 } from "../bridge/types";
 
 const STORAGE_KEY = "cli-pocket/daemon-registry/v1";
@@ -94,10 +94,10 @@ class WebSessionActor implements SessionActor {
 		this.queue.push(terminalListEvent(terminals));
 	}
 
-	async activateTerminal(terminalId: string): Promise<TerminalSnapshotRecord> {
-		return (await this.client.activate_terminal(
+	async openTerminal(terminalId: string): Promise<TerminalOpenAckRecord> {
+		return (await this.client.open_terminal(
 			terminalId,
-		)) as TerminalSnapshotRecord;
+		)) as TerminalOpenAckRecord;
 	}
 
 	async readHistory(

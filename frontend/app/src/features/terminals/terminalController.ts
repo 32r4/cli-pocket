@@ -253,7 +253,7 @@ export class TerminalController {
 		this.flushPendingState();
 	}
 
-	renderSnapshotWithRange(
+	renderSnapshot(
 		terminalId: string,
 		snapshot: string,
 		startSeq: number | null,

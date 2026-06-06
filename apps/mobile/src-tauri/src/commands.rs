@@ -29,11 +29,11 @@ pub async fn cli_pocket_create_terminal(
 }
 
 #[tauri::command]
-pub async fn cli_pocket_activate_terminal(
+pub async fn cli_pocket_open_terminal(
     state: State<'_, AppState>,
     terminal_id: String,
 ) -> Result<serde_json::Value, String> {
-    shared_commands::activate_terminal(state.session(), terminal_id).await
+    shared_commands::open_terminal(state.session(), terminal_id).await
 }
 
 #[tauri::command]

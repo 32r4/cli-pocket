@@ -9,7 +9,7 @@ declare module "cli-pocket-client-core-wasm" {
 		create_terminal(paramsJson: string): Promise<void>;
 		get_server_config(): Promise<unknown>;
 		list_terminals(): Promise<unknown>;
-		activate_terminal(terminalId: string): Promise<unknown>;
+		open_terminal(terminalId: string): Promise<unknown>;
 		read_history(
 			terminalId: string,
 			before: number | null,

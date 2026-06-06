@@ -10,7 +10,7 @@ describe("TerminalSessionRegistry", () => {
 			controller: {
 				setActiveTerminal: vi.fn(),
 				appendActiveOutput: vi.fn(),
-				renderSnapshotWithRange: vi.fn(),
+				renderSnapshot: vi.fn(),
 				prependHistoryPage: vi.fn(async () => undefined),
 				mount: vi.fn(async () => undefined),
 				unmount: vi.fn(),
@@ -42,7 +42,7 @@ describe("TerminalSessionRegistry", () => {
 			controller: {
 				setActiveTerminal: vi.fn(),
 				appendActiveOutput: vi.fn(),
-				renderSnapshotWithRange: vi.fn(),
+				renderSnapshot: vi.fn(),
 				prependHistoryPage: vi.fn(async () => undefined),
 				mount: vi.fn(async () => undefined),
 				unmount: vi.fn(),
@@ -69,13 +69,13 @@ describe("TerminalSessionRegistry", () => {
 		resizeSpy.mockRestore();
 	});
 
-	it("re-attaches when explicitly selecting the same terminal again", () => {
+	it("does not re-attach when selecting the same terminal again", () => {
 		const workspaceState = createWorkspaceStore();
 		const registry = new TerminalSessionRegistry({
 			controller: {
 				setActiveTerminal: vi.fn(),
 				appendActiveOutput: vi.fn(),
-				renderSnapshotWithRange: vi.fn(),
+				renderSnapshot: vi.fn(),
 				prependHistoryPage: vi.fn(async () => undefined),
 				mount: vi.fn(async () => undefined),
 				unmount: vi.fn(),
@@ -92,6 +92,35 @@ describe("TerminalSessionRegistry", () => {
 		registry.setSelectedTerminal("t1");
 		registry.connect(1);
 		registry.setSelectedTerminal("t1");
+
+		expect(actorSpy).toHaveBeenCalledTimes(1);
+
+		actorSpy.mockRestore();
+	});
+
+	it("re-attaches when retrying the active terminal", () => {
+		const workspaceState = createWorkspaceStore();
+		const registry = new TerminalSessionRegistry({
+			controller: {
+				setActiveTerminal: vi.fn(),
+				appendActiveOutput: vi.fn(),
+				renderSnapshot: vi.fn(),
+				prependHistoryPage: vi.fn(async () => undefined),
+				mount: vi.fn(async () => undefined),
+				unmount: vi.fn(),
+			} as never,
+			workspaceState,
+			session: () => null,
+			onInlineError: vi.fn(),
+		});
+		const actorSpy = vi.spyOn(
+			TerminalSessionActor.prototype,
+			"activateTerminal",
+		);
+
+		registry.setSelectedTerminal("t1");
+		registry.connect(1);
+		registry.retryActive();
 
 		expect(actorSpy).toHaveBeenCalledTimes(2);
 

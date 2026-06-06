@@ -144,6 +144,12 @@ impl Terminal {
     }
 
     #[must_use]
+    pub fn snapshot_with_max_bytes(&self, max_bytes: usize) -> Snapshot {
+        let ring = lock_or_recover(&self.inner.ring, "ring");
+        ring.snapshot_with_max_bytes(max_bytes)
+    }
+
+    #[must_use]
     pub fn since(&self, seq: StreamSeq) -> Option<DeltaSlice> {
         let ring = lock_or_recover(&self.inner.ring, "ring");
         ring.since(seq)

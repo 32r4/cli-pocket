@@ -508,6 +508,13 @@ export class ConnectionController {
 		if (!this.isCurrent(run) || session == null) {
 			return;
 		}
+		const activeRuntimeState = this.deps.terminalRegistry.activeRuntimeState();
+		if (
+			activeRuntimeState?.phase === "opening" ||
+			activeRuntimeState?.phase === "loading_history"
+		) {
+			return;
+		}
 
 		try {
 			await session.refreshTerminals();

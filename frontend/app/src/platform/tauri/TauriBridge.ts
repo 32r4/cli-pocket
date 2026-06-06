@@ -12,7 +12,7 @@ import type {
 	SessionActor,
 	TerminalHistoryPageRecord,
 	TerminalInfoRecord,
-	TerminalSnapshotRecord,
+	TerminalOpenAckRecord,
 } from "../bridge/types";
 
 interface TauriBridgeOptions {
@@ -77,13 +77,10 @@ class TauriSessionActor implements SessionActor {
 		this.eventSource.push(terminalListEvent(terminals));
 	}
 
-	async activateTerminal(terminalId: string) {
-		return await invoke<TerminalSnapshotRecord>(
-			"cli_pocket_activate_terminal",
-			{
-				terminalId,
-			},
-		);
+	async openTerminal(terminalId: string) {
+		return await invoke<TerminalOpenAckRecord>("cli_pocket_open_terminal", {
+			terminalId,
+		});
 	}
 
 	async readHistory(

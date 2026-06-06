@@ -47,7 +47,7 @@ pub enum RequestBody {
     CreateTerminal {
         params: TerminalCreateParams,
     },
-    AttachTerminal {
+    OpenTerminal {
         terminal_id: TerminalId,
     },
     ReadHistory {
@@ -81,34 +81,34 @@ pub struct ResponseFrame {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResponseBody {
-    ListTerminals {
-        terminals: Vec<TerminalInfo>,
-    },
-    CreateTerminal {
-        info: TerminalInfo,
-    },
-    AttachTerminal {
-        stream_id: StreamId,
-        terminal_info: TerminalInfo,
-        baseline_start_seq: StreamSeq,
-        baseline_end_seq: StreamSeq,
-        render_prefix: String,
-    },
-    ReadHistory {
-        stream_id: StreamId,
-        terminal_id: TerminalId,
-        start_seq: StreamSeq,
-        end_seq: StreamSeq,
-    },
+    ListTerminals { terminals: Vec<TerminalInfo> },
+    CreateTerminal { info: TerminalInfo },
+    OpenTerminal { ack: OpenTerminalAck },
+    ReadHistory { page: HistoryPage },
     KillTerminal,
-    GetServerConfig {
-        config: ServerConfig,
-    },
-    SetServerConfig {
-        config: ServerConfig,
-    },
+    GetServerConfig { config: ServerConfig },
+    SetServerConfig { config: ServerConfig },
     SendInput,
     ResizeTerminal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenTerminalAck {
+    pub stream_id: StreamId,
+    pub info: TerminalInfo,
+    pub start_seq: StreamSeq,
+    pub end_seq: StreamSeq,
+    pub render_bytes: ByteBuf,
+    pub has_more_history: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryPage {
+    pub terminal_id: TerminalId,
+    pub start_seq: StreamSeq,
+    pub end_seq: StreamSeq,
+    pub bytes: ByteBuf,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

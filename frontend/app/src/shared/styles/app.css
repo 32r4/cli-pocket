@@ -659,9 +659,20 @@ strong {
 
 .terminal-stage {
 	display: flex;
+	position: relative;
 	min-height: 0;
 	min-width: 0;
 	background: var(--surface-terminal-stage);
+}
+
+.terminal-stage__overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	display: flex;
+	min-height: 0;
+	min-width: 0;
+	background: color-mix(in srgb, var(--surface-terminal) 82%, transparent);
 }
 
 .xterm-server,

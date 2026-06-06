@@ -11,10 +11,10 @@ use cli_pocket_proto::hello::HelloOk;
 use cli_pocket_proto::{
     ByeReason, Hello, KillSignal, ProtocolError, RequestBody, RequestFrame, RequestId,
     ResponseBody, ResponseError, ResponseFrame, ServerConfig, SessionId, StreamDataFrame, StreamId,
-    StreamSeq, TerminalBaseline, TerminalId, PROTOCOL_VERSION,
+    StreamSeq, TerminalId, PROTOCOL_VERSION,
 };
 use cli_pocket_pty::output::{OutputChunk, OutputRecv};
-use cli_pocket_pty::Terminal;
+use cli_pocket_pty::{OutputStream, Terminal};
 use cli_pocket_transport::Transport;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
@@ -24,9 +24,8 @@ use crate::client_db::{ClientDb, ClientRecord};
 use crate::handshake::{anonymous_responder_handshake, responder_handshake, AcceptedHandshake};
 use crate::session::SessionManager;
 
-const SNAPSHOT_CHUNK_BYTES: usize = 16 * 1024;
 const OUTPUT_CHUNK_BYTES: usize = 16 * 1024;
-const HISTORY_CHUNK_BYTES: usize = 16 * 1024;
+const OPEN_TERMINAL_MAX_BYTES: usize = 48 * 1024;
 
 pub struct ConnectionDeps {
     pub session_mgr: Arc<SessionManager>,
@@ -138,16 +137,19 @@ async fn run_connection_post_handshake<T: Transport>(
                 }
                 continue;
             }
+            frame = chan.recv_frame() => frame?,
             maybe_output = output_rx.recv() => {
                 let Some(output) = maybe_output else {
                     continue;
                 };
                 if let Some(attached) = streams.map.get(&output.stream) {
-                    send_live_output(&mut chan, output.stream, &output.chunk, attached.terminal_id).await?;
+                    if attached.terminal_id == output.terminal_id {
+                        chan.send_frame(&Frame::body(FrameBody::StreamData(output.frame)))
+                            .await?;
+                    }
                 }
                 continue;
             }
-            frame = chan.recv_frame() => frame?,
         };
 
         match frame.body {
@@ -214,12 +216,13 @@ impl<T: Transport> EncryptedChannel<T> {
 struct AttachedStream {
     terminal: Arc<Terminal>,
     terminal_id: TerminalId,
-    _writer: tokio::task::JoinHandle<()>,
+    writer: tokio::task::JoinHandle<()>,
 }
 
 struct OutboundOutput {
     stream: StreamId,
-    chunk: OutputChunk,
+    terminal_id: TerminalId,
+    frame: StreamDataFrame,
 }
 
 struct StreamContext {
@@ -260,8 +263,8 @@ async fn handle_request(
                 }
             }
         }
-        RequestBody::AttachTerminal { terminal_id } => {
-            handle_attach_request(chan, deps, request.id, terminal_id, streams).await
+        RequestBody::OpenTerminal { terminal_id } => {
+            handle_open_terminal_request(chan, deps, request.id, terminal_id, streams).await
         }
         RequestBody::ReadHistory {
             terminal_id,
@@ -356,25 +359,37 @@ async fn send_error_response(
     .await
 }
 
-async fn handle_attach_request(
+async fn handle_open_terminal_request(
     chan: &mut EncryptedChannel<impl Transport>,
     deps: &ConnectionDeps,
     request_id: RequestId,
     terminal_id: TerminalId,
     streams: &mut StreamContext,
 ) -> crate::DaemonResult<()> {
+    info!(terminal_id = ?terminal_id, request_id = ?request_id, "open terminal requested");
     let Some(terminal) = deps.session_mgr.attach(&terminal_id) else {
         send_error_response(chan, request_id, ProtocolError::UnknownTerminal).await?;
         return Ok(());
     };
 
-    streams.map.clear();
+    clear_attached_streams(streams);
 
     let stream_id = StreamId(streams.next_local_stream_id);
     streams.next_local_stream_id = streams.next_local_stream_id.saturating_add(1);
 
-    let snapshot = terminal.snapshot();
-    let baseline = TerminalBaseline::from(&snapshot);
+    let subscription = terminal.subscribe();
+    // Keep the inline open payload comfortably below Noise's single-message
+    // limit. Older history remains available through ReadHistory.
+    let snapshot = terminal.snapshot_with_max_bytes(OPEN_TERMINAL_MAX_BYTES);
+    let start_seq = StreamSeq(
+        snapshot
+            .head_seq
+            .0
+            .saturating_sub(u64::try_from(snapshot.bytes.len()).unwrap_or(u64::MAX)),
+    );
+    let mut render_bytes =
+        cli_pocket_proto::render_prefix_from_anchor(&snapshot.anchor_state).into_bytes();
+    render_bytes.extend_from_slice(snapshot.bytes.as_ref());
     let Some(info) = deps
         .session_mgr
         .list()
@@ -385,47 +400,45 @@ async fn handle_attach_request(
         return Ok(());
     };
 
-    let start_seq = StreamSeq(
-        baseline
-            .head_seq
-            .0
-            .saturating_sub(u64::try_from(snapshot.bytes.len()).unwrap_or(u64::MAX)),
-    );
     send_ok_response(
         chan,
         request_id,
-        ResponseBody::AttachTerminal {
-            stream_id,
-            terminal_info: info,
-            baseline_start_seq: start_seq,
-            baseline_end_seq: baseline.head_seq,
-            render_prefix: String::new(),
+        ResponseBody::OpenTerminal {
+            ack: cli_pocket_proto::OpenTerminalAck {
+                stream_id,
+                info,
+                start_seq,
+                end_seq: snapshot.head_seq,
+                render_bytes: render_bytes.into(),
+                has_more_history: terminal.history_page(Some(start_seq), 1).has_more,
+            },
         },
     )
     .await?;
+    info!(
+        terminal_id = ?terminal_id,
+        stream_id = ?stream_id,
+        start_seq = ?start_seq,
+        end_seq = ?snapshot.head_seq,
+        "open terminal ack sent"
+    );
 
-    send_stream_chunks(
-        chan,
+    let writer = spawn_attached_stream_forwarder(
         stream_id,
-        baseline.head_seq,
-        Some(0),
-        snapshot.bytes.as_ref(),
-        SNAPSHOT_CHUNK_BYTES,
-        false,
-    )
-    .await?;
-
-    let writer = spawn_output_forwarder(stream_id, terminal.subscribe(), streams.output_tx.clone());
+        terminal_id,
+        subscription,
+        streams.output_tx.clone(),
+    );
     streams.map.insert(
         stream_id,
         AttachedStream {
             terminal,
             terminal_id,
-            _writer: writer,
+            writer,
         },
     );
 
-    info!(terminal_id = ?terminal_id, stream_id = ?stream_id, "terminal attached");
+    info!(terminal_id = ?terminal_id, stream_id = ?stream_id, "terminal opened");
     Ok(())
 }
 
@@ -437,93 +450,53 @@ async fn handle_history_read_request(
     before: Option<StreamSeq>,
     max_bytes: u32,
 ) -> crate::DaemonResult<()> {
+    info!(
+        terminal_id = ?terminal_id,
+        request_id = ?request_id,
+        before = ?before,
+        max_bytes,
+        "history requested"
+    );
     let Some(terminal) = deps.session_mgr.attach(&terminal_id) else {
         send_error_response(chan, request_id, ProtocolError::UnknownTerminal).await?;
         return Ok(());
     };
 
-    let stream_id = StreamId(request_id.0);
     let page = terminal.history_page(before, usize::try_from(max_bytes).unwrap_or(usize::MAX));
+    let page_bytes_len = page.bytes.len();
 
     send_ok_response(
         chan,
         request_id,
         ResponseBody::ReadHistory {
-            stream_id,
-            terminal_id,
-            start_seq: page.start_seq,
-            end_seq: page.end_seq,
+            page: cli_pocket_proto::HistoryPage {
+                terminal_id,
+                start_seq: page.start_seq,
+                end_seq: page.end_seq,
+                bytes: page.bytes,
+                has_more: page.has_more,
+            },
         },
     )
     .await?;
-
-    send_stream_chunks(
-        chan,
-        stream_id,
-        page.start_seq,
-        Some(0),
-        page.bytes.as_ref(),
-        HISTORY_CHUNK_BYTES,
-        true,
-    )
-    .await
-}
-
-async fn send_stream_chunks(
-    chan: &mut EncryptedChannel<impl Transport>,
-    stream_id: StreamId,
-    seq: StreamSeq,
-    first_offset: Option<u32>,
-    bytes: &[u8],
-    chunk_size: usize,
-    advance_seq_per_chunk: bool,
-) -> crate::DaemonResult<()> {
-    if bytes.is_empty() {
-        chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
-            stream_id,
-            seq,
-            offset: first_offset,
-            bytes: Vec::new().into(),
-            last: true,
-        })))
-        .await?;
-        return Ok(());
-    }
-
-    for (index, chunk) in bytes.chunks(chunk_size).enumerate() {
-        let offset = index.saturating_mul(chunk_size);
-        let last = offset + chunk.len() >= bytes.len();
-        let chunk_seq = if advance_seq_per_chunk {
-            StreamSeq(
-                seq.0
-                    .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
-            )
-        } else {
-            seq
-        };
-        chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
-            stream_id,
-            seq: chunk_seq,
-            offset: first_offset
-                .map(|base| base.saturating_add(u32::try_from(offset).unwrap_or(u32::MAX))),
-            bytes: chunk.to_vec().into(),
-            last,
-        })))
-        .await?;
-    }
-
+    info!(
+        terminal_id = ?terminal_id,
+        start_seq = ?page.start_seq,
+        end_seq = ?page.end_seq,
+        bytes = page_bytes_len,
+        "history ack sent"
+    );
     Ok(())
 }
 
-async fn send_live_output(
-    chan: &mut EncryptedChannel<impl Transport>,
+fn live_output_frames(
     stream: StreamId,
-    chunk: &OutputChunk,
     terminal_id: TerminalId,
-) -> crate::DaemonResult<()> {
+    chunk: &OutputChunk,
+) -> crate::DaemonResult<Vec<OutboundOutput>> {
     let total = chunk.bytes.len();
     if total == 0 {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let start_seq = chunk
@@ -537,40 +510,55 @@ async fn send_live_output(
         })?;
 
     let mut sent = 0usize;
-    for piece in chunk.bytes.as_ref().chunks(OUTPUT_CHUNK_BYTES) {
-        sent = sent.saturating_add(piece.len());
-        let seq = StreamSeq(start_seq.saturating_add(u64::try_from(sent).unwrap_or(u64::MAX)));
-        chan.send_frame(&Frame::body(FrameBody::StreamData(StreamDataFrame {
-            stream_id: stream,
-            seq,
-            offset: None,
-            bytes: piece.to_vec().into(),
-            last: false,
-        })))
-        .await?;
-    }
-
-    Ok(())
+    Ok(chunk
+        .bytes
+        .as_ref()
+        .chunks(OUTPUT_CHUNK_BYTES)
+        .map(|piece| {
+            sent = sent.saturating_add(piece.len());
+            let seq = StreamSeq(start_seq.saturating_add(u64::try_from(sent).unwrap_or(u64::MAX)));
+            OutboundOutput {
+                stream,
+                terminal_id,
+                frame: StreamDataFrame {
+                    stream_id: stream,
+                    seq,
+                    offset: None,
+                    bytes: piece.to_vec().into(),
+                    last: false,
+                },
+            }
+        })
+        .collect())
 }
 
-fn spawn_output_forwarder(
+fn spawn_attached_stream_forwarder(
     stream_id: StreamId,
-    mut subscription: cli_pocket_pty::OutputStream,
+    terminal_id: TerminalId,
+    mut subscription: OutputStream,
     output_tx: mpsc::Sender<OutboundOutput>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             match subscription.recv().await {
                 OutputRecv::Chunk(chunk) => {
-                    if output_tx
-                        .send(OutboundOutput {
-                            stream: stream_id,
-                            chunk,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        break;
+                    let frames = match live_output_frames(stream_id, terminal_id, &chunk) {
+                        Ok(frames) => frames,
+                        Err(error) => {
+                            warn!("{error}");
+                            break;
+                        }
+                    };
+                    debug!(
+                        stream_id = ?stream_id,
+                        terminal_id = ?terminal_id,
+                        frames = frames.len(),
+                        "forwarding live output"
+                    );
+                    for frame in frames {
+                        if output_tx.send(frame).await.is_err() {
+                            return;
+                        }
                     }
                 }
                 OutputRecv::Lagged { skipped } => {
@@ -583,6 +571,12 @@ fn spawn_output_forwarder(
             }
         }
     })
+}
+
+fn clear_attached_streams(streams: &mut StreamContext) {
+    for attached in streams.map.drain().map(|(_, attached)| attached) {
+        attached.writer.abort();
+    }
 }
 
 fn current_scrollback_bytes(deps: &ConnectionDeps) -> usize {

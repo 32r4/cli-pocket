@@ -87,6 +87,10 @@ export class TerminalSessionRegistry {
 		this.actor(this.selectedTerminalId).loadOlderHistory();
 	}
 
+	retryActive() {
+		this.activateSelectedTerminal();
+	}
+
 	activeRuntimeState() {
 		if (this.selectedTerminalId == null) {
 			return null;
@@ -95,6 +99,9 @@ export class TerminalSessionRegistry {
 	}
 
 	setSelectedTerminal(terminalId: string | null) {
+		if (this.selectedTerminalId === terminalId) {
+			return;
+		}
 		if (
 			this.selectedTerminalId != null &&
 			this.selectedTerminalId !== terminalId

@@ -1,11 +1,12 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TerminalController } from "@/features/terminals/terminalController";
+import type { TerminalRuntimeState } from "@/features/terminals/terminalSessionActor";
 import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
 import type {
 	SessionActor,
 	TerminalInfoRecord,
-	TerminalSnapshotRecord,
+	TerminalOpenAckRecord,
 } from "@/platform/bridge/types";
 import { createWorkspaceStore } from "@/state/workspace/workspaceState";
 import { TerminalArea } from "./terminalArea";
@@ -20,9 +21,10 @@ function makeSession(): SessionActor {
 			async *[Symbol.asyncIterator]() {},
 		}),
 		refreshTerminals: vi.fn(async () => undefined),
-		activateTerminal: vi.fn(
+		openTerminal: vi.fn(
 			async () =>
 				({
+					stream_id: 1,
 					info: {
 						terminal: "t1",
 						cols: 80,
@@ -33,15 +35,16 @@ function makeSession(): SessionActor {
 					},
 					start_seq: 0,
 					end_seq: 0,
-					render_prefix_b64: "",
-					snapshot_bytes_b64: "",
-				}) satisfies TerminalSnapshotRecord,
+					render_bytes_b64: "",
+					has_more_history: false,
+				}) satisfies TerminalOpenAckRecord,
 		),
 		readHistory: vi.fn(async () => ({
 			terminal_id: "t1",
 			start_seq: 0,
 			end_seq: 0,
 			bytes_b64: "",
+			has_more: false,
 		})),
 		createTerminal: vi.fn(async () => null),
 		getServerConfig: vi.fn(async () => ({ scrollback_bytes: 4 * 1024 * 1024 })),
@@ -67,6 +70,7 @@ function makeRegistry(): TerminalSessionRegistry {
 		applyOutput: vi.fn(),
 		disconnect: vi.fn(),
 		removeTerminal: vi.fn(),
+		retryActive: vi.fn(),
 		setSelectedTerminal: vi.fn(),
 		dispose: vi.fn(),
 		mountActive: vi.fn(async () => undefined),
@@ -239,5 +243,85 @@ describe("TerminalArea", () => {
 		});
 		expect(session.refreshTerminals).toHaveBeenCalledTimes(1);
 		expect(onInlineError).toHaveBeenCalledWith("kill failed");
+	});
+
+	it("shows retry when the active terminal open times out", () => {
+		const workspaceState = createWorkspaceStore();
+		workspaceState.getState().markConnected();
+		workspaceState.getState().syncTerminalList([terminalOne]);
+		workspaceState.getState().setActiveSessionId("t1");
+		const registry = makeRegistry();
+		registry.activeRuntimeState = vi.fn<() => TerminalRuntimeState | null>(
+			() => ({
+				phase: "failed",
+				error: "terminal open timed out",
+			}),
+		);
+
+		const view = render(
+			<TerminalArea
+				session={makeSession()}
+				workspace={workspaceState.getState()}
+				workspaceState={workspaceState}
+				controller={makeController()}
+				registry={registry}
+				theme="dark"
+				onInlineError={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(view.getByRole("button", { name: "Retry" }));
+		expect(registry.retryActive).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the viewport mounted while opening and failed overlays are shown", async () => {
+		const workspaceState = createWorkspaceStore();
+		workspaceState.getState().markConnected();
+		workspaceState.getState().syncTerminalList([terminalOne]);
+		workspaceState.getState().setActiveSessionId("t1");
+		const registry = makeRegistry();
+		const activeRuntimeState = vi
+			.fn<() => TerminalRuntimeState | null>()
+			.mockReturnValueOnce({
+				phase: "opening",
+				error: null,
+			})
+			.mockReturnValueOnce({
+				phase: "failed",
+				error: "terminal open timed out",
+			});
+		registry.activeRuntimeState = activeRuntimeState;
+
+		const view = render(
+			<TerminalArea
+				session={makeSession()}
+				workspace={workspaceState.getState()}
+				workspaceState={workspaceState}
+				controller={makeController()}
+				registry={registry}
+				theme="dark"
+				onInlineError={vi.fn()}
+			/>,
+		);
+
+		await waitFor(() => {
+			expect(registry.mountActive).toHaveBeenCalledTimes(1);
+		});
+		expect(registry.unmountActive).not.toHaveBeenCalled();
+
+		view.rerender(
+			<TerminalArea
+				session={makeSession()}
+				workspace={workspaceState.getState()}
+				workspaceState={workspaceState}
+				controller={makeController()}
+				registry={registry}
+				theme="dark"
+				onInlineError={vi.fn()}
+			/>,
+		);
+
+		expect(registry.mountActive).toHaveBeenCalledTimes(1);
+		expect(registry.unmountActive).not.toHaveBeenCalled();
 	});
 });

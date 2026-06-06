@@ -110,7 +110,7 @@ describe("TerminalController", () => {
 
 		await controller.mount(host);
 		controller.setActiveTerminal("t1");
-		controller.renderSnapshotWithRange("t1", "hello", 10);
+		controller.renderSnapshot("t1", "hello", 10);
 
 		expect(
 			controllerField<{ startSeq: number | null; endSeq: number | null }>(
@@ -132,7 +132,7 @@ describe("TerminalController", () => {
 		const host = document.createElement("div");
 
 		controller.setActiveTerminal("t1");
-		controller.renderSnapshotWithRange("t1", "hello", 10);
+		controller.renderSnapshot("t1", "hello", 10);
 		await controller.mount(host);
 
 		const terminal = controllerField<MockTerminal | null>(
@@ -160,7 +160,7 @@ describe("TerminalController", () => {
 		const host = document.createElement("div");
 
 		controller.setActiveTerminal("t1");
-		controller.renderSnapshotWithRange("t1", "hello", 10);
+		controller.renderSnapshot("t1", "hello", 10);
 		controller.appendActiveOutput("t1", "tail", 19);
 		await controller.mount(host);
 
@@ -198,7 +198,7 @@ describe("TerminalController", () => {
 
 		await controller.mount(firstHost);
 		controller.setActiveTerminal("t1");
-		controller.renderSnapshotWithRange("t1", "hello", 10);
+		controller.renderSnapshot("t1", "hello", 10);
 		controller.unmount();
 		controller.appendActiveOutput("t1", "tail", 19);
 
@@ -237,7 +237,7 @@ describe("TerminalController", () => {
 
 		await controller.mount(host);
 		controller.setActiveTerminal("t1");
-		controller.renderSnapshotWithRange("t1", "live\n", 5);
+		controller.renderSnapshot("t1", "live\n", 5);
 
 		const terminal = controllerField<MockTerminal | null>(
 			controller,
@@ -253,6 +253,7 @@ describe("TerminalController", () => {
 			start_seq: 0,
 			end_seq: 5,
 			bytes_b64: btoa("old\n"),
+			has_more: false,
 		});
 		controller.appendActiveOutput("t1", "tail", 14);
 		await loadPromise;
@@ -285,7 +286,7 @@ describe("TerminalController", () => {
 
 		await controller.mount(host);
 		controller.setActiveTerminal("t1");
-		controller.renderSnapshotWithRange("t1", "live\n", 5);
+		controller.renderSnapshot("t1", "live\n", 5);
 
 		const ensureProbeTerminal = vi.spyOn(
 			controller as unknown as {
@@ -298,6 +299,7 @@ describe("TerminalController", () => {
 			start_seq: 0,
 			end_seq: 5,
 			bytes_b64: btoa("old\n"),
+			has_more: false,
 		});
 
 		expect(ensureProbeTerminal).not.toHaveBeenCalled();

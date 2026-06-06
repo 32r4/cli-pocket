@@ -33,12 +33,13 @@ export interface TerminalInfoRecord {
 	attached_clients: number;
 }
 
-export interface TerminalSnapshotRecord {
+export interface TerminalOpenAckRecord {
+	stream_id: number;
 	info: TerminalInfoRecord;
 	start_seq: number;
 	end_seq: number;
-	render_prefix_b64: string;
-	snapshot_bytes_b64: string;
+	render_bytes_b64: string;
+	has_more_history: boolean;
 }
 
 export interface TerminalHistoryPageRecord {
@@ -46,6 +47,7 @@ export interface TerminalHistoryPageRecord {
 	start_seq: number;
 	end_seq: number;
 	bytes_b64: string;
+	has_more: boolean;
 }
 
 export interface ServerConfigRecord {
@@ -64,7 +66,7 @@ export interface CreateTerminalParams {
 export interface SessionActor {
 	events(): AsyncIterable<unknown>;
 	refreshTerminals(): Promise<void>;
-	activateTerminal(terminalId: string): Promise<TerminalSnapshotRecord>;
+	openTerminal(terminalId: string): Promise<TerminalOpenAckRecord>;
 	readHistory(
 		terminalId: string,
 		before: number | null,

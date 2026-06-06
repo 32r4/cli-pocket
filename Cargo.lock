@@ -891,6 +891,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "tracing",
 ]
 
 [[package]]

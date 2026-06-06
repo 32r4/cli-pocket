@@ -5,11 +5,12 @@ use bytes::Bytes;
 use cli_pocket_client_core::session::SessionBuilder;
 use cli_pocket_client_core::session::SessionSpawner;
 use cli_pocket_client_core::{
-    ClientEvent, ClientSession, Clock, KeyValueStore, Rng, TerminalHistoryPage, TerminalSnapshot,
+    ClientEvent, ClientSession, Clock, KeyValueStore, Rng, TerminalHistoryPage, TerminalOpenAck,
     Transport,
 };
 use cli_pocket_proto::{ServerConfig, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo};
 use futures_channel::mpsc as futures_mpsc;
+use futures_util::FutureExt;
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
 
@@ -35,9 +36,9 @@ enum SessionCommand {
         params: TerminalCreateParams,
         reply: oneshot::Sender<Result<(), String>>,
     },
-    ActivateTerminal {
+    OpenTerminal {
         terminal_id: TerminalId,
-        reply: oneshot::Sender<Result<TerminalSnapshot, String>>,
+        reply: oneshot::Sender<Result<TerminalOpenAck, String>>,
     },
     ListTerminals {
         reply: oneshot::Sender<Result<Vec<TerminalInfo>, String>>,
@@ -171,13 +172,10 @@ impl SessionHandle {
             .map_err(|_| "actor dropped reply".to_owned())?
     }
 
-    pub async fn activate_terminal(
-        &self,
-        terminal_id: TerminalId,
-    ) -> Result<TerminalSnapshot, String> {
+    pub async fn open_terminal(&self, terminal_id: TerminalId) -> Result<TerminalOpenAck, String> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
-            .send(SessionCommand::ActivateTerminal {
+            .send(SessionCommand::OpenTerminal {
                 terminal_id,
                 reply: reply_tx,
             })
@@ -402,34 +400,53 @@ async fn handle_command(
             let _ = reply.send(Ok(()));
         }
         SessionCommand::CreateTerminal { params, reply } => {
-            let result = match &state.session {
-                Some(session) => session
-                    .create_terminal(params)
-                    .await
-                    .map_err(|error| error.to_string()),
-                None => Err("not connected".to_owned()),
-            };
-            let _ = reply.send(result);
+            let session = state.session.clone();
+            spawner.spawn(
+                async move {
+                    let result = match session {
+                        Some(session) => session
+                            .create_terminal(params)
+                            .await
+                            .map(|_| ())
+                            .map_err(|error| error.to_string()),
+                        None => Err("not connected".to_owned()),
+                    };
+                    let _ = reply.send(result);
+                }
+                .boxed_local(),
+            );
         }
-        SessionCommand::ActivateTerminal { terminal_id, reply } => {
-            let result = match &state.session {
-                Some(session) => session
-                    .activate_terminal(terminal_id)
-                    .await
-                    .map_err(|error| error.to_string()),
-                None => Err("not connected".to_owned()),
-            };
-            let _ = reply.send(result);
+        SessionCommand::OpenTerminal { terminal_id, reply } => {
+            let session = state.session.clone();
+            spawner.spawn(
+                async move {
+                    let result = match session {
+                        Some(session) => session
+                            .open_terminal(terminal_id)
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Err("not connected".to_owned()),
+                    };
+                    let _ = reply.send(result);
+                }
+                .boxed_local(),
+            );
         }
         SessionCommand::ListTerminals { reply } => {
-            let result = match &state.session {
-                Some(session) => session
-                    .list_terminals()
-                    .await
-                    .map_err(|error| error.to_string()),
-                None => Err("not connected".to_owned()),
-            };
-            let _ = reply.send(result);
+            let session = state.session.clone();
+            spawner.spawn(
+                async move {
+                    let result = match session {
+                        Some(session) => session
+                            .list_terminals()
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Err("not connected".to_owned()),
+                    };
+                    let _ = reply.send(result);
+                }
+                .boxed_local(),
+            );
         }
         SessionCommand::ReadHistory {
             terminal_id,
@@ -437,34 +454,52 @@ async fn handle_command(
             max_bytes,
             reply,
         } => {
-            let result = match &state.session {
-                Some(session) => session
-                    .read_history(terminal_id, before, max_bytes)
-                    .await
-                    .map_err(|error| error.to_string()),
-                None => Err("not connected".to_owned()),
-            };
-            let _ = reply.send(result);
+            let session = state.session.clone();
+            spawner.spawn(
+                async move {
+                    let result = match session {
+                        Some(session) => session
+                            .read_history(terminal_id, before, max_bytes)
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Err("not connected".to_owned()),
+                    };
+                    let _ = reply.send(result);
+                }
+                .boxed_local(),
+            );
         }
         SessionCommand::GetServerConfig { reply } => {
-            let result = match &state.session {
-                Some(session) => session
-                    .get_server_config()
-                    .await
-                    .map_err(|error| error.to_string()),
-                None => Err("not connected".to_owned()),
-            };
-            let _ = reply.send(result);
+            let session = state.session.clone();
+            spawner.spawn(
+                async move {
+                    let result = match session {
+                        Some(session) => session
+                            .get_server_config()
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Err("not connected".to_owned()),
+                    };
+                    let _ = reply.send(result);
+                }
+                .boxed_local(),
+            );
         }
         SessionCommand::SetServerConfig { config, reply } => {
-            let result = match &state.session {
-                Some(session) => session
-                    .set_server_config(config)
-                    .await
-                    .map_err(|error| error.to_string()),
-                None => Err("not connected".to_owned()),
-            };
-            let _ = reply.send(result);
+            let session = state.session.clone();
+            spawner.spawn(
+                async move {
+                    let result = match session {
+                        Some(session) => session
+                            .set_server_config(config)
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Err("not connected".to_owned()),
+                    };
+                    let _ = reply.send(result);
+                }
+                .boxed_local(),
+            );
         }
         SessionCommand::SendInput {
             terminal_id,
@@ -498,14 +533,20 @@ async fn handle_command(
             let _ = reply.send(result);
         }
         SessionCommand::Kill { terminal_id, reply } => {
-            let result = match state.session.as_ref() {
-                Some(session) => session
-                    .kill_terminal(terminal_id)
-                    .await
-                    .map_err(|error| error.to_string()),
-                None => Err("not connected".to_owned()),
-            };
-            let _ = reply.send(result);
+            let session = state.session.clone();
+            spawner.spawn(
+                async move {
+                    let result = match session {
+                        Some(session) => session
+                            .kill_terminal(terminal_id)
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Err("not connected".to_owned()),
+                    };
+                    let _ = reply.send(result);
+                }
+                .boxed_local(),
+            );
         }
         SessionCommand::Shutdown { reply } => {
             state.event_channel = None;

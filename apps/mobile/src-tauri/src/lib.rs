@@ -18,7 +18,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::cli_pocket_connect,
             commands::cli_pocket_create_terminal,
-            commands::cli_pocket_activate_terminal,
+            commands::cli_pocket_open_terminal,
             commands::cli_pocket_list_terminals,
             commands::cli_pocket_read_history,
             commands::cli_pocket_send_input,
