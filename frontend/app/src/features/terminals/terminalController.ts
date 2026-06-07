@@ -320,6 +320,7 @@ export class TerminalController {
 
 		const terminal = new Terminal({
 			cols: 120,
+			cursorBlink: true,
 			rows: 32,
 			scrollback: terminalScrollbackLines,
 			theme: terminalTheme(),
