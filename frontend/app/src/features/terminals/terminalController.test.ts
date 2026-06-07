@@ -10,6 +10,7 @@ class MockTerminal {
 	cols = 10;
 	rows = 4;
 	options?: unknown;
+	focusCalls = 0;
 	writes: string[] = [];
 	scrollToLineCalls: number[] = [];
 	scrollListener: ((position: number) => void) | null = null;
@@ -32,7 +33,9 @@ class MockTerminal {
 
 	open(_node: HTMLElement) {}
 	loadAddon(_addon: unknown) {}
-	focus() {}
+	focus() {
+		this.focusCalls += 1;
+	}
 	clear() {
 		this.writes = [];
 		this.buffer.active.length = 0;
@@ -116,6 +119,36 @@ describe("TerminalController", () => {
 			startSeq: 10,
 			endSeq: 15,
 		});
+	});
+
+	it("focuses the terminal when the active terminal changes", async () => {
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		const terminal = controllerField<MockTerminal | null>(
+			controller,
+			"terminal",
+		);
+		expect(terminal).not.toBeNull();
+		if (terminal == null) {
+			throw new Error("expected terminal to mount");
+		}
+
+		const initialFocusCalls = terminal.focusCalls;
+		controller.setActiveTerminal("t1");
+
+		await new Promise<void>((resolve) => {
+			window.requestAnimationFrame(() => {
+				resolve();
+			});
+		});
+
+		expect(terminal.focusCalls).toBeGreaterThan(initialFocusCalls);
 	});
 
 	it("replays a snapshot that arrives before the terminal mounts", async () => {

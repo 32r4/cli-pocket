@@ -219,6 +219,7 @@ export class TerminalController {
 	setActiveTerminal(terminalId: string | null) {
 		this.activeTerminalId = terminalId;
 		this.flushPendingState();
+		this.focusActiveTerminal();
 	}
 
 	currentRenderedText() {
@@ -291,6 +292,18 @@ export class TerminalController {
 		} finally {
 			this.initPromise = null;
 		}
+	}
+
+	private focusActiveTerminal() {
+		if (this.terminal == null || this.activeTerminalId == null) {
+			return;
+		}
+
+		window.requestAnimationFrame(() => {
+			if (this.activeTerminalId != null) {
+				this.terminal?.focus();
+			}
+		});
 	}
 
 	private async createTerminal() {
