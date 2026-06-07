@@ -47,7 +47,9 @@ impl Transport for TokioWsTransport {
     async fn recv(&mut self) -> ClientResult<Option<Vec<u8>>> {
         loop {
             match self.ws.next().await {
-                Some(Ok(Message::Binary(bytes))) => return Ok(Some(bytes)),
+                Some(Ok(Message::Binary(bytes))) => {
+                    return Ok(Some(bytes));
+                }
                 Some(Ok(Message::Ping(bytes))) => {
                     self.ws
                         .send(Message::Pong(bytes))

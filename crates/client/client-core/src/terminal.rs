@@ -4,6 +4,7 @@ use futures_channel::mpsc;
 use futures_util::SinkExt;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct TerminalHandle {
@@ -18,6 +19,7 @@ pub(crate) enum TerminalCmd {
     Input {
         terminal: TerminalId,
         bytes: Bytes,
+        queued_at: Instant,
     },
     Resize {
         terminal: TerminalId,
@@ -60,6 +62,7 @@ impl TerminalHandle {
             .send(TerminalCmd::Input {
                 terminal: self.terminal_id(),
                 bytes,
+                queued_at: Instant::now(),
             })
             .await
             .map_err(|_| crate::ClientError::Closed)
@@ -122,13 +125,17 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            cmd_rx.next().await.unwrap(),
+        match cmd_rx.next().await.unwrap() {
             TerminalCmd::Input {
-                terminal: handle.terminal_id(),
-                bytes: Bytes::from_static(b"ls\n"),
+                terminal,
+                bytes,
+                queued_at: _,
+            } => {
+                assert_eq!(terminal, handle.terminal_id());
+                assert_eq!(bytes, Bytes::from_static(b"ls\n"));
             }
-        );
+            other => panic!("expected input command, got {other:?}"),
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
