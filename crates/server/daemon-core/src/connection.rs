@@ -2,8 +2,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::OnceLock;
-use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cli_pocket_crypto::NoiseSession;
@@ -28,137 +26,6 @@ use crate::session::SessionManager;
 
 const OUTPUT_CHUNK_BYTES: usize = 16 * 1024;
 const OPEN_TERMINAL_MAX_BYTES: usize = 48 * 1024;
-const INPUT_PROBE_SUMMARY_SAMPLES: usize = 32;
-const DAEMON_INPUT_PROBE_SLOW_US: u64 = 5_000;
-
-fn input_probe_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("CLI_POCKET_INPUT_PROBE")
-            .is_ok_and(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
-    })
-}
-
-fn elapsed_micros_u64(started_at: Instant) -> u64 {
-    u64::try_from(started_at.elapsed().as_micros()).unwrap_or(u64::MAX)
-}
-
-fn percentile_value(sorted_samples: &[u64], percentile: usize) -> u64 {
-    debug_assert!(!sorted_samples.is_empty());
-    let len = sorted_samples.len();
-    let rank = percentile.saturating_mul(len).div_ceil(100).max(1);
-    sorted_samples[rank.saturating_sub(1).min(len.saturating_sub(1))]
-}
-
-#[derive(Debug, Clone)]
-struct InputLatencySummary {
-    count: usize,
-    min_us: u64,
-    p50_us: u64,
-    p95_us: u64,
-    max_us: u64,
-    slow_count: usize,
-}
-
-#[derive(Debug, Clone)]
-struct InputLatencyWindow {
-    slow_threshold_us: u64,
-    samples_us: Vec<u64>,
-}
-
-impl Default for InputLatencyWindow {
-    fn default() -> Self {
-        Self {
-            slow_threshold_us: DAEMON_INPUT_PROBE_SLOW_US,
-            samples_us: Vec::with_capacity(INPUT_PROBE_SUMMARY_SAMPLES),
-        }
-    }
-}
-
-impl InputLatencyWindow {
-    fn record(&mut self, sample_us: u64) -> Option<InputLatencySummary> {
-        self.samples_us.push(sample_us);
-        if self.samples_us.len() < INPUT_PROBE_SUMMARY_SAMPLES {
-            return None;
-        }
-
-        let mut samples = std::mem::take(&mut self.samples_us);
-        samples.sort_unstable();
-        let count = samples.len();
-        let min_us = samples[0];
-        let max_us = samples[count.saturating_sub(1)];
-        let p50_us = percentile_value(&samples, 50);
-        let p95_us = percentile_value(&samples, 95);
-        let slow_count = samples
-            .iter()
-            .filter(|&&sample| sample >= self.slow_threshold_us)
-            .count();
-        self.samples_us = Vec::with_capacity(INPUT_PROBE_SUMMARY_SAMPLES);
-
-        Some(InputLatencySummary {
-            count,
-            min_us,
-            p50_us,
-            p95_us,
-            max_us,
-            slow_count,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct DaemonInputProbeStats {
-    pty_write: InputLatencyWindow,
-}
-
-impl DaemonInputProbeStats {
-    fn record_sample(
-        window: &mut InputLatencyWindow,
-        probe: &PendingInputProbe,
-        metric: &'static str,
-        slow_message: &'static str,
-        sample_us: u64,
-    ) {
-        if sample_us >= DAEMON_INPUT_PROBE_SLOW_US {
-            info!(
-                target: "cli_pocket_probe::input_latency",
-                component = "daemon",
-                metric,
-                terminal_id = ?probe.terminal_id,
-                request_id = probe.request_id,
-                bytes_len = probe.bytes_len,
-                delay_us = sample_us,
-                slow_threshold_us = DAEMON_INPUT_PROBE_SLOW_US,
-                "{slow_message}"
-            );
-        }
-        if let Some(summary) = window.record(sample_us) {
-            info!(
-                target: "cli_pocket_probe::input_latency",
-                component = "daemon",
-                metric,
-                samples = summary.count,
-                min_us = summary.min_us,
-                p50_us = summary.p50_us,
-                p95_us = summary.p95_us,
-                max_us = summary.max_us,
-                slow_threshold_us = DAEMON_INPUT_PROBE_SLOW_US,
-                slow_samples = summary.slow_count,
-                "daemon input latency summary"
-            );
-        }
-    }
-
-    fn record_pty_write(&mut self, probe: &PendingInputProbe, pty_write_us: u64) {
-        Self::record_sample(
-            &mut self.pty_write,
-            probe,
-            "pty_write_us",
-            "daemon send_input pty write slow",
-            pty_write_us,
-        );
-    }
-}
 
 pub struct ConnectionDeps {
     pub session_mgr: Arc<SessionManager>,
@@ -252,7 +119,6 @@ async fn run_connection_post_handshake<T: Transport>(
         next_local_stream_id: 1,
         output_tx,
     };
-    let mut input_probe_stats = DaemonInputProbeStats::default();
     let mut rev_rx = deps.client_db.watch_revocations();
 
     loop {
@@ -288,14 +154,7 @@ async fn run_connection_post_handshake<T: Transport>(
 
         match frame.body {
             FrameBody::Request(request) => {
-                handle_request(
-                    &mut chan,
-                    &deps,
-                    request,
-                    &mut streams,
-                    &mut input_probe_stats,
-                )
-                .await?;
+                handle_request(&mut chan, &deps, request, &mut streams).await?;
             }
             FrameBody::Ping { nonce } => {
                 chan.send_frame(&Frame::body(FrameBody::Pong { nonce }))
@@ -372,19 +231,11 @@ struct StreamContext {
     output_tx: mpsc::Sender<OutboundOutput>,
 }
 
-#[derive(Debug, Clone)]
-struct PendingInputProbe {
-    request_id: u32,
-    terminal_id: TerminalId,
-    bytes_len: usize,
-}
-
 async fn handle_request(
     chan: &mut EncryptedChannel<impl Transport>,
     deps: &ConnectionDeps,
     request: RequestFrame,
     streams: &mut StreamContext,
-    input_probe_stats: &mut DaemonInputProbeStats,
 ) -> crate::DaemonResult<()> {
     match request.body {
         RequestBody::ListTerminals => {
@@ -458,17 +309,7 @@ async fn handle_request(
                 .values()
                 .find(|attached| attached.terminal_id == terminal_id)
             {
-                let probe = PendingInputProbe {
-                    request_id: request.id.0,
-                    terminal_id,
-                    bytes_len: bytes.len(),
-                };
-                let write_started_at = Instant::now();
                 let _ = attached.terminal.write_input(&bytes);
-                let pty_write_us = elapsed_micros_u64(write_started_at);
-                if input_probe_enabled() {
-                    input_probe_stats.record_pty_write(&probe, pty_write_us);
-                }
                 send_ok_response(chan, request.id, ResponseBody::SendInput).await
             } else {
                 send_error_response(chan, request.id, ProtocolError::UnknownTerminal).await
@@ -807,25 +648,5 @@ mod tests {
         let ms = now_unix_ms();
         assert!(ms > 1_735_689_600_000u64);
         assert!(ms < 1_893_456_000_000u64);
-    }
-
-    #[test]
-    fn input_latency_window_summarizes_full_batch() {
-        let mut window = InputLatencyWindow::default();
-        for sample in 1..INPUT_PROBE_SUMMARY_SAMPLES {
-            assert!(window.record(u64::try_from(sample).unwrap()).is_none());
-        }
-
-        let summary = window
-            .record(u64::try_from(INPUT_PROBE_SUMMARY_SAMPLES).unwrap())
-            .expect("window should summarize once full");
-
-        assert_eq!(summary.count, INPUT_PROBE_SUMMARY_SAMPLES);
-        assert_eq!(summary.min_us, 1);
-        assert_eq!(summary.p50_us, 16);
-        assert_eq!(summary.p95_us, 31);
-        assert_eq!(summary.max_us, 32);
-        assert_eq!(summary.slow_count, 0);
-        assert!(window.samples_us.is_empty());
     }
 }

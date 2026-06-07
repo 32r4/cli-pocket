@@ -17,8 +17,7 @@ use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::OnceLock;
-use std::time::Instant;
-use tracing::{info, trace};
+use tracing::trace;
 
 use crate::events::ClientEvent;
 use crate::history::TerminalHistoryPage;
@@ -50,8 +49,6 @@ const HEARTBEAT_IDLE_MS: u64 = 10_000;
 const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_INPUT_BATCH_WINDOW_MS: u64 = 8;
 const MAX_INPUT_BATCH_WINDOW_MS: u64 = 50;
-const INPUT_PROBE_SUMMARY_SAMPLES: usize = 32;
-const INPUT_PROBE_SLOW_US: u64 = 100_000;
 
 type SharedReply<T> = Rc<RefCell<Option<oneshot::Sender<ClientResult<T>>>>>;
 type TerminalOpenAckReply = SharedReply<TerminalOpenAck>;
@@ -60,14 +57,6 @@ type TerminalCreateReply = SharedReply<TerminalInfo>;
 type TerminalListReply = SharedReply<Vec<TerminalInfo>>;
 type ServerConfigReply = SharedReply<ServerConfig>;
 type UnitReply = SharedReply<()>;
-
-fn input_probe_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("CLI_POCKET_INPUT_PROBE")
-            .is_ok_and(|value| value != "0" && !value.eq_ignore_ascii_case("false"))
-    })
-}
 
 fn input_batch_window_ms() -> u64 {
     static WINDOW_MS: OnceLock<u64> = OnceLock::new();
@@ -79,112 +68,6 @@ fn input_batch_window_ms() -> u64 {
                 value.min(MAX_INPUT_BATCH_WINDOW_MS)
             })
     })
-}
-
-fn elapsed_micros_u64(started_at: Instant) -> u64 {
-    u64::try_from(started_at.elapsed().as_micros()).unwrap_or(u64::MAX)
-}
-
-fn percentile_value(sorted_samples: &[u64], percentile: usize) -> u64 {
-    debug_assert!(!sorted_samples.is_empty());
-    let len = sorted_samples.len();
-    let rank = percentile.saturating_mul(len).div_ceil(100).max(1);
-    sorted_samples[rank.saturating_sub(1).min(len.saturating_sub(1))]
-}
-
-#[derive(Debug, Clone)]
-struct InputLatencySummary {
-    count: usize,
-    min_us: u64,
-    p50_us: u64,
-    p95_us: u64,
-    max_us: u64,
-    slow_count: usize,
-}
-
-#[derive(Debug, Clone)]
-struct InputLatencyWindow {
-    slow_threshold_us: u64,
-    samples_us: Vec<u64>,
-}
-
-impl Default for InputLatencyWindow {
-    fn default() -> Self {
-        Self {
-            slow_threshold_us: INPUT_PROBE_SLOW_US,
-            samples_us: Vec::with_capacity(INPUT_PROBE_SUMMARY_SAMPLES),
-        }
-    }
-}
-
-impl InputLatencyWindow {
-    fn record(&mut self, sample_us: u64) -> Option<InputLatencySummary> {
-        self.samples_us.push(sample_us);
-        if self.samples_us.len() < INPUT_PROBE_SUMMARY_SAMPLES {
-            return None;
-        }
-
-        let mut samples = std::mem::take(&mut self.samples_us);
-        samples.sort_unstable();
-        let count = samples.len();
-        let min_us = samples[0];
-        let max_us = samples[count.saturating_sub(1)];
-        let p50_us = percentile_value(&samples, 50);
-        let p95_us = percentile_value(&samples, 95);
-        let slow_count = samples
-            .iter()
-            .filter(|&&sample| sample >= self.slow_threshold_us)
-            .count();
-        self.samples_us = Vec::with_capacity(INPUT_PROBE_SUMMARY_SAMPLES);
-
-        Some(InputLatencySummary {
-            count,
-            min_us,
-            p50_us,
-            p95_us,
-            max_us,
-            slow_count,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct ClientInputProbeStats {
-    ack_delay: InputLatencyWindow,
-}
-
-impl ClientInputProbeStats {
-    fn record_ack(&mut self, probe: &PendingInputProbe, ack_delay_us: u64) {
-        if ack_delay_us >= INPUT_PROBE_SLOW_US {
-            info!(
-                target: "cli_pocket_probe::input_latency",
-                component = "client",
-                metric = "ack_delay_us",
-                terminal_id = ?probe.terminal_id,
-                request_id = probe.request_id,
-                bytes_len = probe.bytes_len,
-                queue_delay_us = probe.queue_delay_us,
-                delay_us = ack_delay_us,
-                slow_threshold_us = INPUT_PROBE_SLOW_US,
-                "client send_input ack slow"
-            );
-        }
-        if let Some(summary) = self.ack_delay.record(ack_delay_us) {
-            info!(
-                target: "cli_pocket_probe::input_latency",
-                component = "client",
-                metric = "ack_delay_us",
-                samples = summary.count,
-                min_us = summary.min_us,
-                p50_us = summary.p50_us,
-                p95_us = summary.p95_us,
-                max_us = summary.max_us,
-                slow_threshold_us = INPUT_PROBE_SLOW_US,
-                slow_samples = summary.slow_count,
-                "client input latency summary"
-            );
-        }
-    }
 }
 
 fn fail_shared_reply<T>(reply: &SharedReply<T>, error: &ClientError) {
@@ -979,18 +862,7 @@ fn handle_response_frame(
                 let _ = reply.send(Ok(config));
             }
         }
-        ResponseBody::SendInput => {
-            let Some(probe) = runtime.take_pending_input_ack(request_id) else {
-                return Err(ClientError::Proto(format!(
-                    "ack response for unknown request {request_id}"
-                )));
-            };
-            let ack_delay_us = elapsed_micros_u64(probe.sent_at);
-            if input_probe_enabled() {
-                runtime.input_probe_stats.record_ack(&probe, ack_delay_us);
-            }
-        }
-        ResponseBody::ResizeTerminal => {
+        ResponseBody::SendInput | ResponseBody::ResizeTerminal => {
             if !runtime.take_pending_ack(request_id) {
                 return Err(ClientError::Proto(format!(
                     "ack response for unknown request {request_id}"
@@ -1026,10 +898,7 @@ fn fail_request(
             }
         }
         RequestTxn::CreateTerminal { reply } => fail_shared_reply(&reply, error),
-        RequestTxn::SendInputAck { probe } => {
-            runtime.discard_pending_input_output_probe(&probe);
-        }
-        RequestTxn::ResizeAck => {}
+        RequestTxn::SendInputAck | RequestTxn::ResizeAck => {}
     }
 
     Ok(())
@@ -1051,10 +920,7 @@ fn fail_all_pending_requests(runtime: &mut RuntimeState, error: &ClientError) {
                 }
             }
             RequestTxn::CreateTerminal { reply } => fail_shared_reply(&reply, error),
-            RequestTxn::SendInputAck { probe } => {
-                runtime.discard_pending_input_output_probe(&probe);
-            }
-            RequestTxn::ResizeAck => {}
+            RequestTxn::SendInputAck | RequestTxn::ResizeAck => {}
         }
     }
 
@@ -1100,9 +966,6 @@ fn handle_stream_data_frame(
             if let Some(handle) = state.terminal.borrow_mut().as_mut() {
                 handle.last_seq = Some(stream.seq);
                 runtime.update_active_seq(stream.seq);
-                if let Some(probe) = runtime.pop_pending_input_output_probe(terminal_id) {
-                    let _ = probe;
-                }
                 Ok(Action::Emit(ClientEvent::TerminalOutput {
                     terminal_id: handle.terminal_id(),
                     stream_seq: stream.seq,
@@ -1189,23 +1052,12 @@ fn frame_for_command(
     next_request_id: &mut u32,
 ) -> Option<Frame> {
     match cmd {
-        TerminalCmd::Input {
-            terminal,
-            bytes,
-            queued_at,
-        } => active
+        TerminalCmd::Input { terminal, bytes } => active
             .filter(|handle| handle.terminal_id() == terminal)
             .map(|handle| {
                 let request_id = *next_request_id;
                 *next_request_id = next_request_id.saturating_add(1);
-                let probe = PendingInputProbe {
-                    request_id,
-                    terminal_id: handle.terminal_id(),
-                    bytes_len: bytes.len(),
-                    queue_delay_us: elapsed_micros_u64(queued_at),
-                    sent_at: Instant::now(),
-                };
-                runtime.record_send_input_ack(probe);
+                runtime.record_send_input_ack(request_id);
                 request_frame(
                     request_id,
                     RequestBody::SendInput {
@@ -1257,11 +1109,7 @@ fn try_merge_input_command(base: &mut TerminalCmd, next: TerminalCmd) -> Result<
                 bytes: base_bytes,
                 ..
             },
-            TerminalCmd::Input {
-                terminal,
-                bytes,
-                queued_at: _,
-            },
+            TerminalCmd::Input { terminal, bytes },
         ) if *base_terminal == terminal => {
             let mut merged = Vec::with_capacity(base_bytes.len().saturating_add(bytes.len()));
             merged.extend_from_slice(base_bytes.as_ref());
@@ -1516,8 +1364,6 @@ struct RuntimeState {
     info_cache: HashMap<TerminalId, TerminalInfo>,
     pending_requests: HashMap<u32, RequestTxn>,
     active_streams: HashMap<StreamId, StreamState>,
-    pending_input_output_probes: HashMap<TerminalId, VecDeque<PendingInputProbe>>,
-    input_probe_stats: ClientInputProbeStats,
 }
 
 #[derive(Debug, Clone)]
@@ -1549,9 +1395,7 @@ enum RequestTxn {
     SetConfig {
         reply: ServerConfigReply,
     },
-    SendInputAck {
-        probe: PendingInputProbe,
-    },
+    SendInputAck,
     ResizeAck,
     KillTerminal {
         reply: Option<UnitReply>,
@@ -1564,15 +1408,6 @@ enum StreamState {
         terminal_id: TerminalId,
         last_seq: StreamSeq,
     },
-}
-
-#[derive(Debug, Clone)]
-struct PendingInputProbe {
-    request_id: u32,
-    terminal_id: TerminalId,
-    bytes_len: usize,
-    queue_delay_us: u64,
-    sent_at: Instant,
 }
 
 impl RuntimeState {
@@ -1647,13 +1482,9 @@ impl RuntimeState {
         }
     }
 
-    fn record_send_input_ack(&mut self, probe: PendingInputProbe) {
-        self.pending_input_output_probes
-            .entry(probe.terminal_id)
-            .or_default()
-            .push_back(probe.clone());
+    fn record_send_input_ack(&mut self, request_id: u32) {
         self.pending_requests
-            .insert(probe.request_id, RequestTxn::SendInputAck { probe });
+            .insert(request_id, RequestTxn::SendInputAck);
     }
 
     fn record_resize_ack(&mut self, request_id: u32) {
@@ -1669,46 +1500,8 @@ impl RuntimeState {
     fn take_pending_ack(&mut self, request_id: u32) -> bool {
         matches!(
             self.pending_requests.remove(&request_id),
-            Some(RequestTxn::ResizeAck)
+            Some(RequestTxn::SendInputAck | RequestTxn::ResizeAck)
         )
-    }
-
-    fn take_pending_input_ack(&mut self, request_id: u32) -> Option<PendingInputProbe> {
-        match self.pending_requests.remove(&request_id) {
-            Some(RequestTxn::SendInputAck { probe }) => Some(probe),
-            Some(other) => {
-                self.pending_requests.insert(request_id, other);
-                None
-            }
-            None => None,
-        }
-    }
-
-    fn pop_pending_input_output_probe(
-        &mut self,
-        terminal_id: TerminalId,
-    ) -> Option<PendingInputProbe> {
-        let queue = self.pending_input_output_probes.get_mut(&terminal_id)?;
-        let probe = queue.pop_front();
-        if queue.is_empty() {
-            self.pending_input_output_probes.remove(&terminal_id);
-        }
-        probe
-    }
-
-    fn discard_pending_input_output_probe(&mut self, probe: &PendingInputProbe) {
-        let Some(queue) = self.pending_input_output_probes.get_mut(&probe.terminal_id) else {
-            return;
-        };
-        if let Some(index) = queue
-            .iter()
-            .position(|candidate| candidate.request_id == probe.request_id)
-        {
-            queue.remove(index);
-        }
-        if queue.is_empty() {
-            self.pending_input_output_probes.remove(&probe.terminal_id);
-        }
     }
 
     fn start_open_terminal(
@@ -2117,12 +1910,10 @@ mod tests {
             TerminalCmd::Input {
                 terminal,
                 bytes: Bytes::from_static(b"a"),
-                queued_at: Instant::now(),
             },
             TerminalCmd::Input {
                 terminal,
                 bytes: Bytes::from_static(b"b"),
-                queued_at: Instant::now(),
             },
             TerminalCmd::Resize {
                 terminal,
@@ -2157,12 +1948,10 @@ mod tests {
             TerminalCmd::Input {
                 terminal: terminal_a,
                 bytes: Bytes::from_static(b"a"),
-                queued_at: Instant::now(),
             },
             TerminalCmd::Input {
                 terminal: terminal_b,
                 bytes: Bytes::from_static(b"b"),
-                queued_at: Instant::now(),
             },
         ]);
 
@@ -2186,25 +1975,5 @@ mod tests {
             }
             other => panic!("expected second input, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn input_latency_window_summarizes_full_batch() {
-        let mut window = InputLatencyWindow::default();
-        for sample in 1..INPUT_PROBE_SUMMARY_SAMPLES {
-            assert!(window.record(u64::try_from(sample).unwrap()).is_none());
-        }
-
-        let summary = window
-            .record(u64::try_from(INPUT_PROBE_SUMMARY_SAMPLES).unwrap())
-            .expect("window should summarize once full");
-
-        assert_eq!(summary.count, INPUT_PROBE_SUMMARY_SAMPLES);
-        assert_eq!(summary.min_us, 1);
-        assert_eq!(summary.p50_us, 16);
-        assert_eq!(summary.p95_us, 31);
-        assert_eq!(summary.max_us, 32);
-        assert_eq!(summary.slow_count, 0);
-        assert!(window.samples_us.is_empty());
     }
 }
