@@ -107,6 +107,44 @@ describe("TerminalController", () => {
 		});
 	});
 
+	it("creates xterm with the configured font size", async () => {
+		MockTerminal.instances = [];
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+			terminalFontSize: 18,
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+
+		expect(MockTerminal.instances[0]?.options).toMatchObject({
+			fontFamily: '"IBM Plex Mono", "Cascadia Code", monospace',
+			fontSize: 18,
+			lineHeight: 1.05,
+		});
+	});
+
+	it("applies a compact font size offset on mobile", async () => {
+		MockTerminal.instances = [];
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+			terminalFontSize: 18,
+			compactMode: true,
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+
+		expect(MockTerminal.instances[0]?.options).toMatchObject({
+			fontSize: 16,
+			lineHeight: 1,
+		});
+	});
+
 	it("updates the terminal theme through the public options API", async () => {
 		MockTerminal.instances = [];
 		const controller = new TerminalController({
@@ -133,6 +171,25 @@ describe("TerminalController", () => {
 			},
 		});
 		expect(terminal?.refreshCalls).toEqual([[0, 3]]);
+	});
+
+	it("updates the terminal font size through the public options API", async () => {
+		MockTerminal.instances = [];
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		controller.setTerminalFontSize(17);
+
+		const terminal = MockTerminal.instances[0];
+		expect(terminal?.options).toMatchObject({
+			fontSize: 17,
+		});
+		expect(terminal?.refreshCalls).toEqual([]);
 	});
 
 	it("tracks loaded seq range from the snapshot", async () => {

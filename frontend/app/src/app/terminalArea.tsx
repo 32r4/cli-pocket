@@ -21,6 +21,8 @@ interface TerminalAreaProps {
 		terminals: TerminalSummaryView[];
 		activeSessionId: string | null;
 	};
+	isCompactViewport: boolean;
+	terminalFontSize: number;
 	workspaceState: StoreApi<{
 		terminals: TerminalSummaryView[];
 		setActiveSessionId: (terminalId: string | null) => void;
@@ -35,6 +37,8 @@ interface TerminalAreaProps {
 export function TerminalArea({
 	session,
 	workspace,
+	isCompactViewport,
+	terminalFontSize,
 	workspaceState,
 	controller,
 	registry,
@@ -52,6 +56,14 @@ export function TerminalArea({
 	useEffect(() => {
 		controller.setTheme(theme);
 	}, [controller, theme]);
+
+	useEffect(() => {
+		controller.setCompactMode(isCompactViewport);
+	}, [controller, isCompactViewport]);
+
+	useEffect(() => {
+		controller.setTerminalFontSize(terminalFontSize);
+	}, [controller, terminalFontSize]);
 
 	useEffect(() => {
 		registry.setSelectedTerminal(workspace.activeSessionId);

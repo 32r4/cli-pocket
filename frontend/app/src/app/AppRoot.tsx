@@ -222,7 +222,7 @@ export function AppRoot({
 
 	const errorMessage = inlineError ?? workspace.lastError ?? platformError;
 	const hasSavedServers = registry.daemons.length > 0;
-	const isMobileUi = platform.shell === "mobile" || isNarrowViewport;
+	const isMobileOverlay = platform.shell === "mobile" || isNarrowViewport;
 	const primaryNavigationMode = ui.isMenuOpen ? "back" : ("menu" as const);
 	const handlePrimaryNavigation = () => {
 		if (!ui.isMenuOpen) {
@@ -260,6 +260,10 @@ export function AppRoot({
 						});
 				}}
 				theme={ui.theme}
+				terminalFontSize={ui.terminalFontSize}
+				onTerminalFontSizeChange={(fontSize) => {
+					ui.setTerminalFontSize(fontSize);
+				}}
 				onCopyPairUrl={copyPairUrl}
 				isPairUrlCopied={isPairUrlCopied}
 				showPairControls={services?.host != null}
@@ -304,6 +308,8 @@ export function AppRoot({
 			<TerminalArea
 				session={session}
 				workspace={workspace}
+				isCompactViewport={isNarrowViewport}
+				terminalFontSize={ui.terminalFontSize}
 				workspaceState={workspaceState}
 				controller={terminalController}
 				registry={terminalRegistry}
@@ -358,7 +364,7 @@ export function AppRoot({
 				</div>
 				{ui.isMenuOpen ? (
 					<ControlOverlay
-						isMobileUi={isMobileUi}
+						isMobileUi={isMobileOverlay}
 						isMenuRoot={ui.isMenuRoot}
 						menuSection={ui.menuSection}
 						detailSection={overlayDetailSection}

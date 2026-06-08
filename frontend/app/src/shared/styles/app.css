@@ -1007,12 +1007,16 @@ strong {
 	}
 
 	.app-shell__header {
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		align-items: center;
+		gap: 0.7rem;
+		padding-block: calc(var(--safe-area-top) + 0.45rem) 0.45rem;
+		padding-inline: calc(var(--safe-area-left) + 0.65rem)
+			calc(var(--safe-area-right) + 0.65rem);
 	}
 
 	.app-shell[data-window-chrome="desktop"] .app-shell__header {
-		padding-inline: 0.75rem;
+		padding-inline: 0.5rem 0.35rem;
 	}
 
 	.connection-status-panel,
@@ -1038,8 +1042,64 @@ strong {
 		display: block;
 	}
 
+	.terminal-tabs {
+		grid-template-columns: minmax(0, 1fr) auto;
+	}
+
+	.terminal-tabs__actions {
+		padding-inline: 0.35rem 0.5rem;
+	}
+
+	.terminal-tabs__list {
+		min-height: 1.9rem;
+	}
+
+	.terminal-tabs__add {
+		--icon-button-size: 1.4rem;
+	}
+
+	.terminal-tab {
+		min-height: 2rem;
+		max-width: 9rem;
+		font-size: 0.8rem;
+	}
+
+	.terminal-tab__button {
+		padding-inline: 0.65rem;
+	}
+
+	.terminal-tab__close {
+		--icon-button-size: 1.35rem;
+	}
+
+	.terminal-stage {
+		min-height: 0;
+	}
+
+	.xterm-shell {
+		padding: 0.25rem 0.35rem;
+	}
+
 	.terminal-footer {
-		flex-wrap: wrap;
+		padding-block: 0.5rem;
+		padding-inline: 0.65rem;
+		font-size: 0.75rem;
+		flex-wrap: nowrap;
+		gap: 0.5rem;
+	}
+
+	.terminal-footer__title {
+		flex-basis: 0;
+		white-space: nowrap;
+	}
+
+	.terminal-footer__size,
+	.terminal-footer__state {
+		opacity: 0.9;
+	}
+
+	.app-shell__header .icon-button {
+		--icon-button-size: 1.6rem;
 	}
 }
 

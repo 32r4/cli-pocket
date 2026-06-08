@@ -40,6 +40,9 @@ interface TerminalLike {
 	};
 	options: {
 		theme?: Record<string, string>;
+		fontFamily?: string;
+		fontSize?: number;
+		lineHeight?: number;
 	};
 	onData: (listener: (data: string) => void) => { dispose: () => void };
 	dispose: () => void;
@@ -62,11 +65,24 @@ let terminalModulesPromise: Promise<
 > | null = null;
 const utf8Decoder = new TextDecoder();
 const terminalScrollbackLines = 100_000;
+const terminalFontFamily = '"IBM Plex Mono", "Cascadia Code", monospace';
+const defaultTerminalFontSize = 15;
+const compactFontSizeOffset = 2;
+const minTerminalFontSize = 10;
+const maxTerminalFontSize = 20;
+const terminalLineHeight = 1.05;
+const compactTerminalLineHeight = 1;
 
 interface TerminalControllerOptions {
 	onInput: (terminalId: string, data: string) => void;
 	onResize: (terminalId: string, cols: number, rows: number) => void;
 	onLoadOlderHistory: () => void;
+	compactMode?: boolean;
+	terminalFontSize?: number;
+}
+
+function clampTerminalFontSize(value: number) {
+	return Math.min(maxTerminalFontSize, Math.max(minTerminalFontSize, value));
 }
 
 function decodeBase64Bytes(value: string) {
@@ -195,6 +211,8 @@ export class TerminalController {
 	private onInput: TerminalControllerOptions["onInput"];
 	private onResize: TerminalControllerOptions["onResize"];
 	private onLoadOlderHistory: TerminalControllerOptions["onLoadOlderHistory"];
+	private compactMode: boolean;
+	private terminalFontSize: number;
 	private activeTerminalId: string | null = null;
 	private host: HTMLElement | null = null;
 	private terminal: TerminalLike | null = null;
@@ -213,10 +231,48 @@ export class TerminalController {
 		onInput,
 		onResize,
 		onLoadOlderHistory,
+		compactMode = false,
+		terminalFontSize = defaultTerminalFontSize,
 	}: TerminalControllerOptions) {
 		this.onInput = onInput;
 		this.onResize = onResize;
 		this.onLoadOlderHistory = onLoadOlderHistory;
+		this.compactMode = compactMode;
+		this.terminalFontSize = clampTerminalFontSize(terminalFontSize);
+	}
+
+	setCompactMode(compactMode: boolean) {
+		if (this.compactMode === compactMode) {
+			return;
+		}
+
+		this.compactMode = compactMode;
+		if (this.terminal == null) {
+			return;
+		}
+
+		this.terminal.options.fontFamily = terminalFontFamily;
+		this.terminal.options.fontSize = this.getEffectiveFontSize();
+		this.terminal.options.lineHeight = this.compactMode
+			? compactTerminalLineHeight
+			: terminalLineHeight;
+		this.fitToViewport();
+	}
+
+	setTerminalFontSize(fontSize: number) {
+		const nextFontSize = clampTerminalFontSize(fontSize);
+		if (this.terminalFontSize === nextFontSize) {
+			return;
+		}
+
+		this.terminalFontSize = nextFontSize;
+		if (this.terminal == null) {
+			return;
+		}
+
+		this.terminal.options.fontFamily = terminalFontFamily;
+		this.terminal.options.fontSize = this.getEffectiveFontSize();
+		this.fitToViewport();
 	}
 
 	reset() {
@@ -331,6 +387,10 @@ export class TerminalController {
 
 		const modules = await loadTerminalModules();
 		const [{ Terminal }, { FitAddon }] = modules;
+		const fontSize = this.getEffectiveFontSize();
+		const lineHeight = this.compactMode
+			? compactTerminalLineHeight
+			: terminalLineHeight;
 
 		if (this.host === null) {
 			return;
@@ -339,6 +399,9 @@ export class TerminalController {
 		const terminal = new Terminal({
 			cols: 120,
 			cursorBlink: true,
+			fontFamily: terminalFontFamily,
+			fontSize,
+			lineHeight,
 			rows: 32,
 			scrollback: terminalScrollbackLines,
 			theme: terminalTheme(),
@@ -503,6 +566,17 @@ export class TerminalController {
 
 		this.replica.appendLiveChunk(chunk, seq);
 		this.terminal.write(chunk);
+	}
+
+	private getEffectiveFontSize() {
+		if (!this.compactMode) {
+			return this.terminalFontSize;
+		}
+
+		return Math.max(
+			minTerminalFontSize,
+			this.terminalFontSize - compactFontSizeOffset,
+		);
 	}
 
 	private async ensureProbeTerminal() {

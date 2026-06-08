@@ -1,12 +1,18 @@
 import { Check, Copy, Moon, RefreshCw, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import { Group, Input, NumberField } from "react-aria-components";
-import type { ThemeName } from "@/state/ui/uiState";
+import {
+	MAX_TERMINAL_FONT_SIZE,
+	MIN_TERMINAL_FONT_SIZE,
+	type ThemeName,
+} from "@/state/ui/uiState";
 
 interface HostSettingsSectionProps {
 	scrollbackBytes: number | null;
 	onScrollbackBytesChange: (scrollbackBytes: number) => void;
 	theme: ThemeName;
+	terminalFontSize: number;
+	onTerminalFontSizeChange: (fontSize: number) => void;
 	onCopyPairUrl: () => void;
 	isPairUrlCopied: boolean;
 	showPairControls: boolean;
@@ -37,6 +43,8 @@ export function HostSettingsSection({
 	scrollbackBytes,
 	onScrollbackBytesChange,
 	theme,
+	terminalFontSize,
+	onTerminalFontSizeChange,
 	onCopyPairUrl,
 	isPairUrlCopied,
 	showPairControls,
@@ -70,6 +78,34 @@ export function HostSettingsSection({
 						<Moon aria-hidden="true" size={14} strokeWidth={1.75} />
 					</button>
 				</div>
+			</DetailRow>
+			<DetailRow label="Terminal font">
+				<NumberField
+					aria-label="Terminal font size"
+					value={terminalFontSize}
+					minValue={MIN_TERMINAL_FONT_SIZE}
+					maxValue={MAX_TERMINAL_FONT_SIZE}
+					step={1}
+					commitBehavior="snap"
+					formatOptions={{
+						maximumFractionDigits: 0,
+						useGrouping: false,
+					}}
+					isWheelDisabled
+					onChange={(nextFontSize) => {
+						if (nextFontSize != null) {
+							onTerminalFontSizeChange(nextFontSize);
+						}
+					}}
+				>
+					<Group className="detail-row__scrollback-field">
+						<Input
+							className="detail-row__scrollback-input"
+							inputMode="numeric"
+						/>
+						<span className="detail-row__scrollback-unit">px</span>
+					</Group>
+				</NumberField>
 			</DetailRow>
 			{scrollbackBytes != null ? (
 				<DetailRow label="Scrollback">

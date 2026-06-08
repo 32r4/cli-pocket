@@ -43,9 +43,11 @@ export function useAppRuntime({
 	const hostControllerRef = useRef<HostController | null>(null);
 	const controllerRef = useRef<ConnectionController | null>(null);
 	const terminalRegistryRef = useRef<TerminalSessionRegistry | null>(null);
+	const initialTerminalFontSize = uiState.getState().terminalFontSize;
 	const [terminalController] = useState(
 		() =>
 			new TerminalController({
+				terminalFontSize: initialTerminalFontSize,
 				onInput: (terminalId, data) => {
 					const session = controllerRef.current?.getSession() ?? null;
 					if (session == null) {

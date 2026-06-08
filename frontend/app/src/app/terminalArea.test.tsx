@@ -61,6 +61,8 @@ function makeSession(): SessionActor {
 function makeController(): TerminalController {
 	return {
 		setTheme: vi.fn(),
+		setCompactMode: vi.fn(),
+		setTerminalFontSize: vi.fn(),
 		removeTerminal: vi.fn(),
 	} as unknown as TerminalController;
 }
@@ -111,6 +113,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={makeSession()}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
@@ -146,6 +150,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={session}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
@@ -164,6 +170,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={session}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
@@ -193,6 +201,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={session}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={controller}
 				registry={registry}
@@ -230,6 +240,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={session}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={makeRegistry()}
@@ -264,6 +276,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={makeSession()}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
@@ -298,6 +312,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={makeSession()}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
@@ -315,6 +331,8 @@ describe("TerminalArea", () => {
 			<TerminalArea
 				session={makeSession()}
 				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
 				workspaceState={workspaceState}
 				controller={makeController()}
 				registry={registry}
