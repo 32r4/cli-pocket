@@ -90,7 +90,7 @@ export function createWorkspaceStore() {
 					next.some((terminal) => terminal.id === state.activeSessionId)
 						? state.activeSessionId
 						: state.activeSessionId == null
-							? (next[next.length - 1]?.id ?? null)
+							? null
 							: (next[0]?.id ?? null);
 
 				return {

@@ -117,6 +117,7 @@ function makeTerminalRegistry(): TerminalSessionRegistry {
 		mountActive: vi.fn(async () => undefined),
 		unmountActive: vi.fn(),
 		resizeActive: vi.fn(),
+		measureViewportSize: vi.fn(async () => null),
 	} as unknown as TerminalSessionRegistry;
 }
 
@@ -194,7 +195,7 @@ describe("ConnectionController", () => {
 		expect(workspaceState.getState().connectionState).toBe("connected");
 		expect(workspaceState.getState().activeConnectionServerId).toBe("server-a");
 		expect(workspaceState.getState().terminals).toHaveLength(2);
-		expect(workspaceState.getState().activeSessionId).toBe("t2");
+		expect(workspaceState.getState().activeSessionId).toBeNull();
 		expect(workspaceState.getState().terminals[1]?.id).toBe("t2");
 	});
 

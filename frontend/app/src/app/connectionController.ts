@@ -530,10 +530,17 @@ export class ConnectionController {
 		}
 
 		try {
-			const createdTerminal = await session.createTerminal({
-				cols: 120,
-				rows: 36,
+			await new Promise<void>((resolve) => {
+				window.requestAnimationFrame(() => {
+					resolve();
+				});
 			});
+			const terminalSize =
+				(await this.deps.terminalRegistry.measureViewportSize()) ?? {
+					cols: 120,
+					rows: 36,
+				};
+			const createdTerminal = await session.createTerminal(terminalSize);
 			if (this.isCurrent(run) && createdTerminal != null) {
 				this.deps.workspaceState
 					.getState()

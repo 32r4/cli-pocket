@@ -80,6 +80,7 @@ function makeRegistry(): TerminalSessionRegistry {
 		mountActive: vi.fn(async () => undefined),
 		unmountActive: vi.fn(),
 		resizeActive: vi.fn(),
+		measureViewportSize: vi.fn(async () => null),
 	} as unknown as TerminalSessionRegistry;
 }
 
@@ -184,6 +185,37 @@ describe("TerminalArea", () => {
 			expect(session.createTerminal).toHaveBeenCalledWith({
 				cols: 120,
 				rows: 36,
+			});
+		});
+	});
+
+	it("creates terminals with the measured viewport size", async () => {
+		const workspaceState = createWorkspaceStore();
+		workspaceState.getState().markConnected();
+		const session = makeSession();
+		const registry = makeRegistry();
+		registry.measureViewportSize = vi.fn(async () => ({ cols: 88, rows: 27 }));
+
+		const view = render(
+			<TerminalArea
+				session={session}
+				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				terminalFontSize={15}
+				workspaceState={workspaceState}
+				controller={makeController()}
+				registry={registry}
+				theme="dark"
+				onInlineError={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(view.getByLabelText("Create terminal"));
+
+		await waitFor(() => {
+			expect(session.createTerminal).toHaveBeenCalledWith({
+				cols: 88,
+				rows: 27,
 			});
 		});
 	});

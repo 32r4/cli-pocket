@@ -277,6 +277,32 @@ describe("TerminalController", () => {
 		expect(onResize).toHaveBeenCalledWith("t2", 10, 4);
 	});
 
+	it("measures viewport size without reporting a resize for inactive terminals", async () => {
+		const onResize = vi.fn();
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize,
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		const size = await controller.measureViewportSize();
+
+		expect(size).toEqual({ cols: 10, rows: 4 });
+		expect(onResize).not.toHaveBeenCalled();
+	});
+
+	it("returns null when measuring before mount", async () => {
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+
+		await expect(controller.measureViewportSize()).resolves.toBeNull();
+	});
+
 	it("replays a snapshot that arrives before the terminal mounts", async () => {
 		const controller = new TerminalController({
 			onInput: vi.fn(),

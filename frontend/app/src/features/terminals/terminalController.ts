@@ -349,6 +349,15 @@ export class TerminalController {
 		await this.ensureTerminal();
 	}
 
+	async measureViewportSize() {
+		if (this.host === null) {
+			return null;
+		}
+
+		await this.ensureTerminal();
+		return this.fitTerminalToHost();
+	}
+
 	unmount() {
 		this.detachTerminal();
 		this.host = null;
@@ -446,7 +455,7 @@ export class TerminalController {
 
 		window.requestAnimationFrame(() => {
 			this.fitToViewport();
-			this.terminal?.focus();
+			this.focusActiveTerminal();
 		});
 		this.flushPendingState();
 	}
@@ -535,31 +544,36 @@ export class TerminalController {
 	}
 
 	private fitToViewport() {
+		const size = this.fitTerminalToHost();
+		if (size == null || this.activeTerminalId == null) {
+			return;
+		}
+
 		if (
-			this.terminal === null ||
-			this.fitAddon === null ||
-			this.activeTerminalId == null
+			this.lastReportedSize?.cols === size.cols &&
+			this.lastReportedSize?.rows === size.rows
 		) {
 			return;
+		}
+
+		this.lastReportedSize = size;
+		this.onResize(this.activeTerminalId, size.cols, size.rows);
+	}
+
+	private fitTerminalToHost() {
+		if (this.terminal === null || this.fitAddon === null) {
+			return null;
 		}
 
 		this.fitAddon.fit();
-		if (
-			this.lastReportedSize?.cols === this.terminal.cols &&
-			this.lastReportedSize?.rows === this.terminal.rows
-		) {
-			return;
+		if (this.terminal.cols <= 0 || this.terminal.rows <= 0) {
+			return null;
 		}
 
-		this.lastReportedSize = {
+		return {
 			cols: this.terminal.cols,
 			rows: this.terminal.rows,
 		};
-		this.onResize(
-			this.activeTerminalId,
-			this.terminal.cols,
-			this.terminal.rows,
-		);
 	}
 
 	private appendLiveOutput(chunk: string, seq: number) {

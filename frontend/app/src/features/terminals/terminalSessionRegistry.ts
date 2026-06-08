@@ -176,14 +176,15 @@ export class TerminalSessionRegistry {
 	dispose() {}
 
 	mountActive(host: HTMLElement) {
-		if (this.selectedTerminalId == null) {
-			return Promise.resolve();
-		}
 		return this.deps.controller.mount(host);
 	}
 
 	unmountActive() {
 		this.deps.controller.unmount();
+	}
+
+	async measureViewportSize() {
+		return await this.deps.controller.measureViewportSize();
 	}
 
 	resizeActive(cols: number, rows: number) {

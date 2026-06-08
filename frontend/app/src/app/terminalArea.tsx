@@ -45,6 +45,7 @@ export function TerminalArea({
 	theme,
 	onInlineError,
 }: TerminalAreaProps) {
+	const defaultTerminalSize = { cols: 120, rows: 36 };
 	const activeSession =
 		workspace.terminals.find(
 			(terminal) => terminal.id === workspace.activeSessionId,
@@ -79,10 +80,9 @@ export function TerminalArea({
 		}
 
 		try {
-			const createdTerminal = await session.createTerminal({
-				cols: 120,
-				rows: 36,
-			});
+			const terminalSize =
+				(await registry.measureViewportSize()) ?? defaultTerminalSize;
+			const createdTerminal = await session.createTerminal(terminalSize);
 			if (createdTerminal != null) {
 				workspaceState.getState().setActiveSessionId(createdTerminal.terminal);
 			}
@@ -165,39 +165,35 @@ export function TerminalArea({
 				</div>
 			</div>
 			<div className="terminal-stage">
-				{activeSession == null ? null : (
-					<>
-						<TerminalViewport registry={registry} />
-						{isConnecting ? (
-							<div className="terminal-stage__overlay" aria-live="polite">
-								<div className="xterm-server xterm-server--spinner">
-									<LoaderCircle
-										className="connection-spinner"
-										aria-hidden="true"
-										size={32}
-										strokeWidth={1.75}
-									/>
-									<span className="sr-only">Connecting terminal</span>
-								</div>
-							</div>
-						) : isError ? (
-							<div className="terminal-stage__overlay" aria-live="polite">
-								<div className="xterm-server xterm-server--spinner">
-									<button
-										className="icon-button"
-										type="button"
-										aria-label="Retry"
-										onClick={() => {
-											registry.retryActive();
-										}}
-									>
-										Retry
-									</button>
-								</div>
-							</div>
-						) : null}
-					</>
-				)}
+				<TerminalViewport registry={registry} />
+				{activeSession == null ? null : isConnecting ? (
+					<div className="terminal-stage__overlay" aria-live="polite">
+						<div className="xterm-server xterm-server--spinner">
+							<LoaderCircle
+								className="connection-spinner"
+								aria-hidden="true"
+								size={32}
+								strokeWidth={1.75}
+							/>
+							<span className="sr-only">Connecting terminal</span>
+						</div>
+					</div>
+				) : isError ? (
+					<div className="terminal-stage__overlay" aria-live="polite">
+						<div className="xterm-server xterm-server--spinner">
+							<button
+								className="icon-button"
+								type="button"
+								aria-label="Retry"
+								onClick={() => {
+									registry.retryActive();
+								}}
+							>
+								Retry
+							</button>
+						</div>
+					</div>
+				) : null}
 			</div>
 			<footer className="terminal-footer">
 				<span className="terminal-footer__title">
