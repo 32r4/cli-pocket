@@ -122,7 +122,7 @@ describe("TerminalController", () => {
 		const terminal = MockTerminal.instances[0];
 		expect(terminal?.options).toMatchObject({
 			theme: {
-				background: "#fffaf0",
+				background: "#f8fbfb",
 				foreground: "#172326",
 				cursor: "#1e6f72",
 				selectionBackground: "rgba(30, 111, 114, 0.18)",

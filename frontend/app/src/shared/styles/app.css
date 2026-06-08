@@ -79,7 +79,7 @@
 
 :root[data-theme="light"] {
 	color-scheme: light;
-	--bg: #f2eee5;
+	--bg: #edf3f3;
 	--app-background:
 		radial-gradient(
 			120rem 84rem at -12% -22%,
@@ -88,10 +88,10 @@
 		),
 		radial-gradient(
 			96rem 64rem at 110% 0%,
-			rgba(194, 124, 58, 0.14),
+			rgba(78, 140, 162, 0.12),
 			transparent 48%
 		),
-		linear-gradient(180deg, #fbf8f0 0%, #f2eee5 48%, #e5ddd0 100%);
+		linear-gradient(180deg, #fbfdfd 0%, #edf3f3 48%, #dfe8e8 100%);
 	--line: rgba(32, 53, 57, 0.11);
 	--line-strong: rgba(32, 53, 57, 0.2);
 	--text-soft: #5f706f;
@@ -99,37 +99,37 @@
 	--accent: #1e6f72;
 	--danger: #b74434;
 	--surface-hover: rgba(30, 111, 114, 0.07);
-	--surface-input: rgba(255, 252, 244, 0.9);
-	--surface-panel: rgba(255, 252, 244, 0.72);
+	--surface-input: rgba(251, 253, 253, 0.92);
+	--surface-panel: rgba(251, 253, 253, 0.74);
 	--surface-panel-strong: rgba(30, 111, 114, 0.1);
 	--surface-panel-border: rgba(32, 53, 57, 0.1);
-	--surface-shell: rgba(250, 246, 237, 0.88);
-	--surface-header: rgba(250, 246, 237, 0.78);
-	--surface-overlay: rgba(242, 237, 227, 0.94);
+	--surface-shell: rgba(247, 251, 251, 0.9);
+	--surface-header: rgba(247, 251, 251, 0.8);
+	--surface-overlay: rgba(235, 242, 242, 0.94);
 	--surface-terminal-rim: rgba(30, 111, 114, 0.11);
 	--surface-terminal-stage:
 		linear-gradient(
 			180deg,
-			rgba(255, 252, 244, 0.92),
-			rgba(238, 232, 218, 0.96)
+			rgba(251, 253, 253, 0.94),
+			rgba(229, 237, 237, 0.96)
 		),
-		#fffaf0;
-	--surface-terminal: #fffaf0;
+		#f8fbfb;
+	--surface-terminal: #f8fbfb;
 	--terminal-fg: #172326;
 	--terminal-cursor: #1e6f72;
 	--terminal-selection-bg: rgba(30, 111, 114, 0.18);
-	--status-connected: #2f7555;
-	--status-connecting: #906729;
+	--status-connected: #007a78;
+	--status-connecting: #3f7288;
 	--status-disconnected: #b74434;
-	--status-ring: rgba(30, 111, 114, 0.14);
+	--status-ring: rgba(0, 122, 120, 0.2);
 	--alert-border: rgba(183, 68, 52, 0.24);
 	--alert-bg: rgba(255, 235, 226, 0.9);
 	--alert-text: #8f2d22;
-	--overlay-backdrop: rgba(226, 218, 205, 0.82);
-	--selection-border: rgba(30, 111, 114, 0.24);
-	--focus-ring: rgba(30, 111, 114, 0.22);
-	--status-chip-bg: rgba(30, 111, 114, 0.06);
-	--status-chip-border: rgba(30, 111, 114, 0.14);
+	--overlay-backdrop: rgba(220, 229, 229, 0.82);
+	--selection-border: rgba(0, 122, 120, 0.4);
+	--focus-ring: rgba(0, 122, 120, 0.26);
+	--status-chip-bg: rgba(0, 122, 120, 0.08);
+	--status-chip-border: rgba(0, 122, 120, 0.18);
 	--status-chip-failed-bg: rgba(183, 68, 52, 0.08);
 	--status-chip-failed-border: rgba(183, 68, 52, 0.2);
 	--shadow-panel:
