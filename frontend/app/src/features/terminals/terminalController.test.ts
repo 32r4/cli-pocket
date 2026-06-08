@@ -124,8 +124,8 @@ describe("TerminalController", () => {
 			theme: {
 				background: "#f8fbfb",
 				foreground: "#0f1d20",
-				cursor: "#1e6f72",
-				selectionBackground: "rgba(30, 111, 114, 0.18)",
+				cursor: "#0b3a63",
+				selectionBackground: "rgba(37, 79, 113, 0.32)",
 				black: "#0f1d20",
 				white: "#435255",
 				brightBlack: "#3a494c",
