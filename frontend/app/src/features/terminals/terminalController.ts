@@ -94,6 +94,22 @@ function terminalTheme() {
 		foreground: readThemeToken("--terminal-fg"),
 		cursor: readThemeToken("--terminal-cursor"),
 		selectionBackground: readThemeToken("--terminal-selection-bg"),
+		black: readThemeToken("--terminal-black"),
+		red: readThemeToken("--terminal-red"),
+		green: readThemeToken("--terminal-green"),
+		yellow: readThemeToken("--terminal-yellow"),
+		blue: readThemeToken("--terminal-blue"),
+		magenta: readThemeToken("--terminal-magenta"),
+		cyan: readThemeToken("--terminal-cyan"),
+		white: readThemeToken("--terminal-white"),
+		brightBlack: readThemeToken("--terminal-bright-black"),
+		brightRed: readThemeToken("--terminal-bright-red"),
+		brightGreen: readThemeToken("--terminal-bright-green"),
+		brightYellow: readThemeToken("--terminal-bright-yellow"),
+		brightBlue: readThemeToken("--terminal-bright-blue"),
+		brightMagenta: readThemeToken("--terminal-bright-magenta"),
+		brightCyan: readThemeToken("--terminal-bright-cyan"),
+		brightWhite: readThemeToken("--terminal-bright-white"),
 	};
 }
 

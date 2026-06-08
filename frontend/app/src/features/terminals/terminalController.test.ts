@@ -123,9 +123,13 @@ describe("TerminalController", () => {
 		expect(terminal?.options).toMatchObject({
 			theme: {
 				background: "#f8fbfb",
-				foreground: "#172326",
+				foreground: "#0f1d20",
 				cursor: "#1e6f72",
 				selectionBackground: "rgba(30, 111, 114, 0.18)",
+				black: "#0f1d20",
+				white: "#435255",
+				brightBlack: "#3a494c",
+				brightWhite: "#172326",
 			},
 		});
 		expect(terminal?.refreshCalls).toEqual([[0, 3]]);
