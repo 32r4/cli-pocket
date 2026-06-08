@@ -36,8 +36,8 @@ const SIZES = [
   { name: 'icon.png', size: 1024 },
 ];
 
-// Windows picks taskbar icons from the nearest match in the ICO.
-const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256];
+// Keep the largest frame first so naive consumers do not lock onto a tiny icon.
+const ICO_SIZES = [256, 128, 64, 48, 40, 32, 24, 20, 16];
 const SMALL_ICON_MAX_SIZE = 40;
 
 /**
