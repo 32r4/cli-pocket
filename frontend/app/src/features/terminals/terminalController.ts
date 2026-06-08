@@ -32,15 +32,14 @@ interface TerminalLike {
 	reset: () => void;
 	focus: () => void;
 	loadAddon: (addon: TerminalAddonLike) => void;
+	refresh: (start: number, end: number) => void;
 	scrollToLine: (line: number) => void;
 	onScroll: (listener: (position: number) => void) => TerminalScrollDisposable;
 	buffer: {
 		active: TerminalBufferLike;
 	};
-	optionsService?: {
-		options: {
-			theme?: Record<string, string>;
-		};
+	options: {
+		theme?: Record<string, string>;
 	};
 	onData: (listener: (data: string) => void) => { dispose: () => void };
 	dispose: () => void;
@@ -211,9 +210,12 @@ export class TerminalController {
 	}
 
 	setTheme(_theme: ThemeName) {
-		if (this.terminal?.optionsService?.options != null) {
-			this.terminal.optionsService.options.theme = terminalTheme();
+		if (this.terminal == null) {
+			return;
 		}
+
+		this.terminal.options.theme = terminalTheme();
+		this.terminal.refresh(0, Math.max(0, this.terminal.rows - 1));
 	}
 
 	setActiveTerminal(terminalId: string | null) {

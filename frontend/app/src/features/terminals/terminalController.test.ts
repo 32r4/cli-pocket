@@ -10,6 +10,7 @@ class MockTerminal {
 	cols = 10;
 	rows = 4;
 	options?: unknown;
+	refreshCalls: Array<[number, number]> = [];
 	focusCalls = 0;
 	writes: string[] = [];
 	scrollToLineCalls: number[] = [];
@@ -33,6 +34,9 @@ class MockTerminal {
 
 	open(_node: HTMLElement) {}
 	loadAddon(_addon: unknown) {}
+	refresh(start: number, end: number) {
+		this.refreshCalls.push([start, end]);
+	}
 	focus() {
 		this.focusCalls += 1;
 	}
@@ -101,6 +105,30 @@ describe("TerminalController", () => {
 		expect(MockTerminal.instances[0]?.options).toMatchObject({
 			scrollback: 100_000,
 		});
+	});
+
+	it("updates the terminal theme through the public options API", async () => {
+		MockTerminal.instances = [];
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		controller.setTheme("light");
+
+		const terminal = MockTerminal.instances[0];
+		expect(terminal?.options).toMatchObject({
+			theme: {
+				background: "#fffdfa",
+				foreground: "#181818",
+				cursor: "#111111",
+				selectionBackground: "rgba(17, 17, 17, 0.16)",
+			},
+		});
+		expect(terminal?.refreshCalls).toEqual([[0, 3]]);
 	});
 
 	it("tracks loaded seq range from the snapshot", async () => {
