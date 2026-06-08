@@ -147,6 +147,24 @@ describe("TerminalController", () => {
 
 	it("updates the terminal theme through the public options API", async () => {
 		MockTerminal.instances = [];
+		document.documentElement.dataset.theme = "light";
+		document.documentElement.style.setProperty("--surface-terminal", "#f8fbfb");
+		document.documentElement.style.setProperty("--terminal-fg", "#0f1d20");
+		document.documentElement.style.setProperty("--terminal-cursor", "#0b3a63");
+		document.documentElement.style.setProperty(
+			"--terminal-selection-bg",
+			"rgba(37, 79, 113, 0.32)",
+		);
+		document.documentElement.style.setProperty("--terminal-black", "#0f1d20");
+		document.documentElement.style.setProperty("--terminal-white", "#435255");
+		document.documentElement.style.setProperty(
+			"--terminal-bright-black",
+			"#3a494c",
+		);
+		document.documentElement.style.setProperty(
+			"--terminal-bright-white",
+			"#172326",
+		);
 		const controller = new TerminalController({
 			onInput: vi.fn(),
 			onResize: vi.fn(),
@@ -238,6 +256,25 @@ describe("TerminalController", () => {
 		});
 
 		expect(terminal.focusCalls).toBeGreaterThan(initialFocusCalls);
+	});
+
+	it("reports the viewport size again when switching active terminals", async () => {
+		const onResize = vi.fn();
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize,
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		controller.setActiveTerminal("t1");
+		controller.renderSnapshot("t1", "", 0);
+		controller.setActiveTerminal("t2");
+		controller.renderSnapshot("t2", "", 0);
+
+		expect(onResize).toHaveBeenCalledWith("t1", 10, 4);
+		expect(onResize).toHaveBeenCalledWith("t2", 10, 4);
 	});
 
 	it("replays a snapshot that arrives before the terminal mounts", async () => {

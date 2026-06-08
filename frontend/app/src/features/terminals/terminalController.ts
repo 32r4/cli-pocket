@@ -291,6 +291,9 @@ export class TerminalController {
 	}
 
 	setActiveTerminal(terminalId: string | null) {
+		if (this.activeTerminalId !== terminalId) {
+			this.lastReportedSize = null;
+		}
 		this.activeTerminalId = terminalId;
 		this.flushPendingState();
 		this.focusActiveTerminal();
