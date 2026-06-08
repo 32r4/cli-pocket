@@ -1,132 +1,139 @@
 :root {
-	font-family: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+	font-family:
+		"IBM Plex Sans", "Segoe UI Variable", "Segoe UI", "Helvetica Neue", Arial,
+		sans-serif;
 	--safe-area-top: env(safe-area-inset-top, 0px);
 	--safe-area-right: env(safe-area-inset-right, 0px);
 	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
 	--safe-area-left: env(safe-area-inset-left, 0px);
+	--radius-xs: 0.35rem;
+	--radius-sm: 0.55rem;
+	--radius-md: 0.85rem;
+	--radius-lg: 1.15rem;
+	--radius-xl: 1.45rem;
+	--blur-soft: 18px;
+	--blur-strong: 24px;
 }
 
 :root,
 :root[data-theme="dark"] {
 	color-scheme: dark;
-	--bg: #070707;
+	--bg: #050505;
 	--app-background:
 		radial-gradient(
-			140rem 80rem at -10% -20%,
-			rgba(255, 255, 255, 0.12),
-			transparent 55%
+			120rem 72rem at -12% -22%,
+			rgba(255, 255, 255, 0.1),
+			transparent 52%
 		),
 		radial-gradient(
-			90rem 60rem at 110% 0%,
-			rgba(255, 255, 255, 0.06),
-			transparent 45%
+			92rem 58rem at 108% -6%,
+			rgba(255, 255, 255, 0.05),
+			transparent 46%
 		),
-		linear-gradient(180deg, #111111 0%, #070707 42%, #050505 100%);
-	--line: rgba(255, 255, 255, 0.12);
-	--line-strong: rgba(255, 255, 255, 0.22);
-	--text-soft: #9f9a92;
-	--text-strong: #f5f1e8;
+		linear-gradient(180deg, #111111 0%, #070707 46%, #030303 100%);
+	--line: rgba(255, 255, 255, 0.1);
+	--line-strong: rgba(255, 255, 255, 0.2);
+	--text-soft: #a9a39a;
+	--text-strong: #f7f3ea;
 	--accent: #ffffff;
 	--danger: #f38b8b;
-	--surface-hover: rgba(255, 255, 255, 0.055);
-	--surface-input: rgba(255, 255, 255, 0.045);
-	--surface-panel: rgba(255, 255, 255, 0.04);
-	--surface-panel-strong: rgba(255, 255, 255, 0.11);
-	--surface-panel-border: rgba(255, 255, 255, 0.14);
-	--surface-shell: rgba(10, 10, 10, 0.84);
-	--surface-header: rgba(8, 8, 8, 0.62);
-	--surface-overlay: rgba(5, 5, 5, 0.92);
+	--surface-hover: rgba(255, 255, 255, 0.06);
+	--surface-input: rgba(255, 255, 255, 0.05);
+	--surface-panel: rgba(255, 255, 255, 0.042);
+	--surface-panel-strong: rgba(255, 255, 255, 0.12);
+	--surface-panel-border: rgba(255, 255, 255, 0.12);
+	--surface-shell: rgba(10, 10, 10, 0.88);
+	--surface-header: rgba(8, 8, 8, 0.7);
+	--surface-overlay: rgba(4, 4, 4, 0.9);
 	--surface-terminal-rim: rgba(255, 255, 255, 0.08);
 	--surface-terminal-stage:
-		linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+		linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
 		#030303;
 	--surface-terminal: #030303;
 	--terminal-fg: #f0ece4;
 	--terminal-cursor: #ffffff;
-	--terminal-selection-bg: rgba(255, 255, 255, 0.18);
+	--terminal-selection-bg: rgba(255, 255, 255, 0.16);
 	--status-connected: #b8d7c4;
 	--status-connecting: #d8c59c;
 	--status-disconnected: #f0a4a4;
-	--status-ring: rgba(255, 255, 255, 0.12);
+	--status-ring: rgba(255, 255, 255, 0.11);
 	--alert-border: rgba(243, 139, 139, 0.28);
 	--alert-bg: rgba(88, 24, 24, 0.34);
 	--alert-text: #ffe1e1;
-	--overlay-backdrop: rgba(0, 0, 0, 0.82);
-	--selection-border: rgba(255, 255, 255, 0.24);
-	--focus-ring: rgba(255, 255, 255, 0.34);
-	--status-chip-bg: rgba(255, 255, 255, 0.07);
-	--status-chip-border: rgba(255, 255, 255, 0.16);
+	--overlay-backdrop: rgba(0, 0, 0, 0.8);
+	--selection-border: rgba(255, 255, 255, 0.22);
+	--focus-ring: rgba(255, 255, 255, 0.28);
+	--status-chip-bg: rgba(255, 255, 255, 0.065);
+	--status-chip-border: rgba(255, 255, 255, 0.14);
 	--status-chip-failed-bg: rgba(243, 139, 139, 0.12);
 	--status-chip-failed-border: rgba(243, 139, 139, 0.22);
-	--shadow-panel: 0 22px 80px rgba(0, 0, 0, 0.42);
-	--shadow-elevated: 0 12px 36px rgba(0, 0, 0, 0.24);
+	--shadow-panel:
+		0 28px 90px rgba(0, 0, 0, 0.46), 0 1px 0 rgba(255, 255, 255, 0.04);
+	--shadow-elevated: 0 14px 38px rgba(0, 0, 0, 0.26);
 	--shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-	--scrollbar-thumb: rgba(255, 255, 255, 0.16);
-	--scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+	--scrollbar-thumb: rgba(255, 255, 255, 0.14);
+	--scrollbar-thumb-hover: rgba(255, 255, 255, 0.26);
 	--scrollbar-track: transparent;
 	--scrollbar-corner: transparent;
 }
 
 :root[data-theme="light"] {
 	color-scheme: light;
-	--bg: #f5f3ee;
+	--bg: #f3f0ea;
 	--app-background:
 		radial-gradient(
-			130rem 84rem at -10% -22%,
-			rgba(0, 0, 0, 0.06),
-			transparent 55%
+			120rem 84rem at -12% -22%,
+			rgba(0, 0, 0, 0.05),
+			transparent 54%
 		),
 		radial-gradient(
 			96rem 64rem at 110% 0%,
-			rgba(0, 0, 0, 0.04),
+			rgba(0, 0, 0, 0.035),
 			transparent 48%
 		),
-		linear-gradient(180deg, #fbfaf7 0%, #f2efe9 48%, #ece8e0 100%);
-	--line: rgba(15, 15, 15, 0.12);
-	--line-strong: rgba(15, 15, 15, 0.22);
-	--text-soft: #686156;
-	--text-strong: #111111;
-	--accent: #0f172a;
+		linear-gradient(180deg, #fcfbf8 0%, #f4f1ea 48%, #ece7de 100%);
+	--line: rgba(18, 18, 18, 0.1);
+	--line-strong: rgba(18, 18, 18, 0.18);
+	--text-soft: #665f55;
+	--text-strong: #101010;
+	--accent: #111111;
 	--danger: #b91c1c;
-	--surface-hover: rgba(15, 15, 15, 0.045);
-	--surface-input: rgba(255, 255, 255, 0.86);
-	--surface-panel: rgba(255, 255, 255, 0.72);
+	--surface-hover: rgba(15, 15, 15, 0.04);
+	--surface-input: rgba(255, 255, 255, 0.88);
+	--surface-panel: rgba(255, 255, 255, 0.68);
 	--surface-panel-strong: rgba(15, 15, 15, 0.08);
-	--surface-panel-border: rgba(15, 15, 15, 0.1);
-	--surface-shell: rgba(250, 248, 243, 0.82);
-	--surface-header: rgba(251, 250, 247, 0.68);
-	--surface-overlay: rgba(245, 243, 238, 0.94);
+	--surface-panel-border: rgba(15, 15, 15, 0.08);
+	--surface-shell: rgba(252, 250, 246, 0.86);
+	--surface-header: rgba(252, 250, 246, 0.74);
+	--surface-overlay: rgba(245, 242, 236, 0.92);
 	--surface-terminal-rim: rgba(15, 15, 15, 0.08);
 	--surface-terminal-stage:
-		linear-gradient(
-			180deg,
-			rgba(255, 255, 255, 0.82),
-			rgba(236, 232, 224, 0.94)
-		),
+		linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(238, 233, 224, 0.95)),
 		#fffdfa;
 	--surface-terminal: #fffdfa;
 	--terminal-fg: #181818;
 	--terminal-cursor: #111111;
-	--terminal-selection-bg: rgba(17, 17, 17, 0.16);
-	--status-connected: #32684e;
-	--status-connecting: #876830;
-	--status-disconnected: #b74c4c;
-	--status-ring: rgba(15, 15, 15, 0.14);
+	--terminal-selection-bg: rgba(17, 17, 17, 0.12);
+	--status-connected: #365f49;
+	--status-connecting: #8a6a31;
+	--status-disconnected: #ad4747;
+	--status-ring: rgba(15, 15, 15, 0.12);
 	--alert-border: rgba(220, 38, 38, 0.22);
 	--alert-bg: rgba(255, 242, 242, 0.9);
 	--alert-text: #991b1b;
-	--overlay-backdrop: rgba(235, 232, 224, 0.82);
-	--selection-border: rgba(15, 15, 15, 0.2);
-	--focus-ring: rgba(17, 17, 17, 0.22);
-	--status-chip-bg: rgba(17, 17, 17, 0.04);
-	--status-chip-border: rgba(17, 17, 17, 0.1);
+	--overlay-backdrop: rgba(233, 229, 221, 0.8);
+	--selection-border: rgba(15, 15, 15, 0.18);
+	--focus-ring: rgba(17, 17, 17, 0.18);
+	--status-chip-bg: rgba(17, 17, 17, 0.035);
+	--status-chip-border: rgba(17, 17, 17, 0.09);
 	--status-chip-failed-bg: rgba(220, 38, 38, 0.07);
 	--status-chip-failed-border: rgba(220, 38, 38, 0.18);
-	--shadow-panel: 0 20px 72px rgba(36, 32, 24, 0.12);
-	--shadow-elevated: 0 10px 28px rgba(36, 32, 24, 0.08);
+	--shadow-panel:
+		0 24px 76px rgba(36, 32, 24, 0.12), 0 1px 0 rgba(255, 255, 255, 0.74);
+	--shadow-elevated: 0 12px 30px rgba(36, 32, 24, 0.08);
 	--shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-	--scrollbar-thumb: rgba(15, 15, 15, 0.16);
-	--scrollbar-thumb-hover: rgba(15, 15, 15, 0.28);
+	--scrollbar-thumb: rgba(15, 15, 15, 0.15);
+	--scrollbar-thumb-hover: rgba(15, 15, 15, 0.26);
 	--scrollbar-track: transparent;
 	--scrollbar-corner: transparent;
 }
@@ -166,10 +173,14 @@
 body {
 	margin: 0;
 	min-height: 100vh;
-	background: var(--app-background);
+	background:
+		var(--app-background),
+		linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 30%);
 	color: var(--text-strong);
 	background-attachment: fixed;
 	overflow: hidden;
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -180,10 +191,10 @@ select {
 
 button {
 	border: 1px solid transparent;
-	border-radius: 0;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--text-strong);
-	padding: 0.75rem 0;
+	padding: 0.8rem 1rem;
 	cursor: pointer;
 	transition:
 		background-color 140ms ease,
@@ -201,7 +212,7 @@ input,
 select {
 	width: 100%;
 	border: 1px solid var(--line);
-	border-radius: 0;
+	border-radius: var(--radius-sm);
 	background: var(--surface-input);
 	color: var(--text-strong);
 	padding: 0.85rem 0.95rem;
@@ -222,7 +233,7 @@ select:focus-visible {
 	place-items: center;
 	width: var(--icon-button-size, 1.75rem);
 	height: var(--icon-button-size, 1.75rem);
-	border-radius: var(--icon-button-radius, 0.3rem);
+	border-radius: var(--icon-button-radius, 0.45rem);
 	color: var(--text-soft);
 	cursor: pointer;
 	transition:
@@ -278,6 +289,7 @@ strong {
 	min-height: 100vh;
 	padding: 0;
 	overflow: hidden;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
 }
 
 @supports (height: 100dvh) {
@@ -307,20 +319,27 @@ strong {
 			transparent calc(100% - 1px),
 			var(--line) calc(100% - 1px),
 			var(--line) 100%
+		),
+		linear-gradient(
+			180deg,
+			rgba(255, 255, 255, 0.04),
+			transparent 24%,
+			transparent 76%,
+			rgba(0, 0, 0, 0.08)
 		);
-	opacity: 0.24;
+	opacity: 0.2;
 }
 
 .app-shell__header {
 	display: flex;
 	align-items: center;
 	gap: 1rem;
-	padding: calc(var(--safe-area-top) + 0.75rem)
-		calc(var(--safe-area-right) + 0.75rem) 0.75rem
-		calc(var(--safe-area-left) + 0.75rem);
+	padding: calc(var(--safe-area-top) + 0.8rem)
+		calc(var(--safe-area-right) + 0.85rem) 0.8rem
+		calc(var(--safe-area-left) + 0.85rem);
 	border-bottom: 1px solid var(--line-strong);
 	background: var(--surface-header);
-	backdrop-filter: blur(18px);
+	backdrop-filter: blur(var(--blur-soft));
 }
 
 .app-shell[data-window-chrome="desktop"] .app-shell__header {
@@ -353,7 +372,7 @@ strong {
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
 	font-size: 1rem;
 	font-weight: 600;
-	letter-spacing: 0.02em;
+	letter-spacing: 0.01em;
 }
 
 .app-shell__status-light {
@@ -401,6 +420,13 @@ strong {
 	align-content: start;
 	gap: 1rem;
 	max-width: 24rem;
+	padding: 1.25rem;
+	margin: 1rem;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-lg);
+	background: var(--surface-panel);
+	box-shadow: var(--shadow-elevated);
+	backdrop-filter: blur(var(--blur-soft));
 }
 
 .connection-spinner-panel {
@@ -428,6 +454,7 @@ strong {
 	height: 100%;
 	min-height: 0;
 	margin: 0 auto;
+	padding: 1.25rem;
 }
 
 .server-option-buttons {
@@ -502,7 +529,7 @@ strong {
 	justify-content: space-between;
 	gap: 1rem;
 	min-height: 4rem;
-	padding: 0.9rem 0;
+	padding: 0.95rem 0;
 	border-bottom: 1px solid var(--line);
 }
 
@@ -541,7 +568,7 @@ strong {
 .appearance-toggle {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.15rem;
+	gap: 0.25rem;
 }
 
 .appearance-toggle__button {
@@ -551,6 +578,7 @@ strong {
 .appearance-toggle__button[data-active="true"] {
 	color: var(--text-strong);
 	border: 1px solid var(--line);
+	background: var(--surface-panel);
 }
 
 [role="alert"] {
@@ -559,6 +587,7 @@ strong {
 	border: 1px solid var(--alert-border);
 	background: var(--alert-bg);
 	color: var(--alert-text);
+	border-radius: var(--radius-md);
 }
 
 .workspace-panel {
@@ -568,6 +597,7 @@ strong {
 	overflow: hidden;
 	border-bottom: 1px solid var(--line);
 	box-shadow: var(--shadow-panel);
+	background: var(--surface-shell);
 }
 
 .terminal-tabs {
@@ -577,7 +607,7 @@ strong {
 	border-bottom: 1px solid var(--line);
 	overflow: hidden;
 	background: var(--surface-header);
-	backdrop-filter: blur(18px);
+	backdrop-filter: blur(var(--blur-soft));
 }
 
 .terminal-tabs__actions {
@@ -615,6 +645,11 @@ strong {
 	border-bottom: 0;
 	box-shadow: var(--shadow-inset);
 	font-size: 0.9rem;
+	transition:
+		background-color 140ms ease,
+		border-color 140ms ease,
+		box-shadow 140ms ease,
+		transform 140ms ease;
 }
 
 .terminal-tab__button {
@@ -714,11 +749,12 @@ strong {
 	gap: 0.75rem;
 	justify-content: space-between;
 	min-width: 0;
-	padding: 0.75rem;
+	padding: 0.8rem 0.9rem;
 	border-top: 1px solid var(--line);
 	color: var(--text-soft);
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
 	font-size: 0.85rem;
+	background: var(--surface-header);
 }
 
 .terminal-footer__title {
@@ -745,7 +781,7 @@ strong {
 .app-shell__window-button {
 	width: 1.75rem;
 	height: 1.75rem;
-	border-radius: 0.3rem;
+	border-radius: 0.45rem;
 }
 
 .app-shell__window-button--danger:hover:enabled,
@@ -766,23 +802,23 @@ strong {
 	gap: 1rem;
 	padding: 0;
 	background: var(--surface-overlay);
-	backdrop-filter: blur(20px);
+	backdrop-filter: blur(var(--blur-strong));
 	overflow: hidden;
 }
 
 .control-overlay__rail,
 .control-overlay__detail {
 	min-height: 0;
-	padding: 1.5rem calc(var(--safe-area-right) + 1.5rem)
-		calc(var(--safe-area-bottom) + 1.5rem) calc(var(--safe-area-left) + 1.5rem);
+	padding: 1.4rem calc(var(--safe-area-right) + 1.4rem)
+		calc(var(--safe-area-bottom) + 1.4rem) calc(var(--safe-area-left) + 1.4rem);
 	overflow: auto;
 }
 
 .control-overlay__mobile-page {
 	height: 100%;
 	min-height: 0;
-	padding: 1.5rem calc(var(--safe-area-right) + 1.5rem)
-		calc(var(--safe-area-bottom) + 1.5rem) calc(var(--safe-area-left) + 1.5rem);
+	padding: 1.4rem calc(var(--safe-area-right) + 1.4rem)
+		calc(var(--safe-area-bottom) + 1.4rem) calc(var(--safe-area-left) + 1.4rem);
 	overflow: auto;
 }
 
@@ -791,6 +827,9 @@ strong {
 	grid-template-rows: auto auto auto minmax(0, 1fr);
 	gap: 0;
 	border-right: 1px solid var(--line-strong);
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 22%),
+		transparent;
 }
 
 .overlay-nav,
@@ -880,21 +919,22 @@ strong {
 	place-items: center;
 	padding: 1.5rem;
 	background: var(--overlay-backdrop);
+	backdrop-filter: blur(10px);
 }
 
 .server-modal {
 	width: min(100%, 20rem);
 	padding: 1.5rem;
 	border: 1px solid var(--surface-panel-border);
-	border-radius: 0.6rem;
+	border-radius: var(--radius-lg);
 	background: var(--surface-shell);
 	box-shadow: var(--shadow-panel);
-	backdrop-filter: blur(22px);
+	backdrop-filter: blur(var(--blur-strong));
 }
 
 .server-form input,
 .server-form .action-row > button {
-	border-radius: 0.2rem;
+	border-radius: var(--radius-sm);
 }
 
 .server-option-buttons__button {
@@ -904,7 +944,7 @@ strong {
 	justify-content: center;
 	padding: 1rem 1.25rem;
 	border: 1px solid var(--surface-panel-border);
-	border-radius: 0.3rem;
+	border-radius: var(--radius-md);
 	background: var(--surface-panel);
 	box-shadow: var(--shadow-elevated);
 }
@@ -917,6 +957,7 @@ strong {
 	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
 	font-size: 0.85rem;
 	text-transform: lowercase;
+	border-radius: 999px;
 }
 
 .status-chip[data-state="failed"] {
@@ -963,5 +1004,16 @@ strong {
 
 	.terminal-footer {
 		flex-wrap: wrap;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		scroll-behavior: auto;
+		animation-duration: 0.01ms;
+		animation-iteration-count: 1;
+		transition-duration: 0.01ms;
 	}
 }
