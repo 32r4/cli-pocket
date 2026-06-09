@@ -51,7 +51,7 @@ build-mobile-android:
     just mobile-android-init
     just _frontend-install-if-missing
     npm --prefix frontend/app run build:mobile
-    cd apps/mobile; cargo tauri android build --apk --aab
+    cd apps/mobile; cargo tauri android build --split-per-abi --apk --aab
 
 build-mobile-ios:
     just _frontend-install-if-missing
@@ -147,6 +147,7 @@ _ensure-wasm-pkg:
 
 mobile-android-init:
     cd apps/mobile; cargo tauri android init --ci
+    node scripts/mobile/configure-android-signing.mjs
 
 frontend-check:
     just _frontend-install-if-missing

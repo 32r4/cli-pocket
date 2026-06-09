@@ -11,13 +11,17 @@ if [ ! -f "$APP_CONFIG" ]; then
   exit 0
 fi
 
-cd webview/terminal
-npm ci
-npm run build:tauri
-cd "$OLDPWD"
+npm --prefix frontend/app ci
+npm --prefix frontend/app run build:mobile
 
 cd apps/mobile
-cargo tauri android build --apk --aab
+cargo tauri android init --ci
+cd "$OLDPWD"
+
+node scripts/mobile/configure-android-signing.mjs
+
+cd apps/mobile
+cargo tauri android build --split-per-abi --apk --aab
 cd "$OLDPWD"
 
 TARGET_DIR="apps/mobile/src-tauri/gen/android/app/build/outputs"
