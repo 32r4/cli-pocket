@@ -232,6 +232,7 @@ button {
 	color: var(--text-strong);
 	padding: 0.8rem 1rem;
 	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
 	transition:
 		background-color 140ms ease,
 		color 140ms ease,
@@ -272,6 +273,7 @@ select:focus-visible {
 	border-radius: var(--icon-button-radius, 0.45rem);
 	color: var(--text-soft);
 	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
 	transition:
 		background-color 140ms ease,
 		color 140ms ease,
