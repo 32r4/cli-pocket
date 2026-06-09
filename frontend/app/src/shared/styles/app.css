@@ -454,15 +454,7 @@ strong {
 .connection-status-panel {
 	display: grid;
 	align-content: start;
-	gap: 1rem;
-	max-width: 24rem;
 	padding: 1.25rem;
-	margin: 1rem;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-lg);
-	background: var(--surface-panel);
-	box-shadow: var(--shadow-elevated);
-	backdrop-filter: blur(var(--blur-soft));
 }
 
 .connection-spinner-panel {

@@ -355,9 +355,6 @@ export class TerminalSessionRegistry {
 				error instanceof Error ? error.message : "failed to open terminal";
 			this.state.phase = "failed";
 			this.state.error = message;
-			if (message !== "terminal open timed out") {
-				this.deps.onInlineError(message);
-			}
 		}
 	}
 

@@ -426,7 +426,6 @@ export class ConnectionController {
 
 		if (result.state === "failed") {
 			this.deps.workspaceState.getState().markConnectionFailed(result.message);
-			this.deps.onInlineError(result.message);
 			return;
 		}
 

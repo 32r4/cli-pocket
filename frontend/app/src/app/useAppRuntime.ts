@@ -165,7 +165,6 @@ export function useAppRuntime({
 			const message =
 				error instanceof Error ? error.message : "connection failed";
 			workspaceState.getState().markConnectionFailed(message);
-			onInlineError(message);
 		}
 	};
 

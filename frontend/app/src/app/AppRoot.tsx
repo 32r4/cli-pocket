@@ -84,6 +84,9 @@ export function AppRoot({
 		registry.daemons.find(
 			(daemon) => daemon.id === workspace.activeConnectionServerId,
 		) ?? null;
+	const selectedServer =
+		registry.daemons.find((daemon) => daemon.id === ui.selectedServerId) ??
+		null;
 
 	useEffect(() => {
 		if (session == null || workspace.connectionState !== "connected") {
@@ -220,7 +223,7 @@ export function AppRoot({
 		}, 3000);
 	};
 
-	const errorMessage = inlineError ?? workspace.lastError ?? platformError;
+	const errorMessage = inlineError ?? platformError;
 	const hasSavedServers = registry.daemons.length > 0;
 	const isMobileOverlay = platform.shell === "mobile" || isNarrowViewport;
 	const primaryNavigationMode = ui.isMenuOpen ? "back" : ("menu" as const);
@@ -334,7 +337,17 @@ export function AppRoot({
 				className="connection-status-panel"
 				aria-label="Connection status"
 			>
-				<h2>Connection failed</h2>
+				<button
+					type="button"
+					disabled={selectedServer == null}
+					onClick={() => {
+						if (selectedServer != null) {
+							void connectServer(selectedServer);
+						}
+					}}
+				>
+					Retry
+				</button>
 			</section>
 		) : (
 			<section className="empty-hosts-panel" aria-label="Add server options">
