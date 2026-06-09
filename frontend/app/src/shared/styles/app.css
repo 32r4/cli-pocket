@@ -584,8 +584,10 @@ strong {
 }
 
 .detail-row__scrollback-unit {
+	flex: 0 0 1.5rem;
 	color: var(--text-soft);
 	font-size: 0.9rem;
+	text-align: right;
 }
 
 .detail-row__scrollback-field {
@@ -598,6 +600,7 @@ strong {
 	width: 4.5rem;
 	height: 1.75rem;
 	padding: 0.35rem 0.5rem;
+	font-variant-numeric: tabular-nums;
 	text-align: right;
 }
 

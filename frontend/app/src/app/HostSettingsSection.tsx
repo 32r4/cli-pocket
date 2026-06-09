@@ -93,7 +93,7 @@ export function HostSettingsSection({
 					}}
 					isWheelDisabled
 					onChange={(nextFontSize) => {
-						if (nextFontSize != null) {
+						if (Number.isFinite(nextFontSize)) {
 							onTerminalFontSizeChange(nextFontSize);
 						}
 					}}
@@ -122,7 +122,9 @@ export function HostSettingsSection({
 						}}
 						isWheelDisabled
 						onChange={(nextScrollbackMiB) => {
-							onScrollbackBytesChange(nextScrollbackMiB * MIB);
+							if (Number.isFinite(nextScrollbackMiB)) {
+								onScrollbackBytesChange(nextScrollbackMiB * MIB);
+							}
 						}}
 					>
 						<Group className="detail-row__scrollback-field">
