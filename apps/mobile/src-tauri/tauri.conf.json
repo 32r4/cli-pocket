@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.cli-pocket.mobile",
   "build": {
-    "beforeDevCommand": "npm --prefix ../../frontend/app run dev:mobile",
+    "beforeDevCommand": "npm --prefix ../.. run generate-icons && npm --prefix ../../frontend/app run dev:mobile",
     "devUrl": "http://localhost:5174",
-    "beforeBuildCommand": "npm --prefix ../../frontend/app run build:mobile",
+    "beforeBuildCommand": "npm --prefix ../.. run generate-icons && npm --prefix ../../frontend/app run build:mobile",
     "frontendDist": "../../../frontend/app/dist/mobile"
   },
   "app": {

@@ -21,7 +21,8 @@ This approach solves the common issue where server-side SVG renderers (like libr
 - **Input**: `frontend/app/public/favicon.svg`
 - **Outputs**:
   - `apps/desktop/src-tauri/icons/` (all sizes)
-  - `apps/mobile/src-tauri/icons/` (all sizes)
+  - `apps/mobile/src-tauri/icons/` (all common, Android, and iOS sizes)
+  - `apps/mobile/src-tauri/gen/android/app/src/main/res/` (Android launcher resources)
 
 ### Generated Files
 
@@ -32,6 +33,14 @@ For each platform (desktop and mobile):
 - `128x128@2x.png` (256x256) - Retina display
 - `32x32.png` (32x32) - Small size
 - `icon.ico` - Windows icon (contains 16, 32, 48, 64, 128, 256px)
+
+For mobile, the script also runs `cargo tauri icon` from the browser-rendered
+`icon.png` and updates:
+
+- `apps/mobile/src-tauri/icons/android/`
+- `apps/mobile/src-tauri/icons/ios/`
+- `apps/mobile/src-tauri/gen/android/app/src/main/res/mipmap-*`
+- `apps/mobile/src-tauri/gen/android/app/src/main/res/values`
 
 ### Usage
 
@@ -50,6 +59,10 @@ Run this script whenever you:
 - Update the source SVG (`frontend/app/public/favicon.svg`)
 - Add a new platform that needs icons
 - Need to regenerate icons for any reason
+
+Mobile builds run this script automatically before the Tauri mobile dev and
+build commands, so the generated Android launcher resources stay in sync with
+the source SVG.
 
 ### Maintenance
 

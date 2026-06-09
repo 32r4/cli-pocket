@@ -13,6 +13,8 @@ node_modules/
 apps/*/src-tauri/target/
 apps/*/dist/
 apps/mobile/src-tauri/gen/android/
+apps/mobile/src-tauri/icons/android/
+apps/mobile/src-tauri/icons/ios/
 
 # Webview
 webview/*/dist/

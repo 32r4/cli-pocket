@@ -13,13 +13,16 @@
  * Usage: node scripts/generate-icons.js
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, cp } from 'node:fs/promises';
+import { execFile as execFileCallback } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
+const execFile = promisify(execFileCallback);
 
 // Source SVG file
 const SOURCE_SVG = join(rootDir, 'frontend/app/public/favicon.svg');
@@ -27,6 +30,19 @@ const SOURCE_SVG = join(rootDir, 'frontend/app/public/favicon.svg');
 // Target directories
 const DESKTOP_ICONS = join(rootDir, 'apps/desktop/src-tauri/icons');
 const MOBILE_ICONS = join(rootDir, 'apps/mobile/src-tauri/icons');
+const MOBILE_ANDROID_RES = join(
+  rootDir,
+  'apps/mobile/src-tauri/gen/android/app/src/main/res',
+);
+const MOBILE_ANDROID_ICON_DIRS = [
+  'mipmap-anydpi-v26',
+  'mipmap-hdpi',
+  'mipmap-mdpi',
+  'mipmap-xhdpi',
+  'mipmap-xxhdpi',
+  'mipmap-xxxhdpi',
+  'values',
+];
 
 // Icon sizes to generate
 const SIZES = [
@@ -181,6 +197,58 @@ async function generateIconsForTarget(page, svgContent, targetDir) {
 }
 
 /**
+ * Generate Android and iOS icon resources for the mobile app from the
+ * already-rendered 1024x1024 PNG. This keeps the browser-rendered master icon
+ * while letting Tauri produce the platform-specific resource trees it expects.
+ */
+async function generateMobilePlatformIcons(sourceIconPath, targetDir) {
+  const tempDir = join(targetDir, '.tauri-icon-tmp');
+
+  await rm(tempDir, { recursive: true, force: true });
+  await mkdir(tempDir, { recursive: true });
+
+  try {
+    await execFile('cargo', [
+      'tauri',
+      'icon',
+      sourceIconPath,
+      '--output',
+      tempDir,
+    ], {
+      cwd: rootDir,
+    });
+
+    await rm(join(targetDir, 'android'), { recursive: true, force: true });
+    await rm(join(targetDir, 'ios'), { recursive: true, force: true });
+
+    await cp(join(tempDir, 'android'), join(targetDir, 'android'), {
+      recursive: true,
+    });
+    await cp(join(tempDir, 'ios'), join(targetDir, 'ios'), {
+      recursive: true,
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Sync the generated Android launcher assets into the generated mobile project
+ * so the checked-in Android project matches the mobile icon set.
+ */
+async function syncMobileAndroidResources(targetDir) {
+  await mkdir(MOBILE_ANDROID_RES, { recursive: true });
+
+  for (const directory of MOBILE_ANDROID_ICON_DIRS) {
+    await cp(
+      join(targetDir, 'android', directory),
+      join(MOBILE_ANDROID_RES, directory),
+      { recursive: true },
+    );
+  }
+}
+
+/**
  * Main function
  */
 async function main() {
@@ -207,6 +275,8 @@ async function main() {
     // Generate icons for mobile
     console.log('\n📱 Mobile icons:');
     await generateIconsForTarget(page, svgContent, MOBILE_ICONS);
+    await generateMobilePlatformIcons(join(MOBILE_ICONS, 'icon.png'), MOBILE_ICONS);
+    await syncMobileAndroidResources(MOBILE_ICONS);
 
     await page.close();
 
