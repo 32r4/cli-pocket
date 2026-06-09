@@ -289,6 +289,7 @@ fn build_command(params: &TerminalCreateParams) -> Result<CommandBuilder, Termin
 struct ServerOutputProcessor {
     pending: Vec<u8>,
     pending_response: Vec<u8>,
+    skip_next_cursor_position_response: bool,
 }
 
 enum SequenceMatch {
@@ -297,6 +298,14 @@ enum SequenceMatch {
 }
 
 impl ServerOutputProcessor {
+    fn new(skip_next_cursor_position_response: bool) -> Self {
+        Self {
+            pending: Vec::new(),
+            pending_response: Vec::new(),
+            skip_next_cursor_position_response,
+        }
+    }
+
     fn process(&mut self, bytes: &[u8], cursor: (u16, u16)) -> Vec<u8> {
         let mut input = Vec::with_capacity(self.pending.len() + bytes.len());
         input.extend_from_slice(&self.pending);
@@ -312,8 +321,12 @@ impl ServerOutputProcessor {
                 break;
             }
             if remaining.starts_with(CURSOR_POSITION_QUERY) {
-                self.pending_response
-                    .extend_from_slice(cursor_position_report(cursor).as_bytes());
+                if self.skip_next_cursor_position_response {
+                    self.skip_next_cursor_position_response = false;
+                } else {
+                    self.pending_response
+                        .extend_from_slice(cursor_position_report(cursor).as_bytes());
+                }
                 index += CURSOR_POSITION_QUERY.len();
                 continue;
             }
@@ -377,6 +390,10 @@ fn cursor_position_report((col, row): (u16, u16)) -> String {
     format!("\x1b[{};{}R", row.saturating_add(1), col.saturating_add(1))
 }
 
+fn skip_initial_cursor_response() -> bool {
+    cfg!(windows)
+}
+
 #[cfg(windows)]
 fn bootstrap_conpty_cursor_inheritance(
     writer: &mut dyn Write,
@@ -431,7 +448,7 @@ fn spawn_reader(
         .name("cli-pocket-pty-reader".to_string())
         .spawn(move || {
             let mut buffer = [0_u8; 8192];
-            let mut server_output = ServerOutputProcessor::default();
+            let mut server_output = ServerOutputProcessor::new(skip_initial_cursor_response());
 
             loop {
                 let read = match reader.read(&mut buffer) {
@@ -700,6 +717,21 @@ mod tests {
 
         assert!(first.is_empty());
         assert_eq!(second, b"ok");
+        assert_eq!(processor.take_pending_response(), b"\x1b[3;5R");
+    }
+
+    #[test]
+    fn server_output_processor_can_skip_initial_cursor_position_response() {
+        let mut processor = ServerOutputProcessor::new(true);
+
+        let filtered = processor.process(b"\x1b[6n", (4, 2));
+
+        assert!(filtered.is_empty());
+        assert!(processor.take_pending_response().is_empty());
+
+        let filtered = processor.process(b"\x1b[6nok", (4, 2));
+
+        assert_eq!(filtered, b"ok");
         assert_eq!(processor.take_pending_response(), b"\x1b[3;5R");
     }
 
