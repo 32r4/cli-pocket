@@ -397,10 +397,9 @@ fn skip_initial_cursor_response() -> bool {
 #[cfg(windows)]
 fn bootstrap_conpty_cursor_inheritance(
     writer: &mut dyn Write,
-    rows: u16,
+    _rows: u16,
 ) -> Result<(), TerminalError> {
-    let response = format!("\x1b[{};1R", rows.max(1));
-    writer.write_all(response.as_bytes())?;
+    writer.write_all(b"\x1b[1;1R")?;
     writer.flush()?;
     Ok(())
 }
@@ -733,6 +732,16 @@ mod tests {
 
         assert_eq!(filtered, b"ok");
         assert_eq!(processor.take_pending_response(), b"\x1b[3;5R");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bootstrap_conpty_cursor_inheritance_reports_blank_origin() {
+        let mut writer = Vec::new();
+
+        bootstrap_conpty_cursor_inheritance(&mut writer, 34).unwrap();
+
+        assert_eq!(writer, b"\x1b[1;1R");
     }
 
     #[test]
