@@ -317,6 +317,7 @@ export function AppRoot({
 				session={session}
 				workspace={workspace}
 				isCompactViewport={isNarrowViewport}
+				showTerminalControlBar={platform.shell === "mobile"}
 				terminalFontSize={ui.terminalFontSize}
 				workspaceState={workspaceState}
 				controller={terminalController}

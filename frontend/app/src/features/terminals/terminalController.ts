@@ -28,6 +28,7 @@ interface TerminalLike {
 	rows: number;
 	open: (node: HTMLElement) => void;
 	write: (data: string, callback?: () => void) => void;
+	paste: (data: string) => void;
 	clear: () => void;
 	reset: () => void;
 	focus: () => void;
@@ -273,6 +274,30 @@ export class TerminalController {
 		this.terminal.options.fontFamily = terminalFontFamily;
 		this.terminal.options.fontSize = this.getEffectiveFontSize();
 		this.fitToViewport();
+	}
+
+	sendSyntheticInput(data: string) {
+		if (this.activeTerminalId == null || data.length === 0) {
+			return false;
+		}
+
+		this.onInput(this.activeTerminalId, data);
+		this.focusActiveTerminal();
+		return true;
+	}
+
+	pasteText(data: string) {
+		if (
+			this.terminal == null ||
+			this.activeTerminalId == null ||
+			data.length === 0
+		) {
+			return false;
+		}
+
+		this.terminal.paste(data);
+		this.focusActiveTerminal();
+		return true;
 	}
 
 	reset() {

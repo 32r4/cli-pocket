@@ -6,6 +6,7 @@ import type { TerminalController } from "@/features/terminals/terminalController
 import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
 import type { SessionActor } from "@/platform/bridge/types";
 import type { ConnectionState } from "@/state/workspace/workspaceState";
+import { TerminalControlBar } from "./TerminalControlBar";
 
 interface TerminalSummaryView {
 	id: string;
@@ -22,6 +23,7 @@ interface TerminalAreaProps {
 		activeSessionId: string | null;
 	};
 	isCompactViewport: boolean;
+	showTerminalControlBar: boolean;
 	terminalFontSize: number;
 	workspaceState: StoreApi<{
 		terminals: TerminalSummaryView[];
@@ -38,6 +40,7 @@ export function TerminalArea({
 	session,
 	workspace,
 	isCompactViewport,
+	showTerminalControlBar,
 	terminalFontSize,
 	workspaceState,
 	controller,
@@ -195,6 +198,12 @@ export function TerminalArea({
 					</div>
 				) : null}
 			</div>
+			{showTerminalControlBar ? (
+				<TerminalControlBar
+					controller={controller}
+					onInlineError={onInlineError}
+				/>
+			) : null}
 			<footer className="terminal-footer">
 				<span className="terminal-footer__title">
 					{activeSession?.title ?? "No terminal"}

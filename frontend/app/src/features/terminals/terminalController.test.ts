@@ -58,6 +58,9 @@ class MockTerminal {
 		);
 		callback?.();
 	}
+	paste(data: string) {
+		this.writes.push(data);
+	}
 	onData(_listener: (data: string) => void) {
 		return { dispose: () => undefined };
 	}
@@ -291,6 +294,36 @@ describe("TerminalController", () => {
 
 		expect(size).toEqual({ cols: 10, rows: 4 });
 		expect(onResize).not.toHaveBeenCalled();
+	});
+
+	it("sends synthetic input through the active terminal", async () => {
+		const onInput = vi.fn();
+		const controller = new TerminalController({
+			onInput,
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		controller.setActiveTerminal("t1");
+		expect(controller.sendSyntheticInput("\u001b[A")).toBe(true);
+		expect(onInput).toHaveBeenCalledWith("t1", "\u001b[A");
+	});
+
+	it("pastes text through xterm paste", async () => {
+		MockTerminal.instances = [];
+		const controller = new TerminalController({
+			onInput: vi.fn(),
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		controller.setActiveTerminal("t1");
+		expect(controller.pasteText("echo")).toBe(true);
+		expect(MockTerminal.instances[0]?.writes).toContain("echo");
 	});
 
 	it("returns null when measuring before mount", async () => {
