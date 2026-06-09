@@ -344,6 +344,11 @@ export class ConnectionController {
 			return;
 		}
 
+		if (this.deps.workspaceState.getState().connectionState === "connecting") {
+			this.failRun(run, reason);
+			return;
+		}
+
 		this.finishRun(run, { state: "disconnected", willRetry: false, reason });
 	}
 

@@ -151,7 +151,7 @@
 	--terminal-bright-cyan: #347184;
 	--terminal-bright-white: #172326;
 	--status-connected: #2f7555;
-	--status-connecting: #3f7288;
+	--status-connecting: #b98516;
 	--status-disconnected: #b74434;
 	--status-ring: rgba(47, 117, 85, 0.22);
 	--alert-border: rgba(183, 68, 52, 0.24);
@@ -388,14 +388,6 @@ strong {
 	-webkit-app-region: no-drag;
 }
 
-.connection-status-panel h2 {
-	margin: 0;
-	font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-	font-size: 1.05rem;
-	letter-spacing: 0.04em;
-	text-transform: lowercase;
-}
-
 .app-shell__host {
 	display: inline-flex;
 	align-items: center;
@@ -453,8 +445,7 @@ strong {
 
 .connection-status-panel {
 	display: grid;
-	align-content: start;
-	padding: 1.25rem;
+	place-items: center;
 }
 
 .connection-spinner-panel {
@@ -976,6 +967,15 @@ strong {
 	padding: 1rem 1.25rem;
 	border: 1px solid var(--surface-panel-border);
 	border-radius: var(--radius-md);
+	background: var(--surface-panel);
+	box-shadow: var(--shadow-elevated);
+}
+
+.retry-button {
+	min-width: 5rem;
+	padding: 0.75rem 1.25rem;
+	border: 1px solid var(--surface-panel-border);
+  border-radius: var(--radius-xs);
 	background: var(--surface-panel);
 	box-shadow: var(--shadow-elevated);
 }

@@ -301,11 +301,16 @@ export function AppRoot({
 	const mainContent =
 		services == null ? (
 			<section
-				className="connection-status-panel"
-				aria-label="Restoring saved servers"
+				className="connection-spinner-panel"
+				aria-label="Connecting to server"
 			>
-				<h2>Loading servers</h2>
-				<p>Restoring saved servers.</p>
+				<LoaderCircle
+					className="connection-spinner"
+					aria-hidden="true"
+					size={32}
+					strokeWidth={1.75}
+				/>
+				<span className="sr-only">Connecting</span>
 			</section>
 		) : workspace.connectionState === "connected" ? (
 			<TerminalArea
@@ -339,6 +344,7 @@ export function AppRoot({
 			>
 				<button
 					type="button"
+					className="retry-button"
 					disabled={selectedServer == null}
 					onClick={() => {
 						if (selectedServer != null) {

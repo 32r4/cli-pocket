@@ -4,7 +4,8 @@ use cli_pocket_proto::codec::{decode_frame, encode_frame};
 use cli_pocket_proto::{
     ByeReason, EventBody, EventFrame, Frame, FrameBody, Hello, ProtocolError, RequestBody,
     RequestFrame, RequestId, ResponseBody, ResponseFrame, ResumeToken, ServerConfig, ServerId,
-    StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo, PROTOCOL_VERSION,
+    SessionId, StreamId, StreamSeq, TerminalCreateParams, TerminalId, TerminalInfo,
+    PROTOCOL_VERSION,
 };
 use futures_channel::{mpsc, oneshot};
 use futures_util::{
@@ -47,6 +48,7 @@ pub enum SessionEndpoint {
 
 const HEARTBEAT_IDLE_MS: u64 = 10_000;
 const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
+const CONNECT_ATTEMPT_TIMEOUT_MS: u64 = 15_000;
 const DEFAULT_INPUT_BATCH_WINDOW_MS: u64 = 8;
 const MAX_INPUT_BATCH_WINDOW_MS: u64 = 50;
 
@@ -364,6 +366,7 @@ async fn run_session_loop<T, C, R, K>(
 {
     let (start, max, mul) = config.backoff;
     let mut delay = start;
+    let mut ever_connected = false;
     let mut pending_cmds = VecDeque::<TerminalCmd>::new();
     let mut pending_session_cmds = VecDeque::<SessionCommand>::new();
 
@@ -374,24 +377,29 @@ async fn run_session_loop<T, C, R, K>(
 
         let _ = events_tx.clone().send(ClientEvent::Connecting).await;
         let mut reached_connected = false;
-        let mut transport = match transport_factory().await {
-            Ok(transport) => transport,
-            Err(err) => {
-                if stop_requested.get() {
-                    return;
+        let mut transport =
+            match connect_transport_with_timeout(&clock, &mut transport_factory).await {
+                Ok(transport) => transport,
+                Err(err) => {
+                    if stop_requested.get() {
+                        return;
+                    }
+                    let will_retry = ever_connected && should_retry_after_disconnect(&err);
+                    let _ = events_tx
+                        .clone()
+                        .send(ClientEvent::Disconnected {
+                            will_retry,
+                            reason: err.to_string(),
+                        })
+                        .await;
+                    if !will_retry {
+                        return;
+                    }
+                    sleep_backoff(&clock, &rng, delay).await;
+                    delay = crate::reconnect::next_delay(delay, max, mul);
+                    continue;
                 }
-                let _ = events_tx
-                    .clone()
-                    .send(ClientEvent::Disconnected {
-                        will_retry: true,
-                        reason: err.to_string(),
-                    })
-                    .await;
-                sleep_backoff(&clock, &rng, delay).await;
-                delay = crate::reconnect::next_delay(delay, max, mul);
-                continue;
-            }
-        };
+            };
 
         let outcome = run_one_connection(
             &identity,
@@ -419,21 +427,27 @@ async fn run_session_loop<T, C, R, K>(
 
         *terminal.borrow_mut() = None;
         if reached_connected {
+            ever_connected = true;
             delay = start;
         }
 
         match outcome {
             Ok(()) => {
+                let will_retry = reached_connected || ever_connected;
                 let _ = events_tx
                     .clone()
                     .send(ClientEvent::Disconnected {
-                        will_retry: true,
+                        will_retry,
                         reason: "remote closed".to_owned(),
                     })
                     .await;
+                if !will_retry {
+                    return;
+                }
             }
             Err(err) => {
-                let will_retry = should_retry_after_disconnect(&err);
+                let will_retry =
+                    should_retry_after_disconnect(&err) && (reached_connected || ever_connected);
                 let _ = events_tx
                     .clone()
                     .send(ClientEvent::Disconnected {
@@ -455,23 +469,33 @@ async fn run_session_loop<T, C, R, K>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn run_one_connection<T, C, R>(
+async fn connect_transport_with_timeout<T, C>(
+    clock: &C,
+    transport_factory: &mut Box<dyn FnMut() -> LocalBoxFuture<'static, ClientResult<T>>>,
+) -> ClientResult<T>
+where
+    T: Transport + 'static,
+    C: Clock,
+{
+    let connect = transport_factory().fuse();
+    let timeout = clock.sleep_ms(CONNECT_ATTEMPT_TIMEOUT_MS).fuse();
+    futures_util::pin_mut!(connect, timeout);
+
+    match futures_util::future::select(connect, timeout).await {
+        Either::Left((result, _)) => result,
+        Either::Right(((), _)) => Err(ClientError::ConnectTimeout {
+            timeout_ms: CONNECT_ATTEMPT_TIMEOUT_MS,
+        }),
+    }
+}
+
+async fn establish_session<T>(
     identity: &ClientIdentity,
     config: &SessionConfig,
-    clock: &C,
-    rng: &R,
     transport: &mut T,
-    cmd_rx: &mut mpsc::Receiver<TerminalCmd>,
-    session_cmd_rx: &mut mpsc::Receiver<SessionCommand>,
-    pending_cmds: &mut VecDeque<TerminalCmd>,
-    pending_session_cmds: &mut VecDeque<SessionCommand>,
-    state: ConnectionState<'_>,
-) -> ClientResult<()>
+) -> ClientResult<(NoiseSession, SessionId, Option<String>)>
 where
     T: Transport,
-    C: Clock,
-    R: Rng,
 {
     let mut session = match &config.endpoint {
         SessionEndpoint::Direct(_) => {
@@ -506,7 +530,6 @@ where
             noise.finish()?
         }
     };
-    let mut next_request_id = 1_u32;
 
     let hello = Frame::body(FrameBody::Hello(Hello {
         protocol_min: PROTOCOL_VERSION,
@@ -524,6 +547,48 @@ where
             )));
         }
     };
+
+    Ok((session, session_id, server_label))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_one_connection<T, C, R>(
+    identity: &ClientIdentity,
+    config: &SessionConfig,
+    clock: &C,
+    rng: &R,
+    transport: &mut T,
+    cmd_rx: &mut mpsc::Receiver<TerminalCmd>,
+    session_cmd_rx: &mut mpsc::Receiver<SessionCommand>,
+    pending_cmds: &mut VecDeque<TerminalCmd>,
+    pending_session_cmds: &mut VecDeque<SessionCommand>,
+    state: ConnectionState<'_>,
+) -> ClientResult<()>
+where
+    T: Transport,
+    C: Clock,
+    R: Rng,
+{
+    let setup_result = {
+        let setup = establish_session(identity, config, transport).fuse();
+        let timeout = clock.sleep_ms(CONNECT_ATTEMPT_TIMEOUT_MS).fuse();
+        futures_util::pin_mut!(setup, timeout);
+        match futures_util::future::select(setup, timeout).await {
+            Either::Left((result, _)) => result,
+            Either::Right(((), _)) => Err(ClientError::ConnectTimeout {
+                timeout_ms: CONNECT_ATTEMPT_TIMEOUT_MS,
+            }),
+        }
+    };
+    let (mut session, session_id, server_label) = match setup_result {
+        Ok(established) => established,
+        Err(err @ ClientError::ConnectTimeout { .. }) => {
+            let _ = transport.close().await;
+            return Err(err);
+        }
+        Err(err) => return Err(err),
+    };
+    let mut next_request_id = 1_u32;
 
     let _ = state
         .events_tx

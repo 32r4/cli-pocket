@@ -18,6 +18,8 @@ pub enum ClientError {
     NoTerminal,
     #[error("backend closed")]
     Closed,
+    #[error("connection timed out after {timeout_ms}ms")]
+    ConnectTimeout { timeout_ms: u64 },
     #[error("internal: {0}")]
     Internal(String),
 }

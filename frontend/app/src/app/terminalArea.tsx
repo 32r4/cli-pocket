@@ -182,7 +182,7 @@ export function TerminalArea({
 					<div className="terminal-stage__overlay" aria-live="polite">
 						<div className="xterm-server xterm-server--spinner">
 							<button
-								className="icon-button"
+								className="retry-button"
 								type="button"
 								aria-label="Retry"
 								onClick={() => {

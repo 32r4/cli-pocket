@@ -12,7 +12,7 @@ use cli_pocket_client_core::{ClientError, ClientResult, Transport};
 use futures_channel::{mpsc, oneshot};
 use futures_util::StreamExt;
 use js_sys::ArrayBuffer;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -39,6 +39,20 @@ pub struct WsTransport {
     _on_message: Closure<dyn FnMut(MessageEvent)>,
     _on_close: Closure<dyn FnMut(CloseEvent)>,
     _on_error: Closure<dyn FnMut(ErrorEvent)>,
+}
+
+struct PendingOpenCleanup {
+    ws: WebSocket,
+    active: Rc<Cell<bool>>,
+}
+
+impl Drop for PendingOpenCleanup {
+    fn drop(&mut self) {
+        if self.active.get() {
+            clear_handlers(&self.ws);
+            let _ = self.ws.close();
+        }
+    }
 }
 
 impl WsTransport {
@@ -111,6 +125,12 @@ impl WsTransport {
         };
         ws.set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
+        let cleanup_active = Rc::new(Cell::new(true));
+        let cleanup = PendingOpenCleanup {
+            ws: ws.clone(),
+            active: Rc::clone(&cleanup_active),
+        };
+
         // Block until the handshake either succeeds (onopen) or the oneshot
         // sender is dropped (which only happens if the socket errored before
         // `onopen` ran).
@@ -119,8 +139,11 @@ impl WsTransport {
             .map_err(|_| ClientError::Transport("ws open cancelled".into()))?;
         if let Err(err) = open_result {
             clear_handlers(&ws);
+            cleanup_active.set(false);
             return Err(err);
         }
+        cleanup_active.set(false);
+        drop(cleanup);
 
         Ok(Self {
             ws,

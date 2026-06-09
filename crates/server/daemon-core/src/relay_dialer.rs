@@ -18,6 +18,7 @@ use crate::accept::{AcceptedTransport, AcceptedTransportKind};
 use crate::config::{relay_server_ws_url_for_server, RelayConfig};
 
 const PAIR_QUEUE_CAPACITY: usize = 32;
+const RELAY_DIAL_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug)]
 pub struct PairTransport {
@@ -142,9 +143,13 @@ async fn run_once(
         request.headers_mut().insert(AUTHORIZATION, bearer);
     }
 
-    let (ws, _) = tokio_tungstenite::connect_async(request)
-        .await
-        .map_err(|e| crate::DaemonError::Internal(format!("relay connect failed: {e}")))?;
+    let (ws, _) = tokio::time::timeout(
+        RELAY_DIAL_ATTEMPT_TIMEOUT,
+        tokio_tungstenite::connect_async(request),
+    )
+    .await
+    .map_err(|_| crate::DaemonError::Internal("relay connect timed out".into()))?
+    .map_err(|e| crate::DaemonError::Internal(format!("relay connect failed: {e}")))?;
     let (sink, mut stream) = ws.split();
     let sink = Arc::new(Mutex::new(sink));
 
@@ -161,7 +166,9 @@ async fn run_once(
         .await
         .map_err(|e| crate::DaemonError::Internal(format!("send register failed: {e}")))?;
 
-    let first = next_binary(&mut stream).await?;
+    let first = tokio::time::timeout(RELAY_DIAL_ATTEMPT_TIMEOUT, next_binary(&mut stream))
+        .await
+        .map_err(|_| crate::DaemonError::Internal("relay register timed out".into()))??;
     match decode_relay(&first).map_err(|err| codec_err(&err))? {
         RelayWire::Ctrl(RelayCtrl::ServerRegisterOk) => {}
         RelayWire::Ctrl(RelayCtrl::ServerRegisterErr { reason }) => {
