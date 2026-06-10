@@ -13,7 +13,7 @@ type ControlKey =
 	| "enter"
 	| "backspace"
 	| "ctrlc"
-	| "ctrlv"
+	| "ctrld"
 	| "ctrlz"
 	| "ctrly";
 
@@ -57,8 +57,8 @@ function sequenceForKey(key: ControlKey, modifiers: Set<ModifierKey>) {
 			return alt ? "\u001b\u007f" : "\u007f";
 		case "ctrlc":
 			return "\u0003";
-		case "ctrlv":
-			return null;
+		case "ctrld":
+			return "\u0004";
 		case "ctrlz":
 			return "\u001a";
 		case "ctrly":
@@ -83,27 +83,6 @@ export function TerminalControlBar({
 		if (!sent) {
 			onInlineError("terminal is not active");
 			setLatchedModifiers(new Set());
-		}
-	};
-
-	const handlePaste = async () => {
-		try {
-			if (typeof navigator === "undefined" || navigator.clipboard == null) {
-				throw new Error("clipboard unavailable");
-			}
-			const text = await navigator.clipboard.readText();
-			if (text.length === 0) {
-				return;
-			}
-			const pasted = controller.pasteText(text);
-			if (!pasted) {
-				onInlineError("terminal is not active");
-				setLatchedModifiers(new Set());
-			}
-		} catch (error: unknown) {
-			onInlineError(
-				error instanceof Error ? error.message : "failed to paste text",
-			);
 		}
 	};
 
@@ -167,8 +146,8 @@ export function TerminalControlBar({
 			onClick: () => send(sequenceForKey("ctrlc", latchedModifiers)),
 		},
 		{
-			label: "Ctrl+V",
-			onClick: () => void handlePaste(),
+			label: "Ctrl+D",
+			onClick: () => send(sequenceForKey("ctrld", latchedModifiers)),
 		},
 		{
 			label: "Ctrl+Z",
