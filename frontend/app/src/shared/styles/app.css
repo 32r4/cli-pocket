@@ -1120,7 +1120,7 @@ strong {
 	}
 
 	.workspace-panel[data-terminal-controls="true"] {
-		grid-template-rows: auto auto minmax(0, 1fr);
+		grid-template-rows: auto auto minmax(0, 1fr) auto;
 		padding-bottom: 0;
 	}
 
@@ -1146,7 +1146,7 @@ strong {
 	}
 
 	.workspace-panel[data-terminal-controls="true"] .terminal-footer {
-		display: none;
+		grid-row: 4;
 	}
 
 	.xterm-shell {
