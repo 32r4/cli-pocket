@@ -120,7 +120,11 @@ export function TerminalArea({
 	};
 
 	return (
-		<section className="workspace-panel" aria-label="Terminal workspace">
+		<section
+			className="workspace-panel"
+			data-terminal-controls={showTerminalControlBar ? "true" : undefined}
+			aria-label="Terminal workspace"
+		>
 			<div className="terminal-tabs" role="tablist" aria-label="Sessions">
 				<div className="terminal-tabs__list">
 					{workspace.terminals.map((terminal) => (

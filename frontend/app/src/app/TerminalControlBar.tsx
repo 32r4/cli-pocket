@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type PointerEvent, useState } from "react";
 import type { TerminalController } from "@/features/terminals/terminalController";
 
 type ModifierKey = "ctrl" | "alt" | "shift";
@@ -119,6 +119,10 @@ export function TerminalControlBar({
 		});
 	};
 
+	const keepTerminalFocus = (event: PointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+	};
+
 	const controls = [
 		{
 			label: "Ctrl",
@@ -207,6 +211,7 @@ export function TerminalControlBar({
 						aria-label={control.label}
 						data-active={control.active ? "true" : undefined}
 						aria-pressed={control.pressed}
+						onPointerDown={keepTerminalFocus}
 						onClick={control.onClick}
 					>
 						{control.label}
