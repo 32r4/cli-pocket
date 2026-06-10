@@ -1,6 +1,4 @@
 import type { PlatformServices } from "@/platform/bridge/types";
-import { TauriBridge } from "@/platform/tauri/TauriBridge";
-import { WebBridge } from "@/platform/web/WebBridge";
 
 export type AppPlatformId = "desktop" | "mobile" | "web";
 
@@ -41,9 +39,11 @@ export const CURRENT_APP_PLATFORM = platformProfile(__APP_PLATFORM__);
 export async function createPlatformServices(
 	platform: AppPlatform,
 ): Promise<PlatformServices> {
-	if (platform.bridge === "tauri") {
-		return new TauriBridge({ embeddedDaemon: platform.embeddedDaemon });
+	if (__APP_PLATFORM__ === "web") {
+		const { WebBridge } = await import("@/platform/web/WebBridge");
+		return WebBridge.create();
 	}
 
-	return WebBridge.create();
+	const { TauriBridge } = await import("@/platform/tauri/TauriBridge");
+	return new TauriBridge({ embeddedDaemon: platform.embeddedDaemon });
 }
