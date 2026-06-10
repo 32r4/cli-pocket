@@ -1,79 +1,25 @@
-import { type PointerEvent, useState } from "react";
+import type { PointerEvent } from "react";
 import type { TerminalController } from "@/features/terminals/terminalController";
-
-type ModifierKey = "ctrl" | "alt" | "shift";
-type ControlKey =
-	| "tab"
-	| "esc"
-	| "end"
-	| "up"
-	| "down"
-	| "left"
-	| "right"
-	| "enter"
-	| "backspace"
-	| "ctrlc"
-	| "ctrld"
-	| "ctrlz"
-	| "ctrly";
+import {
+	sequenceForControlKey,
+	type TerminalModifierKey,
+} from "@/features/terminals/terminalInput";
 
 interface TerminalControlBarProps {
 	controller: TerminalController;
+	modifiers: ReadonlySet<TerminalModifierKey>;
 	onInlineError: (message: string | null) => void;
-}
-
-function sequenceForKey(key: ControlKey, modifiers: Set<ModifierKey>) {
-	const ctrl = modifiers.has("ctrl");
-	const alt = modifiers.has("alt");
-	const shift = modifiers.has("shift");
-	const anyModifier = ctrl || alt || shift;
-	const modifierParameter =
-		Number(shift) + Number(alt) * 2 + Number(ctrl) * 4 + 1;
-
-	switch (key) {
-		case "tab":
-			if (shift && !ctrl && !alt) {
-				return "\u001b[Z";
-			}
-			if (anyModifier) {
-				return `\u001b[1;${modifierParameter}I`;
-			}
-			return "\t";
-		case "esc":
-			return alt ? "\u001b\u001b" : "\u001b";
-		case "end":
-			return anyModifier ? `\u001b[1;${modifierParameter}F` : "\u001b[F";
-		case "up":
-			return anyModifier ? `\u001b[1;${modifierParameter}A` : "\u001b[A";
-		case "down":
-			return anyModifier ? `\u001b[1;${modifierParameter}B` : "\u001b[B";
-		case "left":
-			return anyModifier ? `\u001b[1;${modifierParameter}D` : "\u001b[D";
-		case "right":
-			return anyModifier ? `\u001b[1;${modifierParameter}C` : "\u001b[C";
-		case "enter":
-			return alt ? "\u001b\r" : "\r";
-		case "backspace":
-			return alt ? "\u001b\u007f" : "\u007f";
-		case "ctrlc":
-			return "\u0003";
-		case "ctrld":
-			return "\u0004";
-		case "ctrlz":
-			return "\u001a";
-		case "ctrly":
-			return "\u0019";
-	}
+	onClearModifiers: () => void;
+	onToggleModifier: (modifier: TerminalModifierKey) => void;
 }
 
 export function TerminalControlBar({
 	controller,
+	modifiers,
 	onInlineError,
+	onClearModifiers,
+	onToggleModifier,
 }: TerminalControlBarProps) {
-	const [latchedModifiers, setLatchedModifiers] = useState<Set<ModifierKey>>(
-		() => new Set(),
-	);
-
 	const send = (sequence: string | null) => {
 		if (sequence == null) {
 			return;
@@ -82,20 +28,8 @@ export function TerminalControlBar({
 		const sent = controller.sendSyntheticInput(sequence);
 		if (!sent) {
 			onInlineError("terminal is not active");
-			setLatchedModifiers(new Set());
+			onClearModifiers();
 		}
-	};
-
-	const toggleModifier = (modifier: ModifierKey) => {
-		setLatchedModifiers((current) => {
-			const next = new Set(current);
-			if (next.has(modifier)) {
-				next.delete(modifier);
-			} else {
-				next.add(modifier);
-			}
-			return next;
-		});
 	};
 
 	const keepTerminalFocus = (event: PointerEvent<HTMLButtonElement>) => {
@@ -105,73 +39,73 @@ export function TerminalControlBar({
 	const controls = [
 		{
 			label: "Ctrl",
-			active: latchedModifiers.has("ctrl"),
-			pressed: latchedModifiers.has("ctrl"),
-			onClick: () => toggleModifier("ctrl"),
+			active: modifiers.has("ctrl"),
+			pressed: modifiers.has("ctrl"),
+			onClick: () => onToggleModifier("ctrl"),
 		},
 		{
 			label: "Alt",
-			active: latchedModifiers.has("alt"),
-			pressed: latchedModifiers.has("alt"),
-			onClick: () => toggleModifier("alt"),
+			active: modifiers.has("alt"),
+			pressed: modifiers.has("alt"),
+			onClick: () => onToggleModifier("alt"),
 		},
 		{
 			label: "Shift",
-			active: latchedModifiers.has("shift"),
-			pressed: latchedModifiers.has("shift"),
-			onClick: () => toggleModifier("shift"),
+			active: modifiers.has("shift"),
+			pressed: modifiers.has("shift"),
+			onClick: () => onToggleModifier("shift"),
 		},
 		{
 			label: "Tab",
-			onClick: () => send(sequenceForKey("tab", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("tab", modifiers)),
 		},
 		{
 			label: "Esc",
-			onClick: () => send(sequenceForKey("esc", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("esc", modifiers)),
 		},
 		{
 			label: "End",
-			onClick: () => send(sequenceForKey("end", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("end", modifiers)),
 		},
 		{
 			label: "Enter",
-			onClick: () => send(sequenceForKey("enter", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("enter", modifiers)),
 		},
 		{
 			label: "Bs",
-			onClick: () => send(sequenceForKey("backspace", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("backspace", modifiers)),
 		},
 		{
 			label: "Ctrl+C",
-			onClick: () => send(sequenceForKey("ctrlc", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("ctrlc", modifiers)),
 		},
 		{
 			label: "Ctrl+D",
-			onClick: () => send(sequenceForKey("ctrld", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("ctrld", modifiers)),
 		},
 		{
 			label: "Ctrl+Z",
-			onClick: () => send(sequenceForKey("ctrlz", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("ctrlz", modifiers)),
 		},
 		{
 			label: "Ctrl+Y",
-			onClick: () => send(sequenceForKey("ctrly", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("ctrly", modifiers)),
 		},
 		{
 			label: "↑",
-			onClick: () => send(sequenceForKey("up", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("up", modifiers)),
 		},
 		{
 			label: "↓",
-			onClick: () => send(sequenceForKey("down", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("down", modifiers)),
 		},
 		{
 			label: "←",
-			onClick: () => send(sequenceForKey("left", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("left", modifiers)),
 		},
 		{
 			label: "→",
-			onClick: () => send(sequenceForKey("right", latchedModifiers)),
+			onClick: () => send(sequenceForControlKey("right", modifiers)),
 		},
 	];
 

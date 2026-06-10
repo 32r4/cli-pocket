@@ -63,6 +63,7 @@ function makeController(): TerminalController {
 		setTheme: vi.fn(),
 		setCompactMode: vi.fn(),
 		setTerminalFontSize: vi.fn(),
+		setVirtualModifiers: vi.fn(),
 		removeTerminal: vi.fn(),
 	} as unknown as TerminalController;
 }
@@ -327,6 +328,39 @@ describe("TerminalArea", () => {
 
 		fireEvent.click(view.getByRole("button", { name: "Retry" }));
 		expect(registry.retryActive).toHaveBeenCalledTimes(1);
+	});
+
+	it("syncs terminal control modifiers to the controller", async () => {
+		const workspaceState = createWorkspaceStore();
+		workspaceState.getState().markConnected();
+		workspaceState.getState().syncTerminalList([terminalOne]);
+		workspaceState.getState().setActiveSessionId("t1");
+		const controller = makeController();
+
+		const view = render(
+			<TerminalArea
+				session={makeSession()}
+				workspace={workspaceState.getState()}
+				isCompactViewport={false}
+				showTerminalControlBar={true}
+				terminalFontSize={15}
+				workspaceState={workspaceState}
+				controller={controller}
+				registry={makeRegistry()}
+				theme="dark"
+				onInlineError={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(view.getByLabelText("Ctrl"));
+
+		await waitFor(() => {
+			const calls = vi.mocked(controller.setVirtualModifiers).mock.calls;
+			const latestModifiers = calls.at(-1)?.[0];
+			expect(
+				latestModifiers instanceof Set && latestModifiers.has("ctrl"),
+			).toBe(true);
+		});
 	});
 
 	it("keeps the viewport mounted while opening and failed overlays are shown", async () => {

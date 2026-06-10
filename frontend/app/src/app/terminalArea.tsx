@@ -1,8 +1,9 @@
 import { LoaderCircle, Plus, X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { TerminalViewport } from "@/features/terminals/TerminalViewport";
 import type { TerminalController } from "@/features/terminals/terminalController";
+import type { TerminalModifierKey } from "@/features/terminals/terminalInput";
 import type { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
 import type { SessionActor } from "@/platform/bridge/types";
 import type { ConnectionState } from "@/state/workspace/workspaceState";
@@ -49,6 +50,9 @@ export function TerminalArea({
 	onInlineError,
 }: TerminalAreaProps) {
 	const defaultTerminalSize = { cols: 120, rows: 36 };
+	const [latchedModifiers, setLatchedModifiers] = useState<
+		Set<TerminalModifierKey>
+	>(() => new Set());
 	const activeSession =
 		workspace.terminals.find(
 			(terminal) => terminal.id === workspace.activeSessionId,
@@ -68,6 +72,12 @@ export function TerminalArea({
 	useEffect(() => {
 		controller.setTerminalFontSize(terminalFontSize);
 	}, [controller, terminalFontSize]);
+
+	useEffect(() => {
+		controller.setVirtualModifiers(
+			showTerminalControlBar ? latchedModifiers : new Set(),
+		);
+	}, [controller, latchedModifiers, showTerminalControlBar]);
 
 	useEffect(() => {
 		registry.setSelectedTerminal(workspace.activeSessionId);
@@ -117,6 +127,22 @@ export function TerminalArea({
 				error instanceof Error ? error.message : "failed to kill terminal",
 			);
 		}
+	};
+
+	const toggleLatchedModifier = (modifier: TerminalModifierKey) => {
+		setLatchedModifiers((current) => {
+			const next = new Set(current);
+			if (next.has(modifier)) {
+				next.delete(modifier);
+			} else {
+				next.add(modifier);
+			}
+			return next;
+		});
+	};
+
+	const clearLatchedModifiers = () => {
+		setLatchedModifiers(new Set());
 	};
 
 	return (
@@ -205,7 +231,10 @@ export function TerminalArea({
 			{showTerminalControlBar ? (
 				<TerminalControlBar
 					controller={controller}
+					modifiers={latchedModifiers}
 					onInlineError={onInlineError}
+					onClearModifiers={clearLatchedModifiers}
+					onToggleModifier={toggleLatchedModifier}
 				/>
 			) : null}
 			<footer className="terminal-footer">

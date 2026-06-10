@@ -14,6 +14,7 @@ class MockTerminal {
 	focusCalls = 0;
 	writes: string[] = [];
 	scrollToLineCalls: number[] = [];
+	dataListener: ((data: string) => void) | null = null;
 	scrollListener: ((position: number) => void) | null = null;
 	buffer = {
 		active: {
@@ -61,8 +62,12 @@ class MockTerminal {
 	paste(data: string) {
 		this.writes.push(data);
 	}
-	onData(_listener: (data: string) => void) {
+	onData(listener: (data: string) => void) {
+		this.dataListener = listener;
 		return { dispose: () => undefined };
+	}
+	emitData(data: string) {
+		this.dataListener?.(data);
 	}
 	onScroll(listener: (position: number) => void) {
 		this.scrollListener = listener;
@@ -309,6 +314,44 @@ describe("TerminalController", () => {
 		controller.setActiveTerminal("t1");
 		expect(controller.sendSyntheticInput("\u001b[A")).toBe(true);
 		expect(onInput).toHaveBeenCalledWith("t1", "\u001b[A");
+	});
+
+	it("applies virtual modifiers to keyboard input", async () => {
+		const onInput = vi.fn();
+		const controller = new TerminalController({
+			onInput,
+			onResize: vi.fn(),
+			onLoadOlderHistory: vi.fn(),
+		});
+		const host = document.createElement("div");
+
+		await controller.mount(host);
+		controller.setActiveTerminal("t1");
+		const terminal = controllerField<MockTerminal | null>(
+			controller,
+			"terminal",
+		);
+		expect(terminal).not.toBeNull();
+		if (terminal == null) {
+			throw new Error("expected terminal to mount");
+		}
+
+		controller.setVirtualModifiers(["ctrl"]);
+		terminal.emitData("a");
+		controller.setVirtualModifiers(["alt"]);
+		terminal.emitData("x");
+		controller.setVirtualModifiers(["shift"]);
+		terminal.emitData("a1/");
+		controller.setVirtualModifiers(["ctrl", "alt"]);
+		terminal.emitData("d");
+		controller.setVirtualModifiers(["ctrl"]);
+		terminal.emitData("\u001b[A");
+
+		expect(onInput).toHaveBeenNthCalledWith(1, "t1", "\u0001");
+		expect(onInput).toHaveBeenNthCalledWith(2, "t1", "\u001bx");
+		expect(onInput).toHaveBeenNthCalledWith(3, "t1", "A!?");
+		expect(onInput).toHaveBeenNthCalledWith(4, "t1", "\u001b\u0004");
+		expect(onInput).toHaveBeenNthCalledWith(5, "t1", "\u001b[1;5A");
 	});
 
 	it("pastes text through xterm paste", async () => {

@@ -1,5 +1,9 @@
 import type { TerminalHistoryPageRecord } from "@/platform/bridge/types";
 import type { ThemeName } from "@/state/ui/uiState";
+import {
+	applyVirtualModifiersToInput,
+	type TerminalModifierKey,
+} from "./terminalInput";
 import { TerminalReplica } from "./terminalReplica";
 
 interface TerminalAddonLike {
@@ -215,6 +219,7 @@ export class TerminalController {
 	private compactMode: boolean;
 	private terminalFontSize: number;
 	private activeTerminalId: string | null = null;
+	private virtualModifiers = new Set<TerminalModifierKey>();
 	private host: HTMLElement | null = null;
 	private terminal: TerminalLike | null = null;
 	private fitAddon: FitAddonLike | null = null;
@@ -284,6 +289,10 @@ export class TerminalController {
 		this.onInput(this.activeTerminalId, data);
 		this.focusActiveTerminal();
 		return true;
+	}
+
+	setVirtualModifiers(modifiers: Iterable<TerminalModifierKey>) {
+		this.virtualModifiers = new Set(modifiers);
 	}
 
 	pasteText(data: string) {
@@ -451,7 +460,10 @@ export class TerminalController {
 		this.fitAddon = fitAddon;
 		this.dataSubscription = terminal.onData((data: string) => {
 			if (this.activeTerminalId != null) {
-				this.onInput(this.activeTerminalId, data);
+				this.onInput(
+					this.activeTerminalId,
+					applyVirtualModifiersToInput(data, this.virtualModifiers),
+				);
 			}
 		});
 		this.scrollSubscription = terminal.onScroll((viewportY) => {
