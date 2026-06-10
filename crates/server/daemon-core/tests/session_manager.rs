@@ -12,6 +12,16 @@ fn quick_exit_params() -> TerminalCreateParams {
     }
 }
 
+fn title_params(title: &str) -> TerminalCreateParams {
+    TerminalCreateParams {
+        cols: 80,
+        rows: 24,
+        cwd: None,
+        cmd: title_command(title),
+        env: Vec::new(),
+    }
+}
+
 #[cfg(windows)]
 fn cmd_command() -> Vec<String> {
     vec![
@@ -21,12 +31,31 @@ fn cmd_command() -> Vec<String> {
     ]
 }
 
+#[cfg(windows)]
+fn title_command(title: &str) -> Vec<String> {
+    vec![
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".to_string(),
+        "-NoProfile".to_string(),
+        "-Command".to_string(),
+        format!("[Console]::Out.Write([char]27 + ']0;{title}' + [char]7); Start-Sleep -Milliseconds 500"),
+    ]
+}
+
 #[cfg(unix)]
 fn cmd_command() -> Vec<String> {
     vec![
         "/bin/sh".to_string(),
         "-c".to_string(),
         "echo done".to_string(),
+    ]
+}
+
+#[cfg(unix)]
+fn title_command(title: &str) -> Vec<String> {
+    vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        format!("printf '\\033]0;{}\\007'; sleep 0.5", title),
     ]
 }
 
@@ -112,6 +141,33 @@ async fn list_returns_terminal_info() {
     assert_eq!(list[0].cols, 80);
     assert_eq!(list[0].rows, 24);
 
+    wait_for_reaper(&mgr, Duration::from_secs(5)).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn list_returns_terminal_title_as_label() {
+    let mgr = SessionManager::new(8);
+
+    mgr.create(title_params("project shell"), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+
+    let title_seen = timeout(Duration::from_secs(5), async {
+        loop {
+            let title = mgr
+                .list()
+                .first()
+                .and_then(|terminal| terminal.label.clone());
+            if title.as_deref() == Some("project shell") {
+                break true;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or(false);
+
+    assert!(title_seen, "terminal title should be published as label");
     wait_for_reaper(&mgr, Duration::from_secs(5)).await;
 }
 

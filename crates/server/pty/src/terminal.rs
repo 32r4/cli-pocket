@@ -14,7 +14,7 @@ use tokio::sync::watch;
 const CURSOR_POSITION_QUERY: &[u8] = b"\x1b[6n";
 const WIN32_INPUT_MODE_PREFIX: &[u8] = b"\x1b[?9001";
 const FOCUS_EVENT_MODE_PREFIX: &[u8] = b"\x1b[?1004";
-const OSC_TITLE_PREFIX: &[u8] = b"\x1b]0;";
+const OSC_PREFIX: &[u8] = b"\x1b]";
 
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalError {
@@ -37,6 +37,7 @@ pub struct Terminal {
 
 struct TerminalInner {
     ring: Mutex<ScrollbackRing>,
+    title: Mutex<Option<String>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
@@ -87,6 +88,7 @@ impl Terminal {
 
         let inner = Arc::new(TerminalInner {
             ring: Mutex::new(ring),
+            title: Mutex::new(None),
             master: Mutex::new(master),
             writer: Mutex::new(writer),
             killer: Mutex::new(killer),
@@ -113,6 +115,11 @@ impl Terminal {
     pub fn dims(&self) -> (u16, u16) {
         let ring = lock_or_recover(&self.inner.ring, "ring");
         ring.dims()
+    }
+
+    #[must_use]
+    pub fn title(&self) -> Option<String> {
+        lock_or_recover(&self.inner.title, "title").clone()
     }
 
     #[must_use]
@@ -289,6 +296,7 @@ fn build_command(params: &TerminalCreateParams) -> Result<CommandBuilder, Termin
 struct ServerOutputProcessor {
     pending: Vec<u8>,
     pending_response: Vec<u8>,
+    pending_title: Option<String>,
     skip_next_cursor_position_response: bool,
 }
 
@@ -297,11 +305,17 @@ enum SequenceMatch {
     Incomplete,
 }
 
+enum TitleSequenceMatch {
+    Consumed { bytes: usize, title: Option<String> },
+    Incomplete,
+}
+
 impl ServerOutputProcessor {
     fn new(skip_next_cursor_position_response: bool) -> Self {
         Self {
             pending: Vec::new(),
             pending_response: Vec::new(),
+            pending_title: None,
             skip_next_cursor_position_response,
         }
     }
@@ -363,11 +377,14 @@ impl ServerOutputProcessor {
 
             if let Some(consumed) = split_osc_title_sequence(remaining) {
                 match consumed {
-                    SequenceMatch::Consumed(consumed) => {
-                        index += consumed;
+                    TitleSequenceMatch::Consumed { bytes, title } => {
+                        if let Some(title) = title {
+                            self.pending_title = Some(title);
+                        }
+                        index += bytes;
                         continue;
                     }
-                    SequenceMatch::Incomplete => {
+                    TitleSequenceMatch::Incomplete => {
                         self.pending.extend_from_slice(remaining);
                         break;
                     }
@@ -383,6 +400,10 @@ impl ServerOutputProcessor {
 
     fn take_pending_response(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.pending_response)
+    }
+
+    fn take_pending_title(&mut self) -> Option<String> {
+        self.pending_title.take()
     }
 }
 
@@ -422,20 +443,59 @@ fn split_prefixed_control_sequence(bytes: &[u8], prefix: &[u8]) -> Option<Sequen
     None
 }
 
-fn split_osc_title_sequence(bytes: &[u8]) -> Option<SequenceMatch> {
-    if OSC_TITLE_PREFIX.starts_with(bytes) {
-        return Some(SequenceMatch::Incomplete);
+fn split_osc_title_sequence(bytes: &[u8]) -> Option<TitleSequenceMatch> {
+    if OSC_PREFIX.starts_with(bytes) {
+        return Some(TitleSequenceMatch::Incomplete);
     }
 
-    if !bytes.starts_with(OSC_TITLE_PREFIX) {
+    if !bytes.starts_with(OSC_PREFIX) {
         return None;
     }
 
-    bytes[OSC_TITLE_PREFIX.len()..]
-        .iter()
-        .position(|&byte| byte == 0x07)
-        .map(|offset| SequenceMatch::Consumed(OSC_TITLE_PREFIX.len() + offset + 1))
-        .or(Some(SequenceMatch::Incomplete))
+    let Some(&selector) = bytes.get(OSC_PREFIX.len()) else {
+        return Some(TitleSequenceMatch::Incomplete);
+    };
+    if selector != b'0' && selector != b'2' {
+        return None;
+    }
+
+    let title_start = OSC_PREFIX.len() + 2;
+    match bytes.get(OSC_PREFIX.len() + 1) {
+        Some(b';') => {}
+        Some(_) => return None,
+        None => return Some(TitleSequenceMatch::Incomplete),
+    }
+
+    let title_bytes = &bytes[title_start..];
+    let Some((title_len, terminator_len)) = find_osc_terminator(title_bytes) else {
+        return Some(TitleSequenceMatch::Incomplete);
+    };
+
+    Some(TitleSequenceMatch::Consumed {
+        bytes: title_start + title_len + terminator_len,
+        title: String::from_utf8(title_bytes[..title_len].to_vec()).ok(),
+    })
+}
+
+fn find_osc_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            0x07 => return Some((index, 1)),
+            0x1b => {
+                if bytes.get(index + 1).copied() == Some(b'\\') {
+                    return Some((index, 2));
+                }
+                if index + 1 == bytes.len() {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+
+    None
 }
 
 fn spawn_reader(
@@ -467,6 +527,10 @@ fn spawn_reader(
                     };
                     server_output.process(&buffer[..read], cursor)
                 };
+
+                if let Some(title) = server_output.take_pending_title() {
+                    *lock_or_recover(&inner.title, "title") = Some(title);
+                }
 
                 let response = server_output.take_pending_response();
                 if !response.is_empty() {
@@ -752,5 +816,40 @@ mod tests {
 
         assert_eq!(filtered, b"hello");
         assert!(processor.take_pending_response().is_empty());
+    }
+
+    #[test]
+    fn server_output_processor_captures_bell_terminated_title() {
+        let mut processor = ServerOutputProcessor::default();
+
+        let filtered = processor.process(b"\x1b]0;project shell\x07hello", (0, 0));
+
+        assert_eq!(filtered, b"hello");
+        assert_eq!(
+            processor.take_pending_title().as_deref(),
+            Some("project shell")
+        );
+    }
+
+    #[test]
+    fn server_output_processor_captures_st_terminated_window_title() {
+        let mut processor = ServerOutputProcessor::default();
+
+        let filtered = processor.process(b"\x1b]2;editor\x1b\\hello", (0, 0));
+
+        assert_eq!(filtered, b"hello");
+        assert_eq!(processor.take_pending_title().as_deref(), Some("editor"));
+    }
+
+    #[test]
+    fn server_output_processor_handles_split_title_sequence() {
+        let mut processor = ServerOutputProcessor::default();
+
+        let first = processor.process(b"\x1b]0;pro", (0, 0));
+        let second = processor.process(b"ject\x07ok", (0, 0));
+
+        assert!(first.is_empty());
+        assert_eq!(second, b"ok");
+        assert_eq!(processor.take_pending_title().as_deref(), Some("project"));
     }
 }

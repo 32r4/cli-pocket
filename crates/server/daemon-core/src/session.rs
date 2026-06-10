@@ -94,8 +94,10 @@ impl SessionManager {
         let (cols, rows) = terminal.dims();
         let created_at_unix_ms = now_unix_ms();
 
+        let terminal = Arc::new(terminal);
+        let label = terminal.title();
         let entry = TerminalEntry {
-            terminal: Arc::new(terminal),
+            terminal: Arc::clone(&terminal),
             created_at_unix_ms,
         };
 
@@ -109,7 +111,7 @@ impl SessionManager {
             cols,
             rows,
             created_at_unix_ms,
-            label: None,
+            label,
             attached_clients: 0,
         })
     }
@@ -155,7 +157,7 @@ impl SessionManager {
                     cols,
                     rows,
                     created_at_unix_ms: entry.created_at_unix_ms,
-                    label: None,
+                    label: entry.terminal.title(),
                     attached_clients: 0,
                 }
             })
