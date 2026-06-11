@@ -32,6 +32,39 @@ export function Shell({
 	const headerRef = useRef<HTMLElement | null>(null);
 
 	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+
+		const syncViewportSize = () => {
+			const visualViewport = window.visualViewport;
+			const viewportHeight = visualViewport?.height ?? window.innerHeight;
+			document.documentElement.style.setProperty(
+				"--app-viewport-height",
+				`${viewportHeight}px`,
+			);
+			document.documentElement.style.setProperty(
+				"--app-viewport-offset-top",
+				`${visualViewport?.offsetTop ?? 0}px`,
+			);
+		};
+
+		syncViewportSize();
+		window.addEventListener("resize", syncViewportSize);
+		window.visualViewport?.addEventListener("resize", syncViewportSize);
+		window.visualViewport?.addEventListener("scroll", syncViewportSize);
+		return () => {
+			window.removeEventListener("resize", syncViewportSize);
+			window.visualViewport?.removeEventListener("resize", syncViewportSize);
+			window.visualViewport?.removeEventListener("scroll", syncViewportSize);
+			document.documentElement.style.removeProperty("--app-viewport-height");
+			document.documentElement.style.removeProperty(
+				"--app-viewport-offset-top",
+			);
+		};
+	}, []);
+
+	useEffect(() => {
 		const header = headerRef.current;
 		if (!isDesktopWindow || header == null) {
 			return;

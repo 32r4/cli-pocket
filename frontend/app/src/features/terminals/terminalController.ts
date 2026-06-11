@@ -227,6 +227,7 @@ export class TerminalController {
 	private scrollSubscription: TerminalScrollDisposable | null = null;
 	private removePointerFocusListener: (() => void) | null = null;
 	private removeWindowResizeListener: (() => void) | null = null;
+	private removeVisualViewportListeners: (() => void) | null = null;
 	private lastReportedSize: { cols: number; rows: number } | null = null;
 	private initPromise: Promise<void> | null = null;
 	private probeHost: HTMLDivElement | null = null;
@@ -483,11 +484,17 @@ export class TerminalController {
 
 		this.host.addEventListener("pointerdown", focusTerminal);
 		window.addEventListener("resize", handleWindowResize);
+		window.visualViewport?.addEventListener("resize", handleWindowResize);
+		window.visualViewport?.addEventListener("scroll", handleWindowResize);
 		this.removePointerFocusListener = () => {
 			this.host?.removeEventListener("pointerdown", focusTerminal);
 		};
 		this.removeWindowResizeListener = () => {
 			window.removeEventListener("resize", handleWindowResize);
+		};
+		this.removeVisualViewportListeners = () => {
+			window.visualViewport?.removeEventListener("resize", handleWindowResize);
+			window.visualViewport?.removeEventListener("scroll", handleWindowResize);
 		};
 
 		window.requestAnimationFrame(() => {
@@ -519,6 +526,8 @@ export class TerminalController {
 		this.removePointerFocusListener = null;
 		this.removeWindowResizeListener?.();
 		this.removeWindowResizeListener = null;
+		this.removeVisualViewportListeners?.();
+		this.removeVisualViewportListeners = null;
 		this.dataSubscription?.dispose();
 		this.dataSubscription = null;
 		this.terminal?.dispose();
