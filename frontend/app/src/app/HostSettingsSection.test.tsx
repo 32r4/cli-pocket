@@ -21,6 +21,7 @@ function renderHostSettings({
 			terminalFontSize={15}
 			onTerminalFontSizeChange={onTerminalFontSizeChange}
 			onCopyPairUrl={vi.fn()}
+			onShowPairQrCode={vi.fn()}
 			isPairUrlCopied={false}
 			showPairControls={false}
 			onRestartLocalDaemon={vi.fn()}

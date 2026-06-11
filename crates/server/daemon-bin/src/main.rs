@@ -36,6 +36,8 @@ enum Cmd {
     PairKey,
     /// Print the canonical relay pairing URL.
     PairUrl,
+    /// Print the canonical relay pairing URL as a terminal QR code.
+    PairQr,
     /// List paired clients.
     ListClients,
     /// Revoke a client by ID.
@@ -84,6 +86,12 @@ async fn main() -> Result<()> {
             let daemon = Daemon::boot(cfg.clone()).await.context("boot daemon")?;
             let url = daemon.pair_url().context("build pair url")?;
             println!("{url}");
+        }
+        Cmd::PairQr => {
+            let daemon = Daemon::boot(cfg.clone()).await.context("boot daemon")?;
+            let qr = daemon.pair_qr_code().context("build pair QR code")?;
+            println!("{}", qr.terminal);
+            println!("{}", qr.url);
         }
         Cmd::ListClients => {
             let db = ClientDb::open(&cfg.security.clients_path, &cfg.security.revoked_path)
@@ -159,6 +167,14 @@ mod tests {
             .expect("pair-url subcommand should parse");
 
         assert!(matches!(cli.cmd, super::Cmd::PairUrl));
+    }
+
+    #[test]
+    fn pair_qr_subcommand_parses() {
+        let cli = Cli::try_parse_from(["cli-pocket-daemon", "pair-qr"])
+            .expect("pair-qr subcommand should parse");
+
+        assert!(matches!(cli.cmd, super::Cmd::PairQr));
     }
 
     #[tokio::test]

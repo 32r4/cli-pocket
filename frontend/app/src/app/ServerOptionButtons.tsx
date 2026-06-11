@@ -1,11 +1,15 @@
 interface ServerOptionButtonsProps {
 	onOpenDirect: () => void;
 	onOpenPairing: () => void;
+	onOpenQrScanner: () => void;
+	showQrScanner: boolean;
 }
 
 export function ServerOptionButtons({
 	onOpenDirect,
 	onOpenPairing,
+	onOpenQrScanner,
+	showQrScanner,
 }: ServerOptionButtonsProps) {
 	return (
 		<>
@@ -23,9 +27,15 @@ export function ServerOptionButtons({
 			>
 				Pairing link
 			</button>
-			<button type="button" className="server-option-buttons__button" disabled>
-				QR code
-			</button>
+			{showQrScanner ? (
+				<button
+					type="button"
+					className="server-option-buttons__button"
+					onClick={onOpenQrScanner}
+				>
+					QR code
+				</button>
+			) : null}
 		</>
 	);
 }

@@ -15,7 +15,8 @@ use tracing::{error, info};
 use crate::accept::{run_accepted_transport, AcceptDeps, AcceptedTransport};
 use crate::client_db::ClientDb;
 use crate::config::{
-    build_pairing_offer_url, relay_client_ws_url_for_server, DaemonConfig, PairingOffer,
+    build_pairing_offer_url, build_pairing_qr_code, relay_client_ws_url_for_server, DaemonConfig,
+    PairingOffer, PairingQrCode,
 };
 use crate::identity_store::{load_or_create, DaemonIdentity};
 use crate::listener::serve;
@@ -199,6 +200,10 @@ impl Daemon {
                 relay_psk_hex: relay_psk_hex.to_owned(),
             },
         )
+    }
+
+    pub fn pair_qr_code(&self) -> crate::DaemonResult<PairingQrCode> {
+        build_pairing_qr_code(self.pair_url()?)
     }
 }
 

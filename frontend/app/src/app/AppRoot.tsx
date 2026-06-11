@@ -10,6 +10,7 @@ import { ErrorBanner } from "@/shared/components/ErrorBanner";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
 import { ControlOverlay } from "./ControlOverlay";
 import { HostSettingsSection } from "./HostSettingsSection";
+import { PairQrCodeModal } from "./PairQrCodeModal";
 import {
 	initialFormState,
 	makeServerRecord,
@@ -50,6 +51,7 @@ export function AppRoot({
 		initialFormState(),
 	);
 	const [pairingUrl, setPairingUrl] = useState("");
+	const [pairQrSvg, setPairQrSvg] = useState<string | null>(null);
 	const [isPairUrlCopied, setIsPairUrlCopied] = useState(false);
 	const [inlineError, setInlineError] = useState<string | null>(null);
 	const [serverScrollbackBytes, setServerScrollbackBytes] = useState<
@@ -68,6 +70,7 @@ export function AppRoot({
 		connectServer,
 		disconnectCurrentServer,
 		copyLocalPairUrl,
+		loadLocalPairQrCode,
 		restartLocalDaemon,
 		importPairingLink: importAndConnectPairingLink,
 	} = useAppRuntime({
@@ -169,6 +172,13 @@ export function AppRoot({
 		setServerModalMode("pairing");
 	};
 
+	const openQrScannerModal = () => {
+		setInlineError(null);
+		setPairingUrl("");
+		setIsPairUrlCopied(false);
+		setServerModalMode("qr");
+	};
+
 	const saveServer = () => {
 		const nextServer = makeServerRecord(serverForm);
 		daemonRegistry.getState().upsertDaemon(nextServer);
@@ -194,8 +204,12 @@ export function AppRoot({
 	};
 
 	const importPairingLink = async () => {
+		await importPairingLinkValue(pairingUrl);
+	};
+
+	const importPairingLinkValue = async (rawUrl: string) => {
 		try {
-			await importAndConnectPairingLink(pairingUrl);
+			await importAndConnectPairingLink(rawUrl);
 			setPairingUrl("");
 			closeServerModal();
 		} catch (error: unknown) {
@@ -221,6 +235,14 @@ export function AppRoot({
 			setIsPairUrlCopied(false);
 			pairUrlCopyTimerRef.current = null;
 		}, 3000);
+	};
+
+	const showPairQrCode = async () => {
+		const qrCode = await loadLocalPairQrCode();
+		if (qrCode == null) {
+			return;
+		}
+		setPairQrSvg(qrCode.svg);
 	};
 
 	const errorMessage = inlineError ?? platformError;
@@ -268,6 +290,7 @@ export function AppRoot({
 					ui.setTerminalFontSize(fontSize);
 				}}
 				onCopyPairUrl={copyPairUrl}
+				onShowPairQrCode={showPairQrCode}
 				isPairUrlCopied={isPairUrlCopied}
 				showPairControls={services?.host != null}
 				onRestartLocalDaemon={restartLocalDaemon}
@@ -362,6 +385,8 @@ export function AppRoot({
 					<ServerOptionButtons
 						onOpenDirect={openDirectServerModal}
 						onOpenPairing={openPairingServerModal}
+						onOpenQrScanner={openQrScannerModal}
+						showQrScanner={platform.shell === "mobile"}
 					/>
 				</div>
 			</section>
@@ -410,16 +435,21 @@ export function AppRoot({
 				mode={serverModalMode}
 				serverForm={serverForm}
 				pairingUrl={pairingUrl}
+				showQrScanner={platform.shell === "mobile"}
 				onClose={closeServerModal}
 				onOpenDirect={openDirectServerModal}
 				onOpenPairing={openPairingServerModal}
+				onOpenQrScanner={openQrScannerModal}
 				onSaveServer={saveServer}
 				onPairingUrlChange={setPairingUrl}
 				onImportPairingLink={importPairingLink}
+				onImportPairingLinkValue={importPairingLinkValue}
+				onPairingQrScannerError={setInlineError}
 				onServerFormChange={(updater) => {
 					setServerForm((state) => updater(state));
 				}}
 			/>
+			<PairQrCodeModal qrSvg={pairQrSvg} onClose={() => setPairQrSvg(null)} />
 		</Shell>
 	);
 }

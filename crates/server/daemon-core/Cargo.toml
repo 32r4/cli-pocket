@@ -22,6 +22,7 @@ getrandom             = { workspace = true }
 hex                   = "0.4"
 hmac                  = "0.12"
 parking_lot           = "0.12"
+qrcode                = { workspace = true }
 serde                 = { workspace = true }
 serde_json            = { workspace = true }
 sha2                  = "0.10"

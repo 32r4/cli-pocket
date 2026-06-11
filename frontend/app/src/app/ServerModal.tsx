@@ -1,8 +1,14 @@
+import { PairingQrScanner } from "@/features/pairing/PairingQrScanner";
 import { DismissibleLayer } from "@/shared/components/DismissibleLayer";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
 import { ServerOptionButtons } from "./ServerOptionButtons";
 
-export type ServerModalMode = "closed" | "chooser" | "direct" | "pairing";
+export type ServerModalMode =
+	| "closed"
+	| "chooser"
+	| "direct"
+	| "pairing"
+	| "qr";
 
 export interface ServerFormState {
 	kind: "direct" | "relay";
@@ -60,12 +66,16 @@ interface ServerModalProps {
 	mode: ServerModalMode;
 	serverForm: ServerFormState;
 	pairingUrl: string;
+	showQrScanner: boolean;
 	onClose: () => void;
 	onOpenDirect: () => void;
 	onOpenPairing: () => void;
+	onOpenQrScanner: () => void;
 	onSaveServer: () => void;
 	onPairingUrlChange: (value: string) => void;
 	onImportPairingLink: () => Promise<void>;
+	onImportPairingLinkValue: (value: string) => Promise<void>;
+	onPairingQrScannerError: (message: string) => void;
 	onServerFormChange: (
 		updater: (state: ServerFormState) => ServerFormState,
 	) => void;
@@ -75,12 +85,16 @@ export function ServerModal({
 	mode,
 	serverForm,
 	pairingUrl,
+	showQrScanner,
 	onClose,
 	onOpenDirect,
 	onOpenPairing,
+	onOpenQrScanner,
 	onSaveServer,
 	onPairingUrlChange,
 	onImportPairingLink,
+	onImportPairingLinkValue,
+	onPairingQrScannerError,
 	onServerFormChange,
 }: ServerModalProps) {
 	if (mode === "closed") {
@@ -101,6 +115,8 @@ export function ServerModal({
 						<ServerOptionButtons
 							onOpenDirect={onOpenDirect}
 							onOpenPairing={onOpenPairing}
+							onOpenQrScanner={onOpenQrScanner}
+							showQrScanner={showQrScanner}
 						/>
 					</div>
 				) : null}
@@ -172,6 +188,23 @@ export function ServerModal({
 							>
 								Import
 							</button>
+							<button type="button" onClick={onClose}>
+								Cancel
+							</button>
+						</div>
+					</div>
+				) : null}
+
+				{mode === "qr" ? (
+					<div className="server-form">
+						<PairingQrScanner
+							active={mode === "qr"}
+							onDetected={(value) => {
+								void onImportPairingLinkValue(value);
+							}}
+							onError={onPairingQrScannerError}
+						/>
+						<div className="action-row">
 							<button type="button" onClick={onClose}>
 								Cancel
 							</button>

@@ -1,5 +1,25 @@
 declare const __APP_PLATFORM__: import("@/platform/runtime/platform").AppPlatformId;
 
+interface BarcodeDetectorOptions {
+	formats?: string[];
+}
+
+interface BarcodeDetectorResult {
+	rawValue: string;
+}
+
+interface BarcodeDetector {
+	detect(source: CanvasImageSource): Promise<BarcodeDetectorResult[]>;
+}
+
+interface BarcodeDetectorConstructor {
+	new (options?: BarcodeDetectorOptions): BarcodeDetector;
+}
+
+interface Window {
+	BarcodeDetector?: BarcodeDetectorConstructor;
+}
+
 declare module "cli-pocket-client-core-wasm" {
 	export default function init(): Promise<unknown>;
 

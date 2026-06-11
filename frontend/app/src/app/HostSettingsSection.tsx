@@ -1,4 +1,4 @@
-import { Check, Copy, Moon, RefreshCw, Sun } from "lucide-react";
+import { Check, Copy, Moon, QrCode, RefreshCw, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import { Group, Input, NumberField } from "react-aria-components";
 import {
@@ -14,6 +14,7 @@ interface HostSettingsSectionProps {
 	terminalFontSize: number;
 	onTerminalFontSizeChange: (fontSize: number) => void;
 	onCopyPairUrl: () => void;
+	onShowPairQrCode: () => void;
 	isPairUrlCopied: boolean;
 	showPairControls: boolean;
 	onRestartLocalDaemon: () => void;
@@ -46,6 +47,7 @@ export function HostSettingsSection({
 	terminalFontSize,
 	onTerminalFontSizeChange,
 	onCopyPairUrl,
+	onShowPairQrCode,
 	isPairUrlCopied,
 	showPairControls,
 	onRestartLocalDaemon,
@@ -139,19 +141,29 @@ export function HostSettingsSection({
 			) : null}
 			{showPairControls ? (
 				<DetailRow label="Pair URL">
-					<button
-						type="button"
-						className="icon-button"
-						aria-label={isPairUrlCopied ? "Pair URL copied" : "Copy pair URL"}
-						data-copied={isPairUrlCopied}
-						onClick={onCopyPairUrl}
-					>
-						{isPairUrlCopied ? (
-							<Check aria-hidden="true" size={14} strokeWidth={1.75} />
-						) : (
-							<Copy aria-hidden="true" size={14} strokeWidth={1.75} />
-						)}
-					</button>
+					<div className="detail-row__actions">
+						<button
+							type="button"
+							className="icon-button"
+							aria-label={isPairUrlCopied ? "Pair URL copied" : "Copy pair URL"}
+							data-copied={isPairUrlCopied}
+							onClick={onCopyPairUrl}
+						>
+							{isPairUrlCopied ? (
+								<Check aria-hidden="true" size={14} strokeWidth={1.75} />
+							) : (
+								<Copy aria-hidden="true" size={14} strokeWidth={1.75} />
+							)}
+						</button>
+						<button
+							type="button"
+							className="icon-button"
+							aria-label="Show pair QR code"
+							onClick={onShowPairQrCode}
+						>
+							<QrCode aria-hidden="true" size={14} strokeWidth={1.75} />
+						</button>
+					</div>
 				</DetailRow>
 			) : null}
 			{showPairControls ? (

@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { TerminalController } from "@/features/terminals/terminalController";
 import { TerminalSessionRegistry } from "@/features/terminals/terminalSessionRegistry";
-import type { PlatformServices, SessionActor } from "@/platform/bridge/types";
+import type {
+	PairingQrCodeRecord,
+	PlatformServices,
+	SessionActor,
+} from "@/platform/bridge/types";
 import type { AppPlatform } from "@/platform/runtime/platform";
 import type { DaemonRecord } from "@/state/daemon-registry/types";
 import { ConnectionController } from "./connectionController";
@@ -27,6 +31,7 @@ interface UseAppRuntimeResult {
 	) => Promise<void>;
 	disconnectCurrentServer: () => Promise<void>;
 	copyLocalPairUrl: () => Promise<boolean>;
+	loadLocalPairQrCode: () => Promise<PairingQrCodeRecord | null>;
 	restartLocalDaemon: () => Promise<void>;
 	importPairingLink: (rawUrl: string) => Promise<void>;
 }
@@ -194,6 +199,24 @@ export function useAppRuntime({
 		}
 	};
 
+	const loadLocalPairQrCode = async () => {
+		const host = services?.host;
+		if (host == null) {
+			return null;
+		}
+
+		try {
+			const qrCode = await host.pairQrCode();
+			onInlineError(null);
+			return qrCode;
+		} catch (error: unknown) {
+			onInlineError(
+				error instanceof Error ? error.message : "failed to load pair QR code",
+			);
+			return null;
+		}
+	};
+
 	const restartLocalDaemon = async () => {
 		await hostControllerRef.current?.restartLocalDaemon();
 	};
@@ -215,6 +238,7 @@ export function useAppRuntime({
 		connectServer,
 		disconnectCurrentServer,
 		copyLocalPairUrl,
+		loadLocalPairQrCode,
 		restartLocalDaemon,
 		importPairingLink,
 	};

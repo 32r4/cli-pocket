@@ -118,6 +118,13 @@ pub async fn cli_pocket_daemon_pair_url(state: State<'_, AppState>) -> Result<St
 }
 
 #[tauri::command]
+pub async fn cli_pocket_daemon_pair_qr_code(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    serde_json::to_value(state.daemon().pair_qr_code().await?).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn cli_pocket_daemon_restart(state: State<'_, AppState>) -> Result<(), String> {
     state.daemon().restart().await
 }

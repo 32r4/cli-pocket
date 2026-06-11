@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::config::{default_config_path, DaemonConfig, SecurityConfig};
+use crate::config::{
+    build_pairing_qr_code, default_config_path, DaemonConfig, PairingQrCode, SecurityConfig,
+};
 use crate::Daemon;
 
 const BUILD_CONFIG_TEMPLATE: &str = include_str!("../../daemon-bin/daemon.build.toml");
@@ -42,6 +44,11 @@ pub fn load_or_create_config_with_template(
 pub async fn pair_url(config: DaemonConfig) -> crate::DaemonResult<String> {
     let daemon = Daemon::boot(config).await?;
     daemon.pair_url()
+}
+
+pub async fn pair_qr_code(config: DaemonConfig) -> crate::DaemonResult<PairingQrCode> {
+    let url = pair_url(config).await?;
+    build_pairing_qr_code(url)
 }
 
 fn generate_relay_psk_hex() -> crate::DaemonResult<String> {

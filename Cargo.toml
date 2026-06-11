@@ -79,6 +79,7 @@ notify         = "6"
 vte            = "0.13"
 portable-pty   = "0.9"
 clap           = { version = "4", features = ["derive", "env"] }
+qrcode         = { version = "0.14.1", default-features = false, features = ["svg", "pic"] }
 
 # Platform directories (XDG / macOS / Windows data dirs)
 directories    = "5"

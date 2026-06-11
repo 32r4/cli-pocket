@@ -22,6 +22,11 @@ function makeServices(overrides?: Partial<PlatformServices>): PlatformServices {
 		host: {
 			localEndpoint: vi.fn(async () => "ws://127.0.0.1:9999"),
 			pairUrl: vi.fn(async () => "https://example.test/#pair=abc"),
+			pairQrCode: vi.fn(async () => ({
+				url: "https://example.test/#pair=abc",
+				svg: "<svg />",
+				terminal: "",
+			})),
 			restart: vi.fn(async () => undefined),
 		},
 		...overrides,

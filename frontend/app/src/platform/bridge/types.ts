@@ -54,6 +54,12 @@ export interface ServerConfigRecord {
 	scrollback_bytes: number;
 }
 
+export interface PairingQrCodeRecord {
+	url: string;
+	svg: string;
+	terminal: string;
+}
+
 export interface CreateTerminalParams {
 	cols: number;
 	rows: number;
@@ -100,6 +106,7 @@ export interface RegistryAdapter extends IdentityAdapter {
 export interface HostAdapter {
 	localEndpoint(): Promise<string>;
 	pairUrl(): Promise<string>;
+	pairQrCode(): Promise<PairingQrCodeRecord>;
 	restart(): Promise<void>;
 }
 

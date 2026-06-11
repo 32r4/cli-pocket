@@ -6,6 +6,7 @@ import type {
 	ConnectConfig,
 	CreateTerminalParams,
 	HostAdapter,
+	PairingQrCodeRecord,
 	PlatformServices,
 	RegistryAdapter,
 	ServerConfigRecord,
@@ -169,6 +170,8 @@ export class TauriBridge implements PlatformServices {
 					localEndpoint: () =>
 						invoke<string>("cli_pocket_local_daemon_endpoint"),
 					pairUrl: () => invoke<string>("cli_pocket_daemon_pair_url"),
+					pairQrCode: () =>
+						invoke<PairingQrCodeRecord>("cli_pocket_daemon_pair_qr_code"),
 					restart: async () => {
 						await invoke("cli_pocket_daemon_restart");
 					},

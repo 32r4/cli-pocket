@@ -32,6 +32,7 @@ pub fn run() {
             commands::cli_pocket_close,
             commands::cli_pocket_local_daemon_endpoint,
             commands::cli_pocket_daemon_pair_url,
+            commands::cli_pocket_daemon_pair_qr_code,
             commands::cli_pocket_daemon_restart,
             commands::cli_pocket_load_daemon_registry,
             commands::cli_pocket_save_daemon_registry,

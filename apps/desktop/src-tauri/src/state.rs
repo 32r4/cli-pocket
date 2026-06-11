@@ -1,3 +1,4 @@
+use cli_pocket_daemon_core::config::PairingQrCode;
 use cli_pocket_daemon_core::config::{default_config_path, workspace_root};
 use cli_pocket_daemon_core::service::{
     build_config_template, dev_config_template, load_or_create_config_with_template,
@@ -130,6 +131,26 @@ impl EmbeddedDaemonRuntime {
             .as_ref()
             .ok_or_else(|| "daemon not running".to_owned())?
             .pair_url()
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn pair_qr_code(&self) -> Result<PairingQrCode, String> {
+        self.ensure_enabled()?;
+
+        let mut state = self.inner.lock().await;
+        if state.daemon.is_none() {
+            let mut daemon = Daemon::boot(state.config.clone())
+                .await
+                .map_err(|error| error.to_string())?;
+            daemon.start().await.map_err(|error| error.to_string())?;
+            state.daemon = Some(daemon);
+        }
+
+        state
+            .daemon
+            .as_ref()
+            .ok_or_else(|| "daemon not running".to_owned())?
+            .pair_qr_code()
             .map_err(|error| error.to_string())
     }
 

@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cli_pocket_proto::ServerId;
+use qrcode::render::{svg, unicode::Dense1x2};
+use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,6 +185,13 @@ pub struct PairingOffer {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct PairingQrCode {
+    pub url: String,
+    pub svg: String,
+    pub terminal: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct PairingOfferPayload<'a> {
     v: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -231,6 +240,21 @@ pub fn build_pairing_offer_url(
     let trimmed = base.trim_end_matches('/');
 
     Ok(format!("{trimmed}/#pair={encoded}"))
+}
+
+pub fn build_pairing_qr_code(url: String) -> crate::DaemonResult<PairingQrCode> {
+    let code = QrCode::new(url.as_bytes())
+        .map_err(|error| crate::DaemonError::Config(format!("build pairing QR code: {error}")))?;
+    let svg = code
+        .render::<svg::Color<'_>>()
+        .min_dimensions(256, 256)
+        .quiet_zone(true)
+        .dark_color(svg::Color("#0a1118"))
+        .light_color(svg::Color("#ffffff"))
+        .build();
+    let terminal = code.render::<Dense1x2>().quiet_zone(true).build();
+
+    Ok(PairingQrCode { url, svg, terminal })
 }
 
 pub fn relay_server_ws_url(base_url: &str) -> crate::DaemonResult<String> {
@@ -326,9 +350,9 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        build_pairing_offer_url, default_config_path, default_state_dir, relay_client_ws_url,
-        relay_client_ws_url_for_server, relay_server_ws_url, relay_server_ws_url_for_server,
-        workspace_root, AppConfig, PairingOffer, SecurityConfig,
+        build_pairing_offer_url, build_pairing_qr_code, default_config_path, default_state_dir,
+        relay_client_ws_url, relay_client_ws_url_for_server, relay_server_ws_url,
+        relay_server_ws_url_for_server, workspace_root, AppConfig, PairingOffer, SecurityConfig,
     };
     use cli_pocket_proto::ServerId;
 
@@ -358,6 +382,16 @@ mod tests {
         assert!(url.starts_with("https://cli-pocket.32r4.asia/#pair="));
         assert!(url.contains("#pair="));
         assert!(!url.contains("/#pair=#pair="));
+    }
+
+    #[test]
+    fn pairing_qr_code_uses_offer_url_as_payload() {
+        let qr = build_pairing_qr_code("https://cli-pocket.example/#pair=abc".to_owned())
+            .expect("build QR code");
+
+        assert_eq!(qr.url, "https://cli-pocket.example/#pair=abc");
+        assert!(qr.svg.contains("<svg"));
+        assert!(qr.svg.contains("viewBox"));
     }
 
     #[test]
