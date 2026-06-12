@@ -256,7 +256,9 @@ fn parse_resume_token(value: Option<&str>) -> Result<Option<ResumeToken>, String
         return Ok(None);
     };
     let bytes = hex::decode(value).map_err(|error| format!("resume_token_hex: {error}"))?;
-    postcard::from_bytes(&bytes).map_err(|error| format!("resume_token_hex: {error}"))
+    postcard::from_bytes(&bytes)
+        .map(Some)
+        .map_err(|error| format!("resume_token_hex: {error}"))
 }
 
 fn parse_connect_args(config: ConnectArgs) -> Result<ParsedConnectArgs, String> {

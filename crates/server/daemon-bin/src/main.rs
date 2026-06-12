@@ -158,7 +158,7 @@ mod tests {
         dev_config_template, load_or_create_config, load_or_create_config_with_template, pair_url,
     };
     use cli_pocket_daemon_core::DaemonConfig;
-    use std::path::PathBuf;
+    use std::path::Path;
     use tempfile::TempDir;
 
     #[test]
@@ -179,6 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn pair_url_builds_canonical_offer_url() {
+        let dir = TempDir::new().expect("temp dir");
         let config = DaemonConfig {
             app: AppConfig {
                 base_url: "https://cli-pocket.example/".to_owned(),
@@ -189,7 +190,7 @@ mod tests {
                 server_auth_token: None,
                 retry: RelayRetryConfig::default(),
             },
-            security: test_security_config(),
+            security: test_security_config(dir.path()),
             ..DaemonConfig::default()
         };
 
@@ -200,8 +201,9 @@ mod tests {
 
     #[tokio::test]
     async fn pair_url_requires_relay_psk() {
+        let dir = TempDir::new().expect("temp dir");
         let err = pair_url(DaemonConfig {
-            security: test_security_config(),
+            security: test_security_config(dir.path()),
             relay: RelayConfig::default(),
             ..DaemonConfig::default()
         })
@@ -246,11 +248,11 @@ mod tests {
         );
     }
 
-    fn test_security_config() -> SecurityConfig {
+    fn test_security_config(base: &Path) -> SecurityConfig {
         SecurityConfig {
-            identity_path: PathBuf::from("identity.json"),
-            clients_path: PathBuf::from("clients.json"),
-            revoked_path: PathBuf::from("revoked.json"),
+            identity_path: base.join("identity.json"),
+            clients_path: base.join("clients.json"),
+            revoked_path: base.join("revoked.json"),
         }
     }
 }
