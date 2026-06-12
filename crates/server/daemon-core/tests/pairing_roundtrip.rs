@@ -369,21 +369,30 @@ async fn paired_client_pages_history() {
             RequestBody::ReadHistory {
                 terminal_id,
                 before: None,
-                max_bytes: 8,
+                max_bytes: u32::try_from(expected_history_tail().len()).unwrap_or(u32::MAX),
             },
         ),
     )
     .await
     .expect("send history request");
 
-    let history_response = recv_frame(&mut client_transport, &mut session)
-        .await
-        .expect("recv history response");
+    let history_response = loop {
+        let frame = recv_frame(&mut client_transport, &mut session)
+            .await
+            .expect("recv history response");
+        match frame.body {
+            FrameBody::Response(response) if response.id == RequestId(4) => {
+                break Frame::body(FrameBody::Response(response));
+            }
+            FrameBody::StreamData(_) => {}
+            other => panic!("expected history Response, got {other:?}"),
+        }
+    };
     let history = match history_response.body {
-        FrameBody::Response(response) if response.id == RequestId(4) => match response.result {
+        FrameBody::Response(response) => match response.result {
             Ok(ResponseBody::ReadHistory { page }) => {
                 assert_eq!(page.terminal_id, terminal_id);
-                assert!(!page.has_more);
+                assert!(page.has_more);
                 page.bytes
             }
             other => panic!("expected ReadHistory response body, got {other:?}"),
