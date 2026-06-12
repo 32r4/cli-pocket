@@ -101,6 +101,19 @@ jobs:
             package-lock.json
             frontend/app/package-lock.json
 
+      - name: Select Xcode 16 (macos)
+        if: runner.os == 'macOS' && (inputs.build_desktop || inputs.build_ios)
+        shell: bash
+        run: |
+          XCODE_APP="$(find /Applications -maxdepth 1 -type d -name 'Xcode_16*.app' | sort -V | tail -n 1)"
+          if [ -z "$XCODE_APP" ]; then
+            echo "No Xcode 16 installation found on runner." >&2
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$XCODE_APP/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+
       - name: Install Tauri prerequisites (linux)
         if: runner.os == 'Linux' && (inputs.build_desktop || inputs.build_android)
         shell: bash
