@@ -12,6 +12,7 @@ if [ ! -f "$APP_CONFIG" ]; then
 fi
 
 npm ci
+npx playwright install chromium
 npm --prefix frontend/app ci
 npm --prefix frontend/app run build:mobile
 
@@ -28,13 +29,12 @@ cd "$OLDPWD"
 TARGET_DIR="apps/mobile/src-tauri/gen/android/app/build/outputs"
 copied=0
 
-shopt -s globstar nullglob
-for f in "$TARGET_DIR"/**/*.apk "$TARGET_DIR"/**/*.aab; do
+while IFS= read -r f; do
   [ -f "$f" ] || continue
   base="$(basename "$f")"
   cp "$f" "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}"
   copied=1
-done
+done < <(find "$TARGET_DIR" -type f \( -name '*.apk' -o -name '*.aab' \))
 
 if [ "$copied" -eq 0 ]; then
   echo "Android build completed but no .apk or .aab artifacts were found in $TARGET_DIR." >&2

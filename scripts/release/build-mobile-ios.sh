@@ -16,6 +16,8 @@ if [ ! -f "$APP_CONFIG" ]; then
   exit 0
 fi
 
+npm ci
+npx playwright install chromium
 npm --prefix frontend/app ci
 npm --prefix frontend/app run build:mobile
 
@@ -26,13 +28,12 @@ cd "$OLDPWD"
 TARGET_DIR="apps/mobile/src-tauri/gen/apple/build"
 copied=0
 
-shopt -s globstar nullglob
-for f in "$TARGET_DIR"/**/*.ipa; do
+while IFS= read -r f; do
   [ -f "$f" ] || continue
   base="$(basename "$f")"
   cp "$f" "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}"
   copied=1
-done
+done < <(find "$TARGET_DIR" -type f -name '*.ipa')
 
 if [ "$copied" -eq 0 ]; then
   echo "iOS build completed but no .ipa artifacts were found in $TARGET_DIR." >&2

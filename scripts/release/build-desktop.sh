@@ -8,7 +8,7 @@ mkdir -p "$OUT_DIR"
 npm --prefix frontend/app ci
 npm --prefix frontend/app run build:desktop
 
-if [ "$(uname -s)" = "Darwin" ] && [ ! -f apps/desktop/src-tauri/icons/icon.icns ]; then
+if [ ! -f apps/desktop/src-tauri/icons/icon.icns ]; then
   cargo tauri icon apps/desktop/src-tauri/icons/icon.png --output apps/desktop/src-tauri/icons
 fi
 
@@ -19,8 +19,7 @@ cd "$OLDPWD"
 TARGET_DIR="apps/desktop/src-tauri/target/release/bundle"
 
 # Collect every produced installer into dist/.
-shopt -s globstar nullglob
-for f in "$TARGET_DIR"/**/*; do
+find "$TARGET_DIR" -type f | while IFS= read -r f; do
   case "$f" in
     *.deb|*.rpm|*.AppImage|*.msi|*.dmg|*.app.tar.gz) ;;
     *) continue ;;
