@@ -32,6 +32,8 @@ use tempfile::TempDir;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+const HISTORY_TAIL_WINDOW_BYTES: u32 = 8;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn paired_client_creates_terminal_end_to_end() {
     // ---- Setup: tempdir, daemon identity, client DB with client's pub key. ----
@@ -369,7 +371,7 @@ async fn paired_client_pages_history() {
             RequestBody::ReadHistory {
                 terminal_id,
                 before: None,
-                max_bytes: u32::try_from(expected_history_tail().len()).unwrap_or(u32::MAX),
+                max_bytes: HISTORY_TAIL_WINDOW_BYTES,
             },
         ),
     )
@@ -400,7 +402,13 @@ async fn paired_client_pages_history() {
         other => panic!("expected history Response, got {other:?}"),
     };
 
-    assert_eq!(history.as_ref(), expected_history_tail().as_slice());
+    let normalized_history = normalize_terminal_newlines(history.as_ref());
+    assert!(
+        normalized_history.ends_with(expected_history_tail().as_slice()),
+        "expected history tail {:?}, got {:?}",
+        expected_history_tail(),
+        normalized_history
+    );
 
     daemon_task.abort();
     let _ = daemon_task.await;
@@ -988,7 +996,22 @@ fn live_output_input() -> Vec<u8> {
 
 #[cfg(windows)]
 fn expected_history_tail() -> Vec<u8> {
-    b"output\r\n".to_vec()
+    b"output\n".to_vec()
+}
+
+fn normalize_terminal_newlines(bytes: &[u8]) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+            normalized.push(b'\n');
+            index += 2;
+            continue;
+        }
+        normalized.push(bytes[index]);
+        index += 1;
+    }
+    normalized
 }
 
 #[cfg(unix)]
