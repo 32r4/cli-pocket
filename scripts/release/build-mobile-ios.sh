@@ -22,6 +22,7 @@ npm --prefix frontend/app ci
 npm --prefix frontend/app run build:mobile
 
 cd apps/mobile
+cargo tauri ios init --ci
 cargo tauri ios build
 cd "$OLDPWD"
 

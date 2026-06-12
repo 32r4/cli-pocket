@@ -16,7 +16,7 @@ cd apps/desktop
 cargo tauri build --bundles "${TAURI_BUNDLES:-app,deb,msi,dmg,appimage,rpm}"
 cd "$OLDPWD"
 
-TARGET_DIR="apps/desktop/src-tauri/target/release/bundle"
+TARGET_DIR="target/release/bundle"
 
 # Collect every produced installer into dist/.
 find "$TARGET_DIR" -type f | while IFS= read -r f; do
