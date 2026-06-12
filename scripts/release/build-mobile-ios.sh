@@ -23,22 +23,56 @@ npm --prefix frontend/app run build:mobile
 
 cd apps/mobile
 cargo tauri ios init --ci
-cargo tauri ios build
+if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || grep -q '"developmentTeam"' src-tauri/tauri.conf.json; then
+  cargo tauri ios build
+else
+  echo "APPLE_DEVELOPMENT_TEAM is not set and tauri.conf.json has no iOS developmentTeam; building unsigned simulator app instead." >&2
+  PROJECT_FILE="$(find src-tauri/gen/apple -maxdepth 1 -type d -name '*.xcodeproj' | head -n 1)"
+  if [ -z "$PROJECT_FILE" ]; then
+    echo "Unable to locate generated Xcode project under src-tauri/gen/apple." >&2
+    exit 1
+  fi
+  WORKSPACE="$PROJECT_FILE/project.xcworkspace"
+  SCHEME="$(basename "$PROJECT_FILE" .xcodeproj)_iOS"
+  DERIVED_DATA="src-tauri/gen/apple/build-simulator"
+  xcodebuild \
+    -workspace "$WORKSPACE" \
+    -scheme "$SCHEME" \
+    -sdk iphonesimulator \
+    -configuration Release \
+    -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath "$DERIVED_DATA" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGN_IDENTITY="" \
+    build
+fi
 cd "$OLDPWD"
 
-TARGET_DIR="apps/mobile/src-tauri/gen/apple/build"
 copied=0
 
-while IFS= read -r f; do
-  [ -f "$f" ] || continue
-  base="$(basename "$f")"
-  cp "$f" "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}"
-  copied=1
-done < <(find "$TARGET_DIR" -type f -name '*.ipa')
+if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || grep -q '"developmentTeam"' "$APP_CONFIG"; then
+  TARGET_DIR="apps/mobile/src-tauri/gen/apple/build"
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    base="$(basename "$f")"
+    cp "$f" "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}"
+    copied=1
+  done < <(find "$TARGET_DIR" -type f -name '*.ipa')
 
-if [ "$copied" -eq 0 ]; then
-  echo "iOS build completed but no .ipa artifacts were found in $TARGET_DIR." >&2
-  exit 1
+  if [ "$copied" -eq 0 ]; then
+    echo "iOS build completed but no .ipa artifacts were found in $TARGET_DIR." >&2
+    exit 1
+  fi
+else
+  APP_DIR="$(find apps/mobile/src-tauri/gen/apple/build-simulator/Build/Products -type d -path '*/Release-iphonesimulator/*.app' | head -n 1)"
+  if [ -z "$APP_DIR" ]; then
+    echo "iOS simulator build completed but no .app artifact was found." >&2
+    exit 1
+  fi
+  base="$(basename "$APP_DIR")"
+  tar -C "$(dirname "$APP_DIR")" -czf "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}.tar.gz" "$base"
+  copied=1
 fi
 
 ls -lh "$OUT_DIR"
