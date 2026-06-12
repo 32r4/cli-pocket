@@ -27,25 +27,11 @@ if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || grep -q '"developmentTeam"' src-tauri
   cargo tauri ios build
 else
   echo "APPLE_DEVELOPMENT_TEAM is not set and tauri.conf.json has no iOS developmentTeam; building unsigned simulator app instead." >&2
-  PROJECT_FILE="$(find src-tauri/gen/apple -maxdepth 1 -type d -name '*.xcodeproj' | head -n 1)"
-  if [ -z "$PROJECT_FILE" ]; then
-    echo "Unable to locate generated Xcode project under src-tauri/gen/apple." >&2
-    exit 1
+  SIM_TARGET="aarch64-sim"
+  if [ "$(uname -m)" = "x86_64" ]; then
+    SIM_TARGET="x86_64"
   fi
-  WORKSPACE="$PROJECT_FILE/project.xcworkspace"
-  SCHEME="$(basename "$PROJECT_FILE" .xcodeproj)_iOS"
-  DERIVED_DATA="src-tauri/gen/apple/build-simulator"
-  xcodebuild \
-    -workspace "$WORKSPACE" \
-    -scheme "$SCHEME" \
-    -sdk iphonesimulator \
-    -configuration Release \
-    -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath "$DERIVED_DATA" \
-    CODE_SIGNING_ALLOWED=NO \
-    CODE_SIGNING_REQUIRED=NO \
-    CODE_SIGN_IDENTITY="" \
-    build
+  cargo tauri ios build --no-sign --target "$SIM_TARGET"
 fi
 cd "$OLDPWD"
 
@@ -65,7 +51,7 @@ if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || grep -q '"developmentTeam"' "$APP_CON
     exit 1
   fi
 else
-  APP_DIR="$(find apps/mobile/src-tauri/gen/apple/build-simulator/Build/Products -type d -path '*/Release-iphonesimulator/*.app' | head -n 1)"
+  APP_DIR="$(find apps/mobile/src-tauri/gen/apple -type d -name '*.app' | head -n 1)"
   if [ -z "$APP_DIR" ]; then
     echo "iOS simulator build completed but no .app artifact was found." >&2
     exit 1
