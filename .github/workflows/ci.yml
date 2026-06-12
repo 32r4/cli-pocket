@@ -18,6 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libssl-dev pkg-config librsvg2-dev
+
       - name: Read rust-toolchain
         run: cat rust-toolchain.toml
 
@@ -41,20 +46,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read rust-toolchain
+        run: cat rust-toolchain.toml
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: webview/terminal/package-lock.json
+          cache-dependency-path: frontend/app/package-lock.json
 
       - run: npm ci
-        working-directory: webview/terminal
+        working-directory: frontend/app
 
-      - run: npm run lint
-        working-directory: webview/terminal
+      - run: npm run check
+        working-directory: frontend/app
 
-      - run: npm run build:tauri
-        working-directory: webview/terminal
+      - run: npm run build:desktop
+        working-directory: frontend/app
 
       - run: npm run build:web
-        working-directory: webview/terminal
+        working-directory: frontend/app

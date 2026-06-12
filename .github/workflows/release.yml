@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+env:
+  HAS_MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+  HAS_MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD != '' }}
+
 jobs:
   build:
     name: build (${{ matrix.name }})
@@ -47,7 +51,7 @@ jobs:
             wasm_pack_install: none
             tauri_bundles: ""
           - name: macos-x86_64
-            os: macos-13
+            os: macos-15-intel
             target: x86_64-apple-darwin
             build_daemon: true
             build_relay: true
@@ -185,7 +189,7 @@ jobs:
         run: choco install minisign -y
 
       - name: Materialise signing key
-        if: secrets.MINISIGN_SECRET_KEY != ''
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true'
         shell: bash
         env:
           KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
@@ -269,7 +273,7 @@ jobs:
         run: bash scripts/release/build-mobile-ios.sh
 
       - name: Sign artifacts
-        if: secrets.MINISIGN_SECRET_KEY != ''
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         env:
           MINISIGN_KEY_FILE: cli-pocket-minisign.key
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
@@ -305,7 +309,7 @@ jobs:
           ls -lh dist/
 
       - name: Verify signing secrets exist
-        if: ${{ secrets.MINISIGN_SECRET_KEY == '' || secrets.MINISIGN_PASSWORD == '' }}
+        if: env.HAS_MINISIGN_SECRET_KEY != 'true' || env.HAS_MINISIGN_PASSWORD != 'true'
         shell: bash
         run: |
           echo "MINISIGN_SECRET_KEY and MINISIGN_PASSWORD must both be configured for release publishing." >&2
