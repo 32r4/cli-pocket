@@ -5,10 +5,8 @@ set -euo pipefail
 OUT_DIR="${OUT_DIR:-dist}"
 mkdir -p "$OUT_DIR"
 
-cd webview/terminal
-npm ci
-npm run build:tauri
-cd "$OLDPWD"
+npm --prefix frontend/app ci
+npm --prefix frontend/app run build:desktop
 
 cd apps/desktop
 cargo tauri build --bundles "${TAURI_BUNDLES:-app,deb,msi,dmg,appimage,rpm}"

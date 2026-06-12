@@ -30,8 +30,20 @@ archive_stage_zip() {
   fi
 
   if command -v powershell.exe >/dev/null 2>&1; then
+    local stage_path_win
+    local output_path_win
+    if command -v cygpath >/dev/null 2>&1; then
+      stage_path_win="$(cygpath -w "${stage_parent}/${stage_name}")"
+      output_path_win="$(cygpath -w "$output_path")"
+    elif command -v wslpath >/dev/null 2>&1; then
+      stage_path_win="$(wslpath -w "${stage_parent}/${stage_name}")"
+      output_path_win="$(wslpath -w "$output_path")"
+    else
+      echo "zip packaging requires cygpath or wslpath when using powershell.exe" >&2
+      exit 1
+    fi
     powershell.exe -NoLogo -Command \
-      "Compress-Archive -LiteralPath '$stage_parent\\$stage_name' -DestinationPath '$output_path' -Force" \
+      "Compress-Archive -LiteralPath '$stage_path_win' -DestinationPath '$output_path_win' -Force" \
       >/dev/null
     return
   fi

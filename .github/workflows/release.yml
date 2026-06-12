@@ -15,6 +15,7 @@ permissions:
 env:
   HAS_MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
   HAS_MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD != '' }}
+  MINISIGN_VERSION: "0.12"
 
 jobs:
   build:
@@ -172,19 +173,20 @@ jobs:
         run: cargo install tauri-cli --version "^2.1" --locked
 
       - name: Install minisign (linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y minisign
+          curl -fsSL -o minisign.tar.gz "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
+          tar -xzf minisign.tar.gz
+          sudo install -m 755 "minisign-linux/$(uname -m)/minisign" /usr/local/bin/minisign
 
       - name: Install minisign (macos)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: bash
         run: brew install minisign
 
       - name: Install minisign (windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: powershell
         run: choco install minisign -y
 
@@ -322,8 +324,9 @@ jobs:
       - name: Install minisign
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y minisign
+          curl -fsSL -o minisign.tar.gz "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
+          tar -xzf minisign.tar.gz
+          sudo install -m 755 "minisign-linux/$(uname -m)/minisign" /usr/local/bin/minisign
 
       - name: Sign SHA256SUMS
         env:
