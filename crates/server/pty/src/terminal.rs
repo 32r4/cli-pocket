@@ -65,9 +65,11 @@ impl Terminal {
             .openpty(pty_size)
             .map_err(|error| TerminalError::Pty(error.to_string()))?;
 
-        let mut writer = master
+        let writer = master
             .take_writer()
             .map_err(|error| TerminalError::Pty(error.to_string()))?;
+        #[cfg(windows)]
+        let mut writer = writer;
         #[cfg(windows)]
         bootstrap_conpty_cursor_inheritance(&mut *writer, rows)?;
 
