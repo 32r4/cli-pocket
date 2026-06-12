@@ -277,6 +277,7 @@ fn save_identity_json(path: &Path, json: &[u8]) -> Result<(), IdentityError> {
     file.sync_all()?;
     drop(file);
     fs::rename(&tmp_path, path)?;
+    set_mode_600(path)?;
     Ok(())
 }
 
