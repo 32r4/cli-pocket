@@ -1,0 +1,28 @@
+name: release android
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (without leading v)"
+        required: true
+
+jobs:
+  build:
+    uses: ./.github/workflows/release-platform.yml
+    with:
+      version: ${{ inputs.version }}
+      name: android
+      os: ubuntu-22.04
+      target: android
+      build_daemon: false
+      build_relay: false
+      build_desktop: false
+      build_web: false
+      build_android: true
+      build_ios: false
+      node_required: true
+      tauri_required: true
+      wasm_pack_install: none
+      tauri_bundles: ""
+    secrets: inherit

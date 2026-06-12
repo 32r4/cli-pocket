@@ -1,0 +1,28 @@
+name: release linux-x86_64
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (without leading v)"
+        required: true
+
+jobs:
+  build:
+    uses: ./.github/workflows/release-platform.yml
+    with:
+      version: ${{ inputs.version }}
+      name: linux-x86_64
+      os: ubuntu-22.04
+      target: x86_64-unknown-linux-gnu
+      build_daemon: true
+      build_relay: true
+      build_desktop: true
+      build_web: true
+      build_android: false
+      build_ios: false
+      node_required: true
+      tauri_required: true
+      wasm_pack_install: shell
+      tauri_bundles: deb,rpm,appimage
+    secrets: inherit
