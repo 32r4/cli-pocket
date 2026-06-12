@@ -11,6 +11,7 @@ if [ ! -f "$APP_CONFIG" ]; then
   exit 0
 fi
 
+npm ci
 npm --prefix frontend/app ci
 npm --prefix frontend/app run build:mobile
 

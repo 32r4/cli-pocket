@@ -28,7 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["deb", "rpm", "msi", "app", "dmg"],
-    "icon": ["icons/icon.png", "icons/icon.ico"]
+    "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"]
   },
   "plugins": {
     "deep-link": {

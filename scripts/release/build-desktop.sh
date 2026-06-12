@@ -8,6 +8,10 @@ mkdir -p "$OUT_DIR"
 npm --prefix frontend/app ci
 npm --prefix frontend/app run build:desktop
 
+if [ "$(uname -s)" = "Darwin" ] && [ ! -f apps/desktop/src-tauri/icons/icon.icns ]; then
+  cargo tauri icon apps/desktop/src-tauri/icons/icon.png --output apps/desktop/src-tauri/icons
+fi
+
 cd apps/desktop
 cargo tauri build --bundles "${TAURI_BUNDLES:-app,deb,msi,dmg,appimage,rpm}"
 cd "$OLDPWD"

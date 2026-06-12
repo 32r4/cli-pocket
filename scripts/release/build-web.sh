@@ -5,16 +5,16 @@ set -euo pipefail
 OUT_DIR="${OUT_DIR:-dist}"
 mkdir -p "$OUT_DIR"
 
-cd apps/web
+cd frontend/app
 if [ -f package-lock.json ]; then
   npm ci
 else
   npm install --no-package-lock
 fi
-npm run build
+npm run build:web
 cd "$OLDPWD"
 
 ART="cli-pocket-web-${VERSION}"
-tar -C apps/web -czf "$OUT_DIR/${ART}.tar.gz" dist/
+tar -C frontend/app -czf "$OUT_DIR/${ART}.tar.gz" dist/web/
 
 echo "Built $OUT_DIR/${ART}.tar.gz"
