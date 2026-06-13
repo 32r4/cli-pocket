@@ -1,14 +1,15 @@
 # Verifying a cli-pocket release
 
-Every artifact at https://github.com/32r4/cli-pocket/releases has a matching
-`.minisig` file. To verify:
+Every release at https://github.com/32r4/cli-pocket/releases includes
+`SHA256SUMS`.
 
-1. Download the public key from `docs/release/PUBLIC_KEY.md`.
-2. Save it to `cli-pocket-minisign.pub`.
-3. Run:
+For all releases:
 
-   ```
-   minisign -V -p cli-pocket-minisign.pub -m <file>
+1. Download `SHA256SUMS` and the artifact you want to install.
+2. Run:
+
+   ```sh
+   sha256sum -c SHA256SUMS
    ```
 
 If verification fails, do not install. Open an issue at

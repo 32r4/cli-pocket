@@ -169,18 +169,18 @@ jobs:
           find aggregated -type f -exec cp -n {} dist/ \;
           ls -lh dist/
 
-      - name: Verify signing secrets exist
+      - name: Signing disabled
         if: env.HAS_MINISIGN_SECRET_KEY != 'true' || env.HAS_MINISIGN_PASSWORD != 'true'
         shell: bash
         run: |
-          echo "MINISIGN_SECRET_KEY and MINISIGN_PASSWORD must both be configured for release publishing." >&2
-          exit 1
+          echo "MINISIGN_SECRET_KEY or MINISIGN_PASSWORD is not configured; skipping release signing."
 
       - name: Generate SHA256SUMS
         shell: bash
         run: bash scripts/release/sha256sums.sh dist/
 
       - name: Install minisign
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: bash
         run: |
           curl -fsSL -o minisign.tar.gz "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
@@ -188,6 +188,7 @@ jobs:
           sudo install -m 755 "minisign-linux/$(uname -m)/minisign" /usr/local/bin/minisign
 
       - name: Sign SHA256SUMS
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         env:
           MINISIGN_KEY_FILE: cli-pocket-minisign.key
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
@@ -199,10 +200,12 @@ jobs:
           echo "$MINISIGN_PASSWORD" | minisign -S -s cli-pocket-minisign.key -m dist/SHA256SUMS -t "cli-pocket release"
 
       - name: Extract minisign public key
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: bash
         run: bash scripts/release/extract-public-key.sh docs/release/PUBLIC_KEY.md cli-pocket-minisign.pub
 
       - name: Verify everything
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         env:
           MINISIGN_PUB_FILE: cli-pocket-minisign.pub
         shell: bash

@@ -1,13 +1,11 @@
 # Releasing cli-pocket
 
-This is a manual process. CI does the heavy lifting (build + sign + draft
+This is a manual process. CI does the heavy lifting (build + draft
 release), but a maintainer must approve and publish.
 
 ## Prerequisites (one-time)
 
 - The maintainer has access to the GitHub repo `32r4/cli-pocket`.
-- GitHub Actions secrets `MINISIGN_SECRET_KEY` and `MINISIGN_PASSWORD` are set.
-- Local minisign public key matches `docs/release/PUBLIC_KEY.md`.
 
 ## Steps
 
@@ -24,10 +22,10 @@ release), but a maintainer must approve and publish.
    artifacts attached.
    - Android/iOS jobs run only when `apps/mobile/src-tauri/tauri.conf.json`
      exists in the tagged revision.
-8. Download `SHA256SUMS` and `SHA256SUMS.minisig`; verify locally:
+8. Download `SHA256SUMS`; verify locally:
 
    ```
-   minisign -V -p cli-pocket-minisign.pub -m SHA256SUMS
+   sha256sum -c SHA256SUMS
    ```
 
 9. Update the Homebrew tap (`32r4/homebrew-cli-pocket`):
