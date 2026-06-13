@@ -15,6 +15,7 @@ permissions:
 env:
   HAS_MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
   HAS_MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD != '' }}
+  HAS_MINISIGN_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY != '' }}
   MINISIGN_VERSION: "0.12"
 
 jobs:
@@ -216,13 +217,15 @@ jobs:
           chmod 600 cli-pocket-minisign.key
           echo "$MINISIGN_PASSWORD" | minisign -S -s cli-pocket-minisign.key -m dist/SHA256SUMS -t "cli-pocket release"
 
-      - name: Extract minisign public key
-        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
+      - name: Write minisign public key
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true' && env.HAS_MINISIGN_PUBLIC_KEY == 'true'
+        env:
+          KEY: ${{ secrets.MINISIGN_PUBLIC_KEY }}
         shell: bash
-        run: bash scripts/release/extract-public-key.sh docs/release/PUBLIC_KEY.md cli-pocket-minisign.pub
+        run: printf '%s' "$KEY" > cli-pocket-minisign.pub
 
       - name: Verify everything
-        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true' && env.HAS_MINISIGN_PUBLIC_KEY == 'true'
         env:
           MINISIGN_PUB_FILE: cli-pocket-minisign.pub
         shell: bash

@@ -32,7 +32,7 @@ copied=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   base="$(basename "$f")"
-  cp "$f" "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}"
+  cp "$f" "$OUT_DIR/cli-pocket-android-${VERSION}-${base}"
   copied=1
 done < <(find "$TARGET_DIR" -type f \( -name '*.apk' -o -name '*.aab' \))
 

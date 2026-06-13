@@ -13,8 +13,10 @@ jobs:
     with:
       version: ${{ inputs.version }}
       name: ios
+      label: iOS
       os: macos-14
       target: aarch64-apple-darwin
+      artifact_target: ios
       build_daemon: false
       build_relay: false
       build_desktop: false

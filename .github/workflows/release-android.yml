@@ -13,8 +13,10 @@ jobs:
     with:
       version: ${{ inputs.version }}
       name: android
+      label: Android
       os: ubuntu-22.04
       target: android
+      artifact_target: android
       build_daemon: false
       build_relay: false
       build_desktop: false

@@ -13,8 +13,10 @@ jobs:
     with:
       version: ${{ inputs.version }}
       name: macos-x86_64
+      label: macOS x64
       os: macos-15-intel
       target: x86_64-apple-darwin
+      artifact_target: macos-x64
       build_daemon: true
       build_relay: true
       build_desktop: true

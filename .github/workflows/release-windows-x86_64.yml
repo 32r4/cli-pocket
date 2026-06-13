@@ -13,8 +13,10 @@ jobs:
     with:
       version: ${{ inputs.version }}
       name: windows-x86_64
+      label: Windows x64
       os: windows-2022
       target: x86_64-pc-windows-msvc
+      artifact_target: windows-x64
       build_daemon: true
       build_relay: true
       build_desktop: true

@@ -9,6 +9,8 @@ Per-target build scripts. Each script:
 - Produces one tarball in `dist/` whose name is
   `<artifact>-<version>-<platform>.<ext>` (e.g.
   `cli-pocket-daemon-0.1.0-linux-x64.tar.gz`).
+- Mobile builds use platform-specific prefixes such as
+  `cli-pocket-android-<version>-...` and `cli-pocket-ios-<version>-...`.
 - Exits non-zero on failure.
 
 After all scripts run, `sha256sums.sh dist/` produces `SHA256SUMS`.

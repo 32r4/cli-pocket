@@ -13,8 +13,10 @@ jobs:
     with:
       version: ${{ inputs.version }}
       name: macos-aarch64
+      label: macOS arm64
       os: macos-14
       target: aarch64-apple-darwin
+      artifact_target: macos-arm64
       build_daemon: true
       build_relay: true
       build_desktop: true

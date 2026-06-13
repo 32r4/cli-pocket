@@ -23,7 +23,7 @@ npm --prefix frontend/app run build:mobile
 
 cd apps/mobile
 cargo tauri ios init --ci
-if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || grep -q '"developmentTeam"' src-tauri/tauri.conf.json; then
+if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || [ -n "${APPLE_TEAM_ID:-}" ] || [ -n "${APPLE_API_KEY:-}" ] || [ -n "${APPLE_API_KEY_PATH:-}" ] || [ -n "${IOS_CERTIFICATE:-}" ] || [ -n "${IOS_MOBILE_PROVISION:-}" ] || grep -q '"developmentTeam"' src-tauri/tauri.conf.json; then
   cargo tauri ios build
 else
   echo "APPLE_DEVELOPMENT_TEAM is not set and tauri.conf.json has no iOS developmentTeam; building unsigned simulator app instead." >&2
@@ -37,12 +37,12 @@ cd "$OLDPWD"
 
 copied=0
 
-if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || grep -q '"developmentTeam"' "$APP_CONFIG"; then
+if [ -n "${APPLE_DEVELOPMENT_TEAM:-}" ] || [ -n "${APPLE_TEAM_ID:-}" ] || [ -n "${APPLE_API_KEY:-}" ] || [ -n "${APPLE_API_KEY_PATH:-}" ] || [ -n "${IOS_CERTIFICATE:-}" ] || [ -n "${IOS_MOBILE_PROVISION:-}" ] || grep -q '"developmentTeam"' "$APP_CONFIG"; then
   TARGET_DIR="apps/mobile/src-tauri/gen/apple/build"
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     base="$(basename "$f")"
-    cp "$f" "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}"
+    cp "$f" "$OUT_DIR/cli-pocket-ios-${VERSION}-${base}"
     copied=1
   done < <(find "$TARGET_DIR" -type f -name '*.ipa')
 
@@ -56,8 +56,12 @@ else
     echo "iOS simulator build completed but no .app artifact was found." >&2
     exit 1
   fi
+  SIM_ARCH="arm64"
+  if [ "$(uname -m)" = "x86_64" ]; then
+    SIM_ARCH="x64"
+  fi
   base="$(basename "$APP_DIR")"
-  tar -C "$(dirname "$APP_DIR")" -czf "$OUT_DIR/cli-pocket-mobile-${VERSION}-${base}.tar.gz" "$base"
+  tar -C "$(dirname "$APP_DIR")" -czf "$OUT_DIR/cli-pocket-ios-${VERSION}-simulator-unsigned-${SIM_ARCH}.app.tar.gz" "$base"
   copied=1
 fi
 
