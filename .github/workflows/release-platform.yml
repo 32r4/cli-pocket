@@ -9,10 +9,16 @@ on:
       name:
         required: true
         type: string
+      label:
+        required: true
+        type: string
       os:
         required: true
         type: string
       target:
+        required: true
+        type: string
+      artifact_target:
         required: true
         type: string
       build_daemon:
@@ -56,12 +62,12 @@ env:
 
 jobs:
   build:
-    name: build (${{ inputs.name }})
+    name: Build
     runs-on: ${{ inputs.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check mobile scaffold
+      - name: Check mobile app
         id: mobile
         shell: bash
         run: |
@@ -79,12 +85,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ inputs.build_ios }}
 
-      - name: Install explicit Rust target (linux aarch64)
+      - name: Add Rust target
         if: inputs.target == 'aarch64-unknown-linux-gnu'
         shell: bash
         run: rustup target add aarch64-unknown-linux-gnu
 
-      - name: Add cross-linker (linux aarch64)
+      - name: Install cross-linker
         if: inputs.target == 'aarch64-unknown-linux-gnu'
         shell: bash
         run: |
@@ -105,7 +111,7 @@ jobs:
             package-lock.json
             frontend/app/package-lock.json
 
-      - name: Select Xcode 16 (macos)
+      - name: Select Xcode
         if: runner.os == 'macOS' && (inputs.build_desktop || inputs.build_ios)
         shell: bash
         run: |
@@ -118,19 +124,19 @@ jobs:
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
 
-      - name: Install Tauri prerequisites (linux)
+      - name: Install Tauri prerequisites
         if: runner.os == 'Linux' && (inputs.build_desktop || inputs.build_android)
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libssl-dev pkg-config librsvg2-dev
 
-      - name: Install wasm-pack (unix)
+      - name: Install wasm-pack
         if: inputs.wasm_pack_install == 'shell' && runner.os != 'Windows'
         shell: bash
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Install wasm-pack (windows)
+      - name: Install wasm-pack
         if: inputs.wasm_pack_install == 'shell' && runner.os == 'Windows'
         shell: bash
         run: cargo install wasm-pack --locked
@@ -140,7 +146,7 @@ jobs:
         shell: bash
         run: cargo install tauri-cli --version "^2.1" --locked
 
-      - name: Install minisign (linux)
+      - name: Install minisign
         if: runner.os == 'Linux' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: bash
         run: |
@@ -148,12 +154,12 @@ jobs:
           tar -xzf minisign.tar.gz
           sudo install -m 755 "minisign-linux/$(uname -m)/minisign" /usr/local/bin/minisign
 
-      - name: Install minisign (macos)
+      - name: Install minisign
         if: runner.os == 'macOS' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: bash
         run: brew install minisign
 
-      - name: Install minisign (windows)
+      - name: Install minisign
         if: runner.os == 'Windows' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
         shell: powershell
         run: choco install minisign -y
@@ -172,6 +178,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           TARGET: ${{ inputs.target }}
+          ARTIFACT_TARGET: ${{ inputs.artifact_target }}
         shell: bash
         run: bash scripts/release/build-daemon.sh
 
@@ -180,6 +187,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           TARGET: ${{ inputs.target }}
+          ARTIFACT_TARGET: ${{ inputs.artifact_target }}
         shell: bash
         run: bash scripts/release/build-relay.sh
 

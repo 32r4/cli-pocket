@@ -4,7 +4,8 @@ set -euo pipefail
 : "${VERSION:?VERSION env var required}"
 : "${TARGET:?TARGET env var required}"
 
-ARTIFACT="cli-pocket-daemon-${VERSION}-${TARGET}"
+ARTIFACT_TARGET="${ARTIFACT_TARGET:-$TARGET}"
+ARTIFACT="cli-pocket-daemon-${VERSION}-${ARTIFACT_TARGET}"
 OUT_DIR="${OUT_DIR:-dist}"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"

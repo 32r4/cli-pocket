@@ -35,11 +35,14 @@ jobs:
 
   build:
     needs: derive-version
+    name: ${{ matrix.label }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: linux-x86_64
+            label: Linux x64
+            artifact_target: linux-x64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             build_daemon: true
@@ -53,6 +56,8 @@ jobs:
             wasm_pack_install: shell
             tauri_bundles: deb,rpm,appimage
           - name: linux-aarch64
+            label: Linux arm64
+            artifact_target: linux-arm64
             os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             build_daemon: true
@@ -66,6 +71,8 @@ jobs:
             wasm_pack_install: none
             tauri_bundles: ""
           - name: macos-x86_64
+            label: macOS x64
+            artifact_target: macos-x64
             os: macos-15-intel
             target: x86_64-apple-darwin
             build_daemon: true
@@ -79,6 +86,8 @@ jobs:
             wasm_pack_install: none
             tauri_bundles: dmg,app
           - name: macos-aarch64
+            label: macOS arm64
+            artifact_target: macos-arm64
             os: macos-14
             target: aarch64-apple-darwin
             build_daemon: true
@@ -92,6 +101,8 @@ jobs:
             wasm_pack_install: none
             tauri_bundles: dmg,app
           - name: windows-x86_64
+            label: Windows x64
+            artifact_target: windows-x64
             os: windows-2022
             target: x86_64-pc-windows-msvc
             build_daemon: true
@@ -105,6 +116,8 @@ jobs:
             wasm_pack_install: none
             tauri_bundles: msi
           - name: android
+            label: Android
+            artifact_target: android
             os: ubuntu-22.04
             target: android
             build_daemon: false
@@ -118,6 +131,8 @@ jobs:
             wasm_pack_install: none
             tauri_bundles: ""
           - name: ios
+            label: iOS
+            artifact_target: ios
             os: macos-14
             target: aarch64-apple-darwin
             build_daemon: false
@@ -134,8 +149,10 @@ jobs:
     with:
       version: ${{ needs.derive-version.outputs.version }}
       name: ${{ matrix.name }}
+      label: ${{ matrix.label }}
       os: ${{ matrix.os }}
       target: ${{ matrix.target }}
+      artifact_target: ${{ matrix.artifact_target }}
       build_daemon: ${{ matrix.build_daemon }}
       build_relay: ${{ matrix.build_relay }}
       build_desktop: ${{ matrix.build_desktop }}

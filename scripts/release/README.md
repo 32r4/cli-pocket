@@ -4,9 +4,11 @@ Per-target build scripts. Each script:
 
 - Takes `$TARGET` (e.g. `x86_64-unknown-linux-gnu`) and `$VERSION` (semver
   without leading `v`) from the environment.
+- Optionally takes `$ARTIFACT_TARGET` to override the platform label used in
+  output filenames.
 - Produces one tarball in `dist/` whose name is
-  `<artifact>-<version>-<target>.<ext>` (e.g.
-  `cli-pocket-daemon-0.1.0-x86_64-unknown-linux-gnu.tar.gz`).
+  `<artifact>-<version>-<platform>.<ext>` (e.g.
+  `cli-pocket-daemon-0.1.0-linux-x64.tar.gz`).
 - Exits non-zero on failure.
 
 After all scripts run, `sha256sums.sh dist/` produces `SHA256SUMS`.
