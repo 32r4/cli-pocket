@@ -72,8 +72,12 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@stable
+        if: !inputs.build_ios
         with:
           targets: ${{ inputs.target == 'android' && 'aarch64-linux-android' || inputs.target }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.build_ios
 
       - name: Install explicit Rust target (linux aarch64)
         if: inputs.target == 'aarch64-unknown-linux-gnu'
