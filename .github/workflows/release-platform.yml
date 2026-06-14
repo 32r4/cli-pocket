@@ -59,6 +59,7 @@ env:
   HAS_MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
   HAS_MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD != '' }}
   HAS_MINISIGN_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY != '' }}
+  HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
   HAS_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
   HAS_IOS_AUTOMATIC_SIGNING: ${{ secrets.APPLE_API_ISSUER != '' && secrets.APPLE_API_KEY != '' && secrets.APPLE_API_PRIVATE_KEY != '' }}
   MINISIGN_VERSION: "0.12"
@@ -177,7 +178,7 @@ jobs:
         run: node scripts/release/configure-desktop-signing.mjs
 
       - name: Import Apple certificate
-        if: runner.os == 'macOS' && inputs.build_desktop && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && inputs.build_desktop && env.HAS_APPLE_CERTIFICATE == 'true'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
