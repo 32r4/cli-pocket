@@ -146,6 +146,7 @@ _ensure-wasm-pkg:
     test -f crates/client/client-core-wasm/pkg/package.json || (cd crates/client/client-core-wasm && wasm-pack build --target web --dev)
 
 mobile-android-init:
+    [ -d apps/mobile/src-tauri/gen/android ] && rm -rf apps/mobile/src-tauri/gen/android || true
     cd apps/mobile; cargo tauri android init --ci
     node scripts/mobile/configure-android-signing.mjs
 

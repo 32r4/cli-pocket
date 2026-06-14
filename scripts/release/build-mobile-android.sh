@@ -16,6 +16,8 @@ npx playwright install chromium chromium-headless-shell
 npm --prefix frontend/app ci
 npm --prefix frontend/app run build:mobile
 
+rm -rf apps/mobile/src-tauri/gen/android
+
 cd apps/mobile
 cargo tauri android init --ci
 cd "$OLDPWD"
