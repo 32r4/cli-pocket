@@ -110,7 +110,11 @@ jobs:
               exit 1
               ;;
           esac
-          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix<<EOF"
+            echo "$matrix_json"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: derive-version
