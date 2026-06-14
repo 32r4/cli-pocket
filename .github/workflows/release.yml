@@ -42,6 +42,7 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
       requested_platform: ${{ steps.platform.outputs.value }}
       should_publish: ${{ steps.platform.outputs.publish }}
+      matrix: ${{ steps.platform.outputs.matrix }}
     steps:
       - name: Derive VERSION
         id: ver
@@ -71,121 +72,53 @@ jobs:
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
+          case "$platform" in
+            all)
+              matrix_json='{"include":[
+                {"name":"linux-x86_64","label":"Linux x64","artifact_target":"linux-x64","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":true,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"shell","tauri_bundles":"deb,rpm,appimage"},
+                {"name":"linux-aarch64","label":"Linux arm64","artifact_target":"linux-arm64","os":"ubuntu-22.04","target":"aarch64-unknown-linux-gnu","build_daemon":true,"build_relay":true,"build_desktop":false,"build_web":false,"build_android":false,"build_ios":false,"node_required":false,"tauri_required":false,"wasm_pack_install":"none","tauri_bundles":""},
+                {"name":"macos-x86_64","label":"macOS x64","artifact_target":"macos-x64","os":"macos-15-intel","target":"x86_64-apple-darwin","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":false,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":"dmg,app"},
+                {"name":"macos-aarch64","label":"macOS arm64","artifact_target":"macos-arm64","os":"macos-14","target":"aarch64-apple-darwin","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":false,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":"dmg,app"},
+                {"name":"windows-x86_64","label":"Windows x64","artifact_target":"windows-x64","os":"windows-2022","target":"x86_64-pc-windows-msvc","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":false,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":"msi"},
+                {"name":"android","label":"Android","artifact_target":"android","os":"ubuntu-22.04","target":"android","build_daemon":false,"build_relay":false,"build_desktop":false,"build_web":false,"build_android":true,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":""},
+                {"name":"ios","label":"iOS","artifact_target":"ios","os":"macos-14","target":"aarch64-apple-darwin","build_daemon":false,"build_relay":false,"build_desktop":false,"build_web":false,"build_android":false,"build_ios":true,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":""}
+              ]}'
+              ;;
+            linux-x86_64)
+              matrix_json='{"include":[{"name":"linux-x86_64","label":"Linux x64","artifact_target":"linux-x64","os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":true,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"shell","tauri_bundles":"deb,rpm,appimage"}]}'
+              ;;
+            linux-aarch64)
+              matrix_json='{"include":[{"name":"linux-aarch64","label":"Linux arm64","artifact_target":"linux-arm64","os":"ubuntu-22.04","target":"aarch64-unknown-linux-gnu","build_daemon":true,"build_relay":true,"build_desktop":false,"build_web":false,"build_android":false,"build_ios":false,"node_required":false,"tauri_required":false,"wasm_pack_install":"none","tauri_bundles":""}]}'
+              ;;
+            macos-x86_64)
+              matrix_json='{"include":[{"name":"macos-x86_64","label":"macOS x64","artifact_target":"macos-x64","os":"macos-15-intel","target":"x86_64-apple-darwin","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":false,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":"dmg,app"}]}'
+              ;;
+            macos-aarch64)
+              matrix_json='{"include":[{"name":"macos-aarch64","label":"macOS arm64","artifact_target":"macos-arm64","os":"macos-14","target":"aarch64-apple-darwin","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":false,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":"dmg,app"}]}'
+              ;;
+            windows-x86_64)
+              matrix_json='{"include":[{"name":"windows-x86_64","label":"Windows x64","artifact_target":"windows-x64","os":"windows-2022","target":"x86_64-pc-windows-msvc","build_daemon":true,"build_relay":true,"build_desktop":true,"build_web":false,"build_android":false,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":"msi"}]}'
+              ;;
+            android)
+              matrix_json='{"include":[{"name":"android","label":"Android","artifact_target":"android","os":"ubuntu-22.04","target":"android","build_daemon":false,"build_relay":false,"build_desktop":false,"build_web":false,"build_android":true,"build_ios":false,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":""}]}'
+              ;;
+            ios)
+              matrix_json='{"include":[{"name":"ios","label":"iOS","artifact_target":"ios","os":"macos-14","target":"aarch64-apple-darwin","build_daemon":false,"build_relay":false,"build_desktop":false,"build_web":false,"build_android":false,"build_ios":true,"node_required":true,"tauri_required":true,"wasm_pack_install":"none","tauri_bundles":""}]}'
+              ;;
+            *)
+              echo "Unsupported platform: $platform" >&2
+              exit 1
+              ;;
+          esac
+          echo "matrix=$matrix_json" >> "$GITHUB_OUTPUT"
 
   build:
     needs: derive-version
     name: ${{ matrix.label }}
-    if: ${{ needs.derive-version.outputs.requested_platform == 'all' || needs.derive-version.outputs.requested_platform == matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: linux-x86_64
-            label: Linux x64
-            artifact_target: linux-x64
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            build_daemon: true
-            build_relay: true
-            build_desktop: true
-            build_web: true
-            build_android: false
-            build_ios: false
-            node_required: true
-            tauri_required: true
-            wasm_pack_install: shell
-            tauri_bundles: deb,rpm,appimage
-          - name: linux-aarch64
-            label: Linux arm64
-            artifact_target: linux-arm64
-            os: ubuntu-22.04
-            target: aarch64-unknown-linux-gnu
-            build_daemon: true
-            build_relay: true
-            build_desktop: false
-            build_web: false
-            build_android: false
-            build_ios: false
-            node_required: false
-            tauri_required: false
-            wasm_pack_install: none
-            tauri_bundles: ""
-          - name: macos-x86_64
-            label: macOS x64
-            artifact_target: macos-x64
-            os: macos-15-intel
-            target: x86_64-apple-darwin
-            build_daemon: true
-            build_relay: true
-            build_desktop: true
-            build_web: false
-            build_android: false
-            build_ios: false
-            node_required: true
-            tauri_required: true
-            wasm_pack_install: none
-            tauri_bundles: dmg,app
-          - name: macos-aarch64
-            label: macOS arm64
-            artifact_target: macos-arm64
-            os: macos-14
-            target: aarch64-apple-darwin
-            build_daemon: true
-            build_relay: true
-            build_desktop: true
-            build_web: false
-            build_android: false
-            build_ios: false
-            node_required: true
-            tauri_required: true
-            wasm_pack_install: none
-            tauri_bundles: dmg,app
-          - name: windows-x86_64
-            label: Windows x64
-            artifact_target: windows-x64
-            os: windows-2022
-            target: x86_64-pc-windows-msvc
-            build_daemon: true
-            build_relay: true
-            build_desktop: true
-            build_web: false
-            build_android: false
-            build_ios: false
-            node_required: true
-            tauri_required: true
-            wasm_pack_install: none
-            tauri_bundles: msi
-          - name: android
-            label: Android
-            artifact_target: android
-            os: ubuntu-22.04
-            target: android
-            build_daemon: false
-            build_relay: false
-            build_desktop: false
-            build_web: false
-            build_android: true
-            build_ios: false
-            node_required: true
-            tauri_required: true
-            wasm_pack_install: none
-            tauri_bundles: ""
-          - name: ios
-            label: iOS
-            artifact_target: ios
-            os: macos-14
-            target: aarch64-apple-darwin
-            build_daemon: false
-            build_relay: false
-            build_desktop: false
-            build_web: false
-            build_android: false
-            build_ios: true
-            node_required: true
-            tauri_required: true
-            wasm_pack_install: none
-            tauri_bundles: ""
+      matrix: ${{ fromJSON(needs.derive-version.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
