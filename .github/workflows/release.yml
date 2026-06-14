@@ -8,6 +8,20 @@ on:
       version:
         description: "Version (without leading v)"
         required: true
+      platform:
+        description: "Platform to build"
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - linux-x86_64
+          - linux-aarch64
+          - macos-x86_64
+          - macos-aarch64
+          - windows-x86_64
+          - android
+          - ios
 
 permissions:
   contents: read
@@ -16,6 +30,9 @@ env:
   HAS_MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
   HAS_MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD != '' }}
   HAS_MINISIGN_PUBLIC_KEY: ${{ secrets.MINISIGN_PUBLIC_KEY != '' }}
+  HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+  HAS_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+  HAS_IOS_AUTOMATIC_SIGNING: ${{ secrets.APPLE_API_ISSUER != '' && secrets.APPLE_API_KEY != '' && secrets.APPLE_API_PRIVATE_KEY != '' }}
   MINISIGN_VERSION: "0.12"
 
 jobs:
@@ -23,6 +40,8 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.ver.outputs.version }}
+      requested_platform: ${{ steps.platform.outputs.value }}
+      should_publish: ${{ steps.platform.outputs.publish }}
     steps:
       - name: Derive VERSION
         id: ver
@@ -34,9 +53,30 @@ jobs:
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve platform
+        id: platform
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            platform="${{ github.event.inputs.platform }}"
+          else
+            platform="all"
+          fi
+          if [ -z "$platform" ]; then
+            platform="all"
+          fi
+          echo "value=$platform" >> "$GITHUB_OUTPUT"
+          if [ "$platform" = "all" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     needs: derive-version
     name: ${{ matrix.label }}
+    if: ${{ needs.derive-version.outputs.requested_platform == 'all' || needs.derive-version.outputs.requested_platform == matrix.name }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,29 +186,321 @@ jobs:
             tauri_required: true
             wasm_pack_install: none
             tauri_bundles: ""
-    uses: ./.github/workflows/release-platform.yml
-    with:
-      version: ${{ needs.derive-version.outputs.version }}
-      name: ${{ matrix.name }}
-      label: ${{ matrix.label }}
-      os: ${{ matrix.os }}
-      target: ${{ matrix.target }}
-      artifact_target: ${{ matrix.artifact_target }}
-      build_daemon: ${{ matrix.build_daemon }}
-      build_relay: ${{ matrix.build_relay }}
-      build_desktop: ${{ matrix.build_desktop }}
-      build_web: ${{ matrix.build_web }}
-      build_android: ${{ matrix.build_android }}
-      build_ios: ${{ matrix.build_ios }}
-      node_required: ${{ matrix.node_required }}
-      tauri_required: ${{ matrix.tauri_required }}
-      wasm_pack_install: ${{ matrix.wasm_pack_install }}
-      tauri_bundles: ${{ matrix.tauri_bundles }}
-    secrets: inherit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check mobile app
+        id: mobile
+        shell: bash
+        run: |
+          if [ -f apps/mobile/src-tauri/tauri.conf.json ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !matrix.build_ios }}
+        with:
+          targets: ${{ matrix.target == 'android' && 'aarch64-linux-android' || matrix.target }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ matrix.build_ios }}
+
+      - name: Add Rust target
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: rustup target add aarch64-unknown-linux-gnu
+
+      - name: Install cross-linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - uses: actions/setup-node@v4
+        if: matrix.node_required
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/app/package-lock.json
+
+      - name: Select Xcode
+        if: runner.os == 'macOS' && (matrix.build_desktop || matrix.build_ios)
+        shell: bash
+        run: |
+          XCODE_APP="$(find /Applications -maxdepth 1 -type d -name 'Xcode_16*.app' | sort -V | tail -n 1)"
+          if [ -z "$XCODE_APP" ]; then
+            echo "No Xcode 16 installation found on runner." >&2
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$XCODE_APP/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install Tauri prerequisites
+        if: runner.os == 'Linux' && (matrix.build_desktop || matrix.build_android)
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libssl-dev pkg-config librsvg2-dev
+
+      - name: Install wasm-pack
+        if: matrix.wasm_pack_install == 'shell' && runner.os != 'Windows'
+        shell: bash
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install wasm-pack
+        if: matrix.wasm_pack_install == 'shell' && runner.os == 'Windows'
+        shell: bash
+        run: cargo install wasm-pack --locked
+
+      - name: Install tauri-cli
+        if: matrix.tauri_required
+        shell: bash
+        run: cargo install tauri-cli --version "^2.1" --locked
+
+      - name: Import Windows certificate
+        if: runner.os == 'Windows' && matrix.build_desktop && env.HAS_WINDOWS_CERTIFICATE == 'true'
+        shell: powershell
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          New-Item -ItemType Directory -Force -Path certificate | Out-Null
+          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate/tempCert.txt certificate/certificate.pfx | Out-Null
+          Remove-Item certificate/tempCert.txt
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $imported = Import-PfxCertificate -FilePath certificate/certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $imported) { throw "Failed to import Windows code signing certificate." }
+          $thumbprint = ($imported | Select-Object -First 1).Thumbprint
+          if (-not $thumbprint) { throw "Imported Windows certificate has no thumbprint." }
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$thumbprint" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure Windows signing
+        if: runner.os == 'Windows' && matrix.build_desktop && env.HAS_WINDOWS_CERTIFICATE == 'true'
+        shell: bash
+        env:
+          WINDOWS_DIGEST_ALGORITHM: ${{ secrets.WINDOWS_DIGEST_ALGORITHM }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_SIGN_COMMAND: ${{ secrets.WINDOWS_SIGN_COMMAND }}
+        run: node scripts/release/configure-desktop-signing.mjs
+
+      - name: Import Apple certificate
+        if: runner.os == 'macOS' && matrix.build_desktop && env.HAS_APPLE_CERTIFICATE == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_SIGNING_IDENTITY_OVERRIDE: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          if [ -n "${APPLE_SIGNING_IDENTITY_OVERRIDE:-}" ]; then
+            CERT_ID="$APPLE_SIGNING_IDENTITY_OVERRIDE"
+          else
+            CERT_ID="$(security find-identity -v -p codesigning build.keychain | awk -F'"' '/Developer ID Application|Apple Distribution|Apple Development/ { print $2; exit }')"
+          fi
+          if [ -z "$CERT_ID" ]; then
+            echo "No usable Apple signing identity found in imported certificate." >&2
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
+
+      - name: Write App Store Connect API key
+        if: runner.os == 'macOS' && (matrix.build_desktop || matrix.build_ios) && env.HAS_IOS_AUTOMATIC_SIGNING == 'true'
+        shell: bash
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          API_KEY_PATH="$RUNNER_TEMP/app-store-connect-api-key.p8"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$API_KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Validate Android signing
+        if: matrix.build_android
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || { echo "ANDROID_KEYSTORE_BASE64 secret is required for signed Android releases." >&2; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD secret is required for signed Android releases." >&2; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo "ANDROID_KEY_ALIAS secret is required for signed Android releases." >&2; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD secret is required for signed Android releases." >&2; exit 1; }
+
+      - name: Validate iOS signing
+        if: matrix.build_ios
+        shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+        run: |
+          if [ -n "${APPLE_API_ISSUER:-}" ] && [ -n "${APPLE_API_KEY:-}" ] && [ -n "${APPLE_API_PRIVATE_KEY:-}" ]; then
+            exit 0
+          fi
+          if [ -n "${IOS_CERTIFICATE:-}" ] && [ -n "${IOS_CERTIFICATE_PASSWORD:-}" ] && [ -n "${IOS_MOBILE_PROVISION:-}" ]; then
+            exit 0
+          fi
+          echo "Provide App Store Connect API secrets or IOS_CERTIFICATE/IOS_CERTIFICATE_PASSWORD/IOS_MOBILE_PROVISION for signed iOS releases." >&2
+          exit 1
+
+      - name: Install minisign
+        if: runner.os == 'Linux' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
+        shell: bash
+        run: |
+          curl -fsSL -o minisign.tar.gz "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
+          tar -xzf minisign.tar.gz
+          sudo install -m 755 "minisign-linux/$(uname -m)/minisign" /usr/local/bin/minisign
+
+      - name: Install minisign
+        if: runner.os == 'macOS' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
+        shell: bash
+        run: brew install minisign
+
+      - name: Install minisign
+        if: runner.os == 'Windows' && env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
+        shell: powershell
+        run: choco install minisign -y
+
+      - name: Materialise signing key
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true'
+        shell: bash
+        env:
+          KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          printf '%s' "$KEY" > cli-pocket-minisign.key
+          chmod 600 cli-pocket-minisign.key
+
+      - name: Build daemon
+        if: matrix.build_daemon
+        env:
+          VERSION: ${{ needs.derive-version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          ARTIFACT_TARGET: ${{ matrix.artifact_target }}
+        shell: bash
+        run: bash scripts/release/build-daemon.sh
+
+      - name: Build relay
+        if: matrix.build_relay
+        env:
+          VERSION: ${{ needs.derive-version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          ARTIFACT_TARGET: ${{ matrix.artifact_target }}
+        shell: bash
+        run: bash scripts/release/build-relay.sh
+
+      - name: Build desktop
+        if: matrix.build_desktop
+        env:
+          VERSION: ${{ needs.derive-version.outputs.version }}
+          TAURI_BUNDLES: ${{ matrix.tauri_bundles }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+        shell: bash
+        run: bash scripts/release/build-desktop.sh
+
+      - name: Build web
+        if: matrix.build_web
+        env:
+          VERSION: ${{ needs.derive-version.outputs.version }}
+        shell: bash
+        run: bash scripts/release/build-web.sh
+
+      - name: Setup Java
+        if: matrix.build_android && steps.mobile.outputs.enabled == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android NDK
+        if: matrix.build_android && steps.mobile.outputs.enabled == 'true'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: Write Android keystore
+        if: matrix.build_android && steps.mobile.outputs.enabled == 'true'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p apps/mobile/src-tauri/gen/android
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > apps/mobile/src-tauri/gen/android/release.keystore
+          echo "ANDROID_KEYSTORE_PATH=$PWD/apps/mobile/src-tauri/gen/android/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build Android app
+        if: matrix.build_android
+        env:
+          VERSION: ${{ needs.derive-version.outputs.version }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: bash scripts/release/build-mobile-android.sh
+
+      - name: Build iOS app
+        if: matrix.build_ios
+        env:
+          VERSION: ${{ needs.derive-version.outputs.version }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+        shell: bash
+        run: bash scripts/release/build-mobile-ios.sh
+
+      - name: Sign artifacts
+        if: env.HAS_MINISIGN_SECRET_KEY == 'true' && env.HAS_MINISIGN_PASSWORD == 'true'
+        env:
+          MINISIGN_KEY_FILE: cli-pocket-minisign.key
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        shell: bash
+        run: bash scripts/release/sign.sh dist/
+
+      - name: Upload artifacts
+        if: always() && hashFiles('dist/*') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.name }}
+          path: dist/
 
   publish:
     name: publish release
-    needs: build
+    needs:
+      - derive-version
+      - build
+    if: ${{ needs.derive-version.outputs.should_publish == 'true' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
