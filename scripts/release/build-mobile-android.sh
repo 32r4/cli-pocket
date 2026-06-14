@@ -22,6 +22,12 @@ cd apps/mobile
 cargo tauri android init --ci
 cd "$OLDPWD"
 
+mkdir -p apps/mobile/src-tauri/gen/android
+if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+  printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > apps/mobile/src-tauri/gen/android/release.keystore
+  export ANDROID_KEYSTORE_PATH="$PWD/apps/mobile/src-tauri/gen/android/release.keystore"
+fi
+
 node scripts/mobile/configure-android-signing.mjs
 
 cd apps/mobile

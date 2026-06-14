@@ -367,20 +367,11 @@ jobs:
         with:
           ndk-version: r26d
 
-      - name: Write Android keystore
-        if: matrix.build_android && steps.mobile.outputs.enabled == 'true'
-        shell: bash
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          mkdir -p apps/mobile/src-tauri/gen/android
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > apps/mobile/src-tauri/gen/android/release.keystore
-          echo "ANDROID_KEYSTORE_PATH=$PWD/apps/mobile/src-tauri/gen/android/release.keystore" >> "$GITHUB_ENV"
-
       - name: Build Android app
         if: matrix.build_android
         env:
           VERSION: ${{ needs.derive-version.outputs.version }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
