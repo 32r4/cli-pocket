@@ -12,6 +12,11 @@ if [ ! -f apps/desktop/src-tauri/icons/icon.icns ]; then
   cargo tauri icon apps/desktop/src-tauri/icons/icon.png --output apps/desktop/src-tauri/icons
 fi
 
+if [ ! -f apps/desktop/src-tauri/icons/icon.icns ]; then
+  echo "Desktop icon generation did not produce apps/desktop/src-tauri/icons/icon.icns." >&2
+  exit 1
+fi
+
 cd apps/desktop
 cargo tauri build --bundles "${TAURI_BUNDLES:-app,deb,msi,dmg,appimage,rpm}"
 cd "$OLDPWD"

@@ -43,6 +43,7 @@ const MOBILE_ANDROID_ICON_DIRS = [
   'mipmap-xxxhdpi',
   'values',
 ];
+const DESKTOP_PLATFORM_ICON_FILES = ['icon.icns'];
 
 // Icon sizes to generate
 const SIZES = [
@@ -197,6 +198,35 @@ async function generateIconsForTarget(page, svgContent, targetDir) {
 }
 
 /**
+ * Generate desktop platform icons that are awkward to render directly in JS,
+ * while keeping the browser-rendered PNG as the source of truth.
+ */
+async function generateDesktopPlatformIcons(sourceIconPath, targetDir) {
+  const tempDir = join(targetDir, '.tauri-icon-tmp');
+
+  await rm(tempDir, { recursive: true, force: true });
+  await mkdir(tempDir, { recursive: true });
+
+  try {
+    await execFile('cargo', [
+      'tauri',
+      'icon',
+      sourceIconPath,
+      '--output',
+      tempDir,
+    ], {
+      cwd: rootDir,
+    });
+
+    for (const fileName of DESKTOP_PLATFORM_ICON_FILES) {
+      await cp(join(tempDir, fileName), join(targetDir, fileName));
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Generate Android and iOS icon resources for the mobile app from the
  * already-rendered 1024x1024 PNG. This keeps the browser-rendered master icon
  * while letting Tauri produce the platform-specific resource trees it expects.
@@ -271,6 +301,7 @@ async function main() {
     // Generate icons for desktop
     console.log('\n📱 Desktop icons:');
     await generateIconsForTarget(page, svgContent, DESKTOP_ICONS);
+    await generateDesktopPlatformIcons(join(DESKTOP_ICONS, 'icon.png'), DESKTOP_ICONS);
 
     // Generate icons for mobile
     console.log('\n📱 Mobile icons:');

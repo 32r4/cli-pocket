@@ -12,7 +12,7 @@ if [ ! -f "$APP_CONFIG" ]; then
 fi
 
 npm ci
-npx playwright install chromium
+npx playwright install chromium chromium-headless-shell
 npm --prefix frontend/app ci
 npm --prefix frontend/app run build:mobile
 
